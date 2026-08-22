@@ -1,0 +1,27 @@
+# Core orchestration
+langgraph>=0.2.60
+langgraph-checkpoint-sqlite>=2.0.0
+
+# Data contracts (shared by LLM schemas, API bodies, and internal models)
+pydantic>=2.9.0
+python-dotenv>=1.0.1
+
+# LLM providers
+openai>=1.55.0          # Azure OpenAI / Foundry client
+httpx>=0.27.0           # Ollama adapter
+tenacity>=9.0.0         # retry/backoff in adapters, never in core/
+
+# Azure adapters
+azure-identity>=1.19.0
+azure-storage-blob>=12.24.0
+azure-cognitiveservices-speech>=1.41.0
+
+# Scene authoring + rendering
+jinja2>=3.1.4
+playwright>=1.49.0
+
+# API
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+sse-starlette>=2.1.3
+python-multipart>=0.0.17
