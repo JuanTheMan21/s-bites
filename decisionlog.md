@@ -223,3 +223,258 @@ still holds for the POC phase, so those two stay stubbed through iteration 3, bu
 permanently deferred: new iteration 5.5 (T34, T35) makes them real before RAG. This surfaced a
 dependency error: T35 needs a container image, and the Dockerfile was scheduled in T33 at the very
 end of RAG. It moves to T35.
+
+---
+
+## 2026-08-22 · T4 — Domain models
+
+*Naming note for anyone reading upward: the D15-D18 block above is headed "T4 — Toolchain spike"
+and refers to the pre-iteration spike, not to this task. It predates a renumbering — its "T10" and
+"T14" are now T17 and T35. `tasks.md` is the authority on what a task number means.*
+
+### D26 — Strict-mode conformance is enforced by a test over a marker base class
+**Rejected:** reviewing each schema by eye, and separately, a hand-maintained list of LLM-facing
+models for the test to iterate.
+**Reasoning:** Azure rejects a non-conforming schema with a 400 *at call time*, so the failure
+lands mid-run in T15 or T16, minutes in, looking like an adapter bug. `core/strict_schema.py`
+exists so that inheriting `StrictSchema` both supplies `additionalProperties: false` and *marks*
+the model as LLM-facing; the test in `tests/test_slot_schemas.py` enumerates subclasses
+recursively and checks every one. A schema added in a later task is therefore covered by virtue of
+existing. A registry someone has to remember to update is a registry that goes stale, and the
+staleness would be invisible — the parametrised tests would simply run over a smaller set and pass.
+**Known limit:** the unsupported-keyword list is the conservative set. Azure may have relaxed some
+since; a test stricter than the backend is safe, but if T15 wants a schema this test rejects, check
+live behaviour at T8 before loosening it rather than after.
+
+### D27 — `Importance` is an enum, not an int with `ge=1, le=5`
+**Rejected:** `importance: int = Field(ge=1, le=5)`, which is the obvious spelling.
+**Reasoning:** strict mode drops range keywords. `ge`/`le` would be *silently absent* from the
+schema Azure enforces — the constraint would exist in pydantic, validating a response that already
+arrived, rather than in the generation constraint that shapes it. `enum` is on the supported list,
+so an enum moves the bound to where it actually binds. This generalises: **in an LLM-facing schema,
+express a bounded value as an enum, never as a range.**
+**Discovered in passing:** pydantic copies a class docstring into the JSON Schema, so a verbose
+enum docstring is shipped to the model as prompt tokens on every call. `VisualIntent` and
+`Importance` therefore keep one-line docstrings with the rationale in comments above them. Do not
+"improve" those docstrings back into paragraphs.
+
+### D28 — `SegmentPlan` and `Segment` are separate classes
+**Rejected:** one `Segment` model used for both the LLM's outline response and pipeline state,
+with the timing fields simply left unset by the prompt.
+**Reasoning:** Invariant 1 made structural instead of procedural. A combined model puts a
+`duration_ms` field in the schema the LLM is shown and is forbidden to fill, leaving the project's
+single most expensive invariant — measured audio, never an estimate — enforced by prompt wording.
+Two classes mean the model never sees the field. `SegmentPlan.to_segment(index)` is the one-way
+bridge, and it lives on the *plan* rather than as `Segment.from_plan` so that
+`core/outline_schema.py` imports `core/models.py` and never the reverse.
+**Also why there are two modules:** `core/models.py` reached 196 of its 200 lines, and the next
+`/newintent` would have breached the ceiling. Split by responsibility per CLAUDE.md — pipeline
+state and enums here, what the LLM returns one module over.
+
+### D29 — `Segment.slots` is `dict[str, Any] | None`, not a discriminated union
+**Rejected:** a `Literal` discriminator field on each slot schema, with `slots` typed as a
+discriminated union.
+**Reasoning:** the union is the better-typed design and was preferred on the merits, but it
+requires a redundant `intent` field inside every LLM-facing schema, and pydantic emits a
+single-value `Literal` as `const` — a keyword not on strict mode's supported list. Betting T15 on
+that before T8 has made a single live call is the wrong order. `slot_schema_for(intent)` in
+`core/slot_schemas.py` is the typed accessor instead: it turns "this segment wants a comparison"
+into the class to validate against.
+**Cost accepted:** the API contract at T19 and the generated client at T24 see an untyped object
+for this one field. **Revisit at T24** if it bites — by then strict mode's real behaviour is known.
+
+### D30 — Six visual intents, chosen against T17's workload rather than expressiveness
+**Rejected:** eight (adding `TIMELINE` and `DEFINITION`), and four.
+**Reasoning:** every member costs a hand-authored Jinja template with seekable animation at T17,
+and each must also degrade to a single sensible static frame because the resolver can put any
+segment on Tier 0. Six covers the demo topic end to end — code walkthrough for the vulnerable
+query, comparison for safe against unsafe, flow diagram for the attack chain — without making T17
+a template-writing marathon. `/newintent` is the cheap path to more once the pipeline is proven,
+and it touches all seven registration points at once.
+
+### D31 — Pipeline state forbids extra fields too, without inheriting `StrictSchema`
+**Rejected:** leaving `Segment` and `VideoJob` on pydantic's default, which *ignores* unknown keys.
+**Reasoning:** found by a test that failed on the assumption. The default means a `durationMs` in a
+T19 request body is dropped in silence, producing a segment that looks fine and is unmeasured —
+precisely Invariant 1's failure mode, arrived at from the opposite direction. So both set
+`extra="forbid"` directly. They deliberately do **not** inherit `StrictSchema`: they carry defaults
+freely, and inheriting it would enrol them in D26's conformance test, which they would rightly
+fail. The base class is a marker for "the LLM fills this", not a general-purpose strict model.
+
+---
+
+## 2026-08-22 · T5 — Tier resolver
+
+The first behaviour in the repo, and the first code to compute a frame cost — which is how D32
+below got found. Everything here is pure: no I/O, no clock, no config.
+
+### D32 — At the configured budget, Tier 2 buys *shortness*, not importance
+**Discovered, not decided.** `FRAME_BUDGET=600` at `FPS=24` buys **25 seconds** of Tier-2
+animation. `SECONDS_PER_SEGMENT=28`. An average segment therefore cannot be Tier 2 at all.
+
+D9 set the budget at ~2000 and asked for "2-3 Tier-2 scenes". D16 then cut it to 600 on measured
+render throughput (1.7-2.7 frames/sec) and, in doing so, made that arithmetically impossible.
+Both decisions were right on their own terms; nothing had yet multiplied a duration by a frame
+rate, so the conflict was invisible.
+
+**Rejected:** capping Tier-2 animation at N seconds with a static hold for the remainder, which
+would let 600 frames buy three short animations. That redefines what Tier 2 *is* and obliges
+every template to honour it — T17's decision, not T5's. Also rejected: quietly raising the
+constants until the demo looks good.
+
+**Reasoning:** the resolver stays truthful to the cost model in the `scene-templates` skill and
+lets the number be wrong where the number lives. On a realistic 412-second, 15-segment outline it
+produces `STATIC=2 REVEAL=11 ANIMATED=2` at 594/600 frames — all three tiers, so the system is
+not decorative — but **both `CRITICAL` segments are demoted to Tier 1** because they are 34s and
+38s, while the winners are a 9s title card and a 12s stat callout. That is a frame budget
+behaving correctly. Pinned by `test_the_budget_buys_shortness_not_importance` so a future reader
+does not file it as a bug.
+**Open:** whether to raise `FRAME_BUDGET`, shorten segments, or accept short-segment Tier 2 as
+the product. Cannot be settled until T16 produces real measured durations. Do not tune it against
+the fixture.
+
+### D33 — Importance sets an *ideal* tier; the budget demotes from it
+**Rejected:** a single greedy pass promoting segments by importance until the budget runs out.
+**Reasoning:** one pass lets a single long, important segment consume the entire budget before
+anything else gets even a reveal — precisely the single-tier outcome D9 calls decorative. So
+`IDEAL_TIER` maps importance to the tier a segment *wants* (CRITICAL/MAJOR to Tier 2,
+NORMAL/MINOR to Tier 1, ASIDE to Tier 0), reveals are seeded in a first pass at ~7 frames each,
+and animations compete for what is left in a second. The spread becomes a property of the
+algorithm rather than an accident of the input.
+Keeping `ideal` alongside `assigned` on the result is what lets `/tiers` report "demoted from
+Tier 2" — a bare `dict[int, Tier]` throws that away, and the command's output spec already
+presupposed it. Two importances aim at Tier 2 rather than one so the budget genuinely binds:
+with a single candidate there is nothing to choose between and demotion never happens.
+
+### D34 — An unmeasured segment raises; there is no `MeasuredSegment` type
+**Rejected:** a narrower input type carrying `duration_ms: int`, so that passing an unmeasured
+segment would be a *type* error — the structural enforcement D28 used for `SegmentPlan` and that
+`scene_author` gets from a required parameter.
+**Reasoning:** the project runs ruff, not mypy. A type error nothing checks is a comment. The
+runtime `ValueError` names the offending indexes and says *why* — Tier 2 costs duration x fps, so
+an unmeasured segment would look free and spend the budget on nothing. That is the ordering bug
+wearing a different hat, and it fires in every environment rather than in the one that runs a
+type checker. **Revisit if mypy is ever added**; the structural version is genuinely better then.
+
+### D35 — `scale_frame_budget` lives in `core/frame_budget.py`, with no import edge back
+**Rejected:** keeping it in `core/tier_resolver.py`, which hit **220 lines** with it.
+**Reasoning:** the 200-line ceiling forced the question, but the split is by responsibility per
+CLAUDE.md rather than by line count: the resolver *spends* a budget, this decides *how large* one
+is, and nothing in the budget module knows what a tier is. The resolver deliberately does **not**
+import it — the caller calls both and passes one answer into the other — which keeps T5's DoD
+("imports nothing but stdlib and `core.models`") literally true rather than true-in-spirit.
+
+### D36 — `TIER_SUPPORT` ships as a no-op registration point
+**Rejected:** dropping it until an intent with no Tier 1 form actually appears.
+**Reasoning:** it maps all six intents to all three tiers, so it changes no behaviour today and
+looks like dead weight — which is exactly why it needs a decision entry, because the instinct on
+reading it is to delete it. `/newintent` step 5 already promises the resolver holds per-intent
+characteristics, and T17 is the first code in a position to *know* whether, say, a `STAT_CALLOUT`
+has anything to reveal in stages. Declaring that now would be a guess the template author then
+has to honour. The map is the place T17 records what it finds, and
+`test_every_visual_intent_declares_its_tier_support` fails if a future intent is added to the
+enum and not to it.
+
+---
+
+## 2026-08-22 · T6 — Test foundation
+
+The resolver reaches full branch coverage, and the six fakes every task from T14 on is tested
+against get written. The fakes are the consequential half: they are the only implementation of
+each contract that exists until T9, so whatever they teach the pipeline is what it learns.
+
+### D37 — A fake is an adapter, and every fake can be made to fail on demand
+**Rejected:** fakes that only ever succeed, and separately, per-fake ad-hoc failure hooks.
+**Reasoning:** an in-memory fake succeeds at everything, which is the problem with it. `JobQueue`
+documents `ProviderUnavailable` and `RateLimited` on the *class* rather than per method precisely
+because the in-process implementation never raises either -- so T14's retry classifier, written
+and tested against the local pool alone, will never have executed its own error paths, and T34
+is where that bill arrives. `tests/fakes/failure_injection.py` gives all six one shared
+`fail_next(method, exc)`, so a test arms a failure and the next call raises it.
+
+One mechanism rather than six, because a fake that fails differently from its siblings is a fake
+nobody trusts. `fail_next` rejects a method name that does not exist on the fake: a typo would
+otherwise arm a failure that never fires, and the test would pass for the wrong reason.
+
+The wider rule this follows from: **a fake is held to the standard `adapter-parity` applies to
+the real adapters at T13.** It may not import a vendor SDK, it raises only from
+`interfaces/errors.py`, and it matches its contract in semantics -- not merely in signature.
+
+### D38 — `FakeTTSProvider` writes a real WAV and measures the file it wrote
+**Rejected:** returning a plausible constant, and returning a words-per-minute estimate directly.
+**Reasoning:** this is the fake whose shortcut would have been most expensive. `duration_ms` is
+what every downstream timing decision rests on (Invariant 1), and a constant is indistinguishable
+from a real measurement to every caller -- so every timing assertion from T16 on would be checking
+a number nobody produced, and the rot would first appear as A/V drift in a rendered video at T18.
+
+So the ordering is inverted: a frame count is chosen first, the audio is written, and the returned
+duration is computed back out of the frame count. The two cannot disagree. `estimate_ms` still
+uses a speaking rate, which is legitimate *there* because it decides how much audio to generate --
+the synthesiser's job -- rather than reporting an estimate as a measurement.
+
+**Verified against the real tool, not just against the library that wrote the file:** `ffprobe`
+reads a 9000ms synthesis as `duration=9.000000`. T10's definition of done ("durations match
+`ffprobe` within tolerance") is therefore already satisfiable offline, and exactly rather than
+within tolerance -- 8000 Hz is an exact multiple of 1000, so the arithmetic never rounds.
+
+### D39 — Fakes enforce the two preconditions an in-process implementation would hide
+**Rejected:** permissive fakes that model the happy path and only the errors the interfaces
+declare.
+**Reasoning:** two contract terms are stated in the interface docstrings and are *invisible* to an
+in-memory implementation. `JobQueue.enqueue` requires a JSON-serialisable payload because Service
+Bus crosses a wire -- but an in-process queue hands the very same object back, so a `Path` or a
+model instance works perfectly and fails at T34. And `Storage` keys are relative POSIX strings,
+while a dict accepts an absolute path or a `..` without complaint, either of which escapes the
+disk adapter's root once T11 gives it a real filesystem. One `json.dumps` and one `check_key`
+close both, and in doing so **set the spec T11 and T34 must match** rather than inheriting one.
+
+The risk accepted is a fake stricter than the real Azure adapters turn out to be. That is the
+cheap direction to be wrong in: a false failure at T11 is visible immediately, where a false pass
+is not.
+
+**Caught by `project-reviewer`:** `FakeStorage.exists` was the one method that skipped
+`check_key`, because the test only parametrised `put_bytes`. A malformed key returned `False`
+there instead of raising -- the single place a `..` would have quietly answered for a file
+outside the root. Fixed, and the test now covers all six methods. The general lesson is that a
+validation rule tested on one method of six is a rule tested nowhere.
+
+### D40 — Conformance is mechanical, and the contract list is discovered rather than written down
+**Rejected:** reviewing the fakes against the interfaces by eye, and a hand-maintained list of
+contracts for the tests to iterate.
+**Reasoning:** the same argument as D26, applied to adapters instead of schemas. `tests/test_fakes.py`
+asserts `inspect.signature` equality for all 21 methods, `iscoroutinefunction` on every one of
+them (D19 -- a sync fake type-checks fine and dies at the first `await`), and walks each fake
+module's **AST** for banned import roots and for invented exception types. AST rather than text,
+per the standing gotcha that the boundary greps are plain-text searches and a docstring mentioning
+a vendor is not an import.
+
+`contracts()` discovers the ABCs by walking `interfaces` for classes with a non-empty
+`__abstractmethods__`, so **T30's `VectorStore` will demand a fake the day it is written** rather
+than the day someone remembers to update a list here. A registry someone has to maintain goes
+stale invisibly -- the parametrised tests simply run over a smaller set and pass.
+
+Signature equality compares annotation *objects*, which imposes two constraints worth knowing
+before they cause a confusing failure: no fake may use `from __future__ import annotations`, and
+`FakeLLMProvider` must import the same `T` TypeVar the contract uses rather than declaring its own.
+
+### D41 — The skill-pack version ordering is defined in the fake, and T7 must adopt it
+**Rejected:** promoting `version_key` to production code now, and leaving the fake's ordering
+unspecified.
+**Reasoning:** `SkillRegistry.versions` promises "newest first", which is not a property a string
+sort delivers -- `2.10` sorts below `2.9`. The fake needs an answer today and T7 writes the real
+registry next session, so the rule lives in `tests/fakes/skill_registry.py` with the constraint
+stated in its docstring. Promoting it to a shared module now would be pulling T7's scope forward
+to serve a test.
+**Open:** the two implementations must agree. They only diverge once a pack has a second version,
+which is late and quiet. **T7 owns closing this** -- adopt `version_key` or replace both.
+
+### D42 — Full branch coverage is verified by a documented command, not by a gate
+**Rejected:** `--cov-fail-under=100` inside the `hook_py_quality.py` block that already runs the
+resolver's tests on every edit, and a self-referential test that measures the suite from inside it.
+**Reasoning:** user decision. The hook version slows every write to `core/tier_resolver.py` and
+makes an unrelated edit fail for a reason that is not about the edit; the test version is awkward
+to debug for the same reason it is clever. `branch = true` now sits in `[tool.coverage.run]`, so
+a coverage run is a *branch* coverage run without a flag anyone has to remember, and the command
+is recorded in `handoff.md`.
+**Risk accepted:** coverage can decay between checkpoints without anything failing. `/checkpoint`
+re-runs the command.

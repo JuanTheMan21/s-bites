@@ -71,10 +71,27 @@ grep -rE "langgraph" core/ --include=*.py | grep -v "^core/graph/"           # m
 Work proceeds task by task from `tasks.md`, one task per session:
 
 1. `/build-task Tn` — loads `handoff.md` + `decisionlog.md` + the task, presents a plan, stops.
-2. Agree, exit plan mode, switch to Sonnet/Haiku in auto mode, build.
+2. Agree and exit plan mode; the build runs in auto mode.
 3. Run the `project-reviewer` agent.
 4. `/checkpoint` — reviewer gate → append `decisionlog.md` → rewrite `handoff.md` → mark done →
    reindex RepoWise → offer to push.
+
+### Which model runs what
+
+**Opus plans. Sonnet builds and reviews.** Configured, not remembered — the previous version of this
+file asked you to type `/model sonnet` at step 2, and a step you have to remember is a step that
+gets skipped.
+
+| Where | Setting | Covers |
+|---|---|---|
+| `.claude/settings.json` | `"model": "sonnet"` | The session default: building, and `/checkpoint` |
+| `.claude/commands/build-task.md` | `model: opus` | Planning |
+| `.claude/agents/*.md` | `model: sonnet` | `project-reviewer`, `adapter-parity` |
+
+**The `/build-task` override lasts for that turn only** — the session returns to Sonnet on your next
+message. That covers loading context and drafting the plan, which is the expensive thinking. If a
+plan needs a longer back-and-forth, type `/model opus` first (that persists) and `/model sonnet`
+before building.
 
 **Read `handoff.md` first in any session.** It holds current state. `decisionlog.md` holds history
 and the reasoning behind past choices — consult it before revisiting a settled decision.

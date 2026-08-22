@@ -35,7 +35,7 @@ enforcement is available to adapters that support it.
 **DoD:** all six ABCs typed and importable; nothing else in the repo imports them yet.
 **Depends:** T1
 
-### T4 — Domain models · `todo`
+### T4 — Domain models · `done`
 `Segment`, `VisualIntent` (closed enum), `Tier`, `VideoJob`, plus the per-intent pydantic slot
 schemas the LLM fills. These same models serve LLM structured output, internal state, and later the
 API contract — one definition, three uses.
@@ -45,7 +45,7 @@ API contract — one definition, three uses.
 `target_duration_ms`; nothing may hardcode 7 minutes or 15 segments. Segment count is *derived*
 (~28s of narration each), so a 10-minute request yields ~21 segments on its own.
 
-### T5 — Tier resolver · `todo`
+### T5 — Tier resolver · `done`
 The pure function at the heart of the render budget: importance-ranked segments in, tier
 assignments out, under a global frame budget. No I/O, no LLM, no clock. The one piece of this
 system with no excuse for external dependencies.
@@ -56,12 +56,20 @@ with `target_duration_ms` under a hard ceiling. `FRAME_BUDGET` is really a *rend
 (D16: 1.7-2.7 frames/sec), so linear scaling with no cap turns a 20-minute video into a 20-minute
 render, and no scaling at all spreads 600 frames so thin that everything lands on Tier 0.
 
-### T6 — Test foundation · `todo`
+### T6 — Test foundation · `done`
 Thorough unit tests for the tier resolver — budget exhaustion, ties, degenerate inputs, and a
 realistic 7-minute case asserting all three tiers appear — plus in-memory fakes for all six
 interfaces so every later task can be tested without network.
 **DoD:** `pytest` green; tier resolver at full branch coverage.
 **Depends:** T5
+**T5 already shipped part of this.** `tests/test_tier_resolver.py` covers the realistic 7-minute
+case, the unmeasured-segment raise, empty input, zero budget, determinism under shuffle, and
+intent-registration completeness. T6 is the *remaining* branches — the argument-validation
+raises, `tier_for`'s `KeyError`, `scale_frame_budget`'s guards, `ideal_tier`'s unreachable branch
+(monkeypatch `TIER_SUPPORT`; do not weaken the real map), and a budget that binds mid-pass-1,
+which no fixture currently exercises. `--cov-branch` is not in `pyproject.toml` and must be
+passed or added. **The fakes are the larger half** — 21 async methods across six interfaces, and
+every task from T14 on is tested against them.
 
 ### T7 — Runtime skill registry · `todo`
 Versioned prompt packs the *pipeline* loads at runtime, so the system starts from accumulated
@@ -69,6 +77,13 @@ knowledge rather than a cold prompt. Registry behind an interface; packs on disk
 on Azure, updatable without redeploying code.
 **DoD:** four packs load through the interface; pack content is data, not code.
 **Depends:** T3
+**T6 wrote the reference semantics.** `tests/fakes/skill_registry.py` already encodes the
+asymmetry the contract requires — `load` raises `SkillPackNotFound` for an unknown pack *or*
+version, while `versions` returns an empty list and never raises. It also defines `version_key`,
+a numeric-aware "newest first" rule, because a string sort puts `2.10` below `2.9`. **T7 must
+adopt that rule or replace both** (D41): the two only diverge once a pack has a second version,
+which is late and quiet. Which four packs is not specified anywhere — decide it in plan mode,
+since it determines what T15 and T16 can ask for.
 
 ---
 
@@ -98,6 +113,12 @@ measured duration is what every downstream timing decision depends on.
 Blob and local disk behind `Storage`, plus the Blob-backed skill registry from T7.
 **DoD:** identical behavior for put/get/url across both; skill packs load from Blob.
 **Depends:** T3, T7, T8
+**T6's `FakeStorage` already set the spec** (D39). Keys are relative POSIX strings, and it rejects
+absolute paths, backslashes, `..` and empty keys with `ValueError` on **all six** methods — an
+absolute key escapes the disk adapter's root once there is a real filesystem behind it. Match
+that, or if a real backend legitimately accepts something the fake rejects, change the fake and
+record why. Note it applies to `exists` too, which is not a contradiction of "never raises for a
+missing key": malformed is not the same as absent.
 
 ### T12 — Local adapters & Azure stubs · `todo`
 Ollama, the asyncio-pool queue, the Playwright + HyperFrames render backend. Service Bus and
@@ -127,18 +148,35 @@ Topic to segments to narration, driven by the runtime skill packs. Produces roug
 a 7-minute target.
 **DoD:** structured output validates on every segment; skill packs demonstrably change behavior.
 **Depends:** T14
+**T4 built the schemas this node fills.** Ask for `core.outline_schema.Outline` (the list is wrapped
+in an object because strict mode needs an object root), and take the segment count from
+`VideoJob.segment_count` — a literal 15 here is exactly what the T4 flag was written to prevent.
 
 ### T16 — TTS, tiering & scene authoring · `todo`
 The ordering-critical stretch: narrate, measure, assign tiers against the real durations, then fill
 scene slots. Scene authoring takes measured duration as a required input so it cannot run early.
 **DoD:** timing attributes derive only from measured audio; tier spread covers all three tiers.
 **Depends:** T15
+**Scene authoring goes through `core.slot_schemas.slot_schema_for(intent)`** — it returns the schema
+class to hand `LLMProvider.generate`, and the validated payload is stored on `Segment.slots` as a
+dict (D29). Validate it back through the same function rather than trusting the dict.
+**T5 flagged that `FRAME_BUDGET=600` is mistuned, and this task owns the fix (D32).** 600 frames
+at 24fps buys 25s of Tier-2 animation against a 28s average segment, so Tier 2 lands on the
+*shortest* segments rather than the most important. The DoD's "tier spread covers all three
+tiers" is achievable at 600 — T5 measured `2/11/2` on a realistic outline — but only because
+title cards and stat callouts are short. Once real measured durations exist, use `/tiers` to
+decide between raising the budget, shortening segments, or accepting short-segment Tier 2 as the
+product. Do not tune it against a fixture.
 
 ### T17 — The three renderers · `todo`
 Static screenshot, multi-state reveal with crossfade, and full HyperFrames animation — one module
 per tier, with composition linting before render.
 **DoD:** each tier produces a valid clip; invalid compositions are caught before rendering.
 **Depends:** T16
+**This task owns six Jinja templates, one per visual intent** (D30) — the tier modules are the three
+capture strategies, but every intent needs markup. Each template must also degrade to a sensible
+single static frame, since the resolver can put any segment on Tier 0. `tests/slot_examples.py` has
+a realistic payload per intent to render against.
 
 ### T18 — Mux & CLI · `todo`
 Per-segment audio mux, then concat, then the CLI entrypoint. **This task produces the first

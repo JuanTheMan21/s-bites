@@ -1,6 +1,7 @@
 ---
 description: Load context and plan the next build task (run at the start of a session)
 argument-hint: <task-id, e.g. T3>
+model: opus
 ---
 
 Plan the implementation of task **$1**.

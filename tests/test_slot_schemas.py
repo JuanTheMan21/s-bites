@@ -1,0 +1,151 @@
+"""Every LLM-facing schema, checked against Azure strict mode before Azure ever sees it.
+
+Strict mode rejects an unsupported schema with a 400 at call time, so the cost of getting this
+wrong is a failed run somewhere in T15 or T16, minutes in, pointing at the adapter rather than
+at the schema. These tests move that failure to ``pytest``.
+
+The conformance test enumerates ``StrictSchema`` subclasses recursively rather than reading a
+list, so a schema added later is covered by virtue of existing. That is the point of the marker
+base class -- a registry someone has to remember to update is a registry that goes stale.
+"""
+
+from typing import Any
+
+import pytest
+
+from core import SLOT_SCHEMAS, Segment, StrictSchema, VisualIntent, slot_schema_for
+from core.slot_schemas import FlowNode
+from tests.slot_examples import EXAMPLES
+
+# Keywords Azure strict mode does not accept. Reaching for one of these is the natural way to
+# say "a headline should be short", and it is exactly what turns a schema into a 400.
+UNSUPPORTED_KEYWORDS = {
+    "minLength",
+    "maxLength",
+    "pattern",
+    "format",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "multipleOf",
+    "minItems",
+    "maxItems",
+    "uniqueItems",
+    "minProperties",
+    "maxProperties",
+    "patternProperties",
+    "propertyNames",
+    "default",
+}
+
+# Sub-objects keyed by author-chosen names. Their keys are field names, not schema keywords, so
+# a slot field legitimately called "format" must not read as a violation.
+NAME_KEYED = {"properties", "$defs"}
+
+
+def all_strict_schemas() -> list[type[StrictSchema]]:
+    """Every LLM-facing model, however deeply subclassed."""
+    found: dict[str, type[StrictSchema]] = {}
+    stack = list(StrictSchema.__subclasses__())
+    while stack:
+        cls = stack.pop()
+        if cls.__name__ not in found:
+            found[cls.__name__] = cls
+            stack.extend(cls.__subclasses__())
+    return sorted(found.values(), key=lambda c: c.__name__)
+
+
+def object_nodes(schema: dict[str, Any]) -> list[dict[str, Any]]:
+    """The schema itself, plus every ``$defs`` entry that describes an object.
+
+    Enums land in ``$defs`` too and are not objects, so ``additionalProperties`` does not apply
+    to them -- filtering on ``properties`` is what keeps the assertions honest.
+    """
+    return [schema, *(d for d in schema.get("$defs", {}).values() if "properties" in d)]
+
+
+def keywords_in(node: Any) -> set[str]:
+    """Unsupported keywords anywhere in the schema tree, ignoring author-chosen field names."""
+    found: set[str] = set()
+    if isinstance(node, dict):
+        found |= set(node) & UNSUPPORTED_KEYWORDS
+        for key, value in node.items():
+            children = value.values() if key in NAME_KEYED and isinstance(value, dict) else [value]
+            for child in children:
+                found |= keywords_in(child)
+    elif isinstance(node, list):
+        for item in node:
+            found |= keywords_in(item)
+    return found
+
+
+def test_every_visual_intent_has_a_slot_schema() -> None:
+    """T4's definition of done. A missing entry surfaces at scene-authoring time otherwise."""
+    assert set(SLOT_SCHEMAS) == set(VisualIntent)
+
+
+def test_no_slot_schema_is_registered_against_a_dead_intent() -> None:
+    for intent, schema in SLOT_SCHEMAS.items():
+        assert isinstance(intent, VisualIntent)
+        assert issubclass(schema, StrictSchema)
+
+
+def test_the_schemas_found_include_the_ones_we_expect() -> None:
+    """Guards the enumeration itself -- a walker that finds nothing passes every test below."""
+    names = {c.__name__ for c in all_strict_schemas()}
+    assert {"SegmentPlan", "Outline", "FlowNode"} <= names
+    assert {c.__name__ for c in SLOT_SCHEMAS.values()} <= names
+
+
+@pytest.mark.parametrize("schema", all_strict_schemas(), ids=lambda c: c.__name__)
+def test_schema_satisfies_azure_strict_mode(schema: type[StrictSchema]) -> None:
+    generated = schema.model_json_schema()
+
+    leaked = keywords_in(generated)
+    assert not leaked, f"{schema.__name__} uses keywords strict mode rejects: {sorted(leaked)}"
+
+    for node in object_nodes(generated):
+        title = node.get("title", schema.__name__)
+        assert node.get("type") == "object", f"{title} is not an object"
+        assert node.get("additionalProperties") is False, f"{title} allows extra properties"
+        missing = set(node.get("properties", {})) - set(node.get("required", []))
+        assert not missing, (
+            f"{title}: {sorted(missing)} not required. Strict mode requires every property, and "
+            "pydantic drops a field from `required` as soon as it has a default -- express "
+            "optionality as `X | None` with no default instead."
+        )
+
+
+@pytest.mark.parametrize("schema", all_strict_schemas(), ids=lambda c: c.__name__)
+def test_every_field_carries_a_description(schema: type[StrictSchema]) -> None:
+    """Descriptions are the only guidance channel strict mode leaves open."""
+    for name, field in schema.model_json_schema()["properties"].items():
+        assert field.get("description"), f"{schema.__name__}.{name} has no description"
+
+
+@pytest.mark.parametrize("intent", list(VisualIntent), ids=lambda i: i.value)
+def test_a_realistic_payload_validates_for_every_intent(intent: VisualIntent) -> None:
+    payload = slot_schema_for(intent).model_validate(EXAMPLES[intent])
+    assert payload.model_dump() == EXAMPLES[intent]
+
+
+@pytest.mark.parametrize("intent", list(VisualIntent), ids=lambda i: i.value)
+def test_a_filled_payload_round_trips_through_a_segment(intent: VisualIntent) -> None:
+    """``Segment.slots`` is an untyped dict; ``slot_schema_for`` gives it back its type."""
+    segment = Segment(
+        index=0,
+        title="t",
+        summary="s",
+        visual_intent=intent,
+        importance=3,
+        slots=EXAMPLES[intent],
+    )
+    restored = Segment.model_validate_json(segment.model_dump_json())
+    assert slot_schema_for(restored.visual_intent).model_validate(restored.slots)
+
+
+def test_a_nested_model_is_itself_strict() -> None:
+    """The case a top-level-only check would miss: a nested model that forgot the base class."""
+    assert issubclass(FlowNode, StrictSchema)
+    assert FlowNode.model_json_schema()["additionalProperties"] is False

@@ -22,3 +22,7 @@ addopts = "-q"
 
 [tool.coverage.run]
 source = ["core", "interfaces", "adapters"]
+# Statement coverage says every line ran; branch coverage says every *decision* went both ways.
+# T6's definition of done is the second one, so it is configured rather than left to a flag
+# someone has to remember to pass.
+branch = true
