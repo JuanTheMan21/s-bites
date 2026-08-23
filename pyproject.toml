@@ -18,7 +18,16 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-q"
+# `not live` by default keeps `pytest` offline, network-free and runnable on every edit -- the
+# standing rule in CLAUDE.md. Live tests are opt-in: `pytest -m live`. They still skip rather
+# than fail when a credential is missing, so a fresh clone runs green either way.
+# `local_live` is the same contract (D56) for a different dependency: a real local runtime --
+# Playwright's browser, the HyperFrames CLI -- actually installed, rather than Azure credentials.
+addopts = "-q -m 'not live and not local_live'"
+markers = [
+    "live: calls a real Azure backend. Deselected by default; run with `pytest -m live`.",
+    "local_live: needs a real local runtime (Playwright's browser, the HyperFrames CLI) installed. Deselected by default; run with `pytest -m local_live`.",
+]
 
 [tool.coverage.run]
 source = ["core", "interfaces", "adapters"]

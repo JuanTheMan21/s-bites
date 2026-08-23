@@ -1,28 +1,11 @@
 """``JobQueue``, as an in-process asyncio queue."""
 
 import asyncio
-import json
 from typing import Any
 from uuid import uuid4
 
-from interfaces import JobQueue, QueuedJob
+from interfaces import JobQueue, QueuedJob, check_serialisable
 from tests.fakes.failure_injection import FailureInjector
-
-
-def check_serialisable(payload: dict[str, Any]) -> None:
-    """Refuse a payload that could not survive the trip to a real queue.
-
-    The contract says payloads must be JSON-serialisable because Service Bus crosses a wire. An
-    in-process queue hands the very same object back, so a ``Path``, a ``datetime`` or a model
-    instance works perfectly here and fails at T34 -- the local-only bug the ``JobQueue``
-    docstring warns about, in its most literal form. One ``json.dumps`` closes it.
-    """
-    try:
-        json.dumps(payload)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"job payload must be JSON-serialisable -- it crosses a wire on Service Bus: {exc}"
-        ) from exc
 
 
 class FakeJobQueue(FailureInjector, JobQueue):

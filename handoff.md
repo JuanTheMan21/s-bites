@@ -3,181 +3,181 @@
 **Overwritten completely at every `/checkpoint`.** This file describes *now*, never history.
 History lives in `decisionlog.md`.
 
-_Last updated: 2026-08-22 · after T6_
+_Last updated: 2026-08-23 · after T13_
 
 ---
 
 ## Where we are
 
-Iteration 1 is one task from done. The contracts exist, the domain vocabulary exists, the tier
-resolver computes, and as of T6 there is a **test foundation**: 196 tests, six in-memory fakes,
-and the resolver at 100% branch coverage. `adapters/`, `rendering/`, `mux/` and `runtime_skills/`
-are still empty.
+**The interface/adapter boundary is complete and wired.** All six interfaces exist; `Storage`,
+`SkillRegistry`, `JobQueue` and `RenderBackend` each have a real local and a real Azure
+implementation (the latter two Azure-side stubbed until T34/T35, signature-matched); `LLMProvider`
+and `TTSProvider` are Azure-only for now. `config.py` is the resolver: `build_adapters()` reads
+`RUNTIME_ENV` and returns a full six-adapter `Adapters` bundle on `azure`, and `close_adapters()`
+owns their lifetimes on shutdown.
 
-**Done:** T1 (scaffold), T2 (operating system), T3 (six interfaces), T4 (domain models),
-T5 (tier resolver), T6 (test foundation)
-**Next:** T7 — runtime skill registry. **The last task before Azure.**
+**Done:** T1-T9 (iterations 0-2 partial), T11 (storage adapters + Blob skill registry), T12 (local
+render backend + job queue, Azure stubs — rescoped, see decisionlog D59), **T13** (config resolver).
+**In progress, unclaimed:** **T10** — Azure TTS is done and tested; Ollama/Kokoro (local
+`LLMProvider`/`TTSProvider`) still don't exist and no task currently builds them.
+**Next:** **T14** — LangGraph skeleton. Its dependencies (T6, T13) are both `done`.
 
-## What T6 produced
+## What T13 produced
 
-196 passing tests, up from 103.
+`config.py` (199 lines, repo root) — the one module CLAUDE.md permits to name a concrete adapter
+class:
 
-| File | Holds |
+| Symbol | Does |
 |---|---|
-| `tests/fakes/failure_injection.py` | `FailureInjector` — `fail_next(method, exc)`, inherited by all six fakes |
-| `tests/fakes/{llm_provider,tts_provider,storage,skill_registry,job_queue,render_backend}.py` | One fake per contract, 21 async methods total |
-| `tests/fakes/__init__.py` | Re-exports, and the parity rule stated in the docstring |
-| `tests/conftest.py` | Six function-scoped fixtures: `fake_llm`, `fake_tts`, `fake_storage`, `fake_skills`, `fake_queue`, `fake_render` |
-| `tests/segment_examples.py` | `a_segment()`, `SEVEN_MINUTE_OUTLINE`, `seven_minute_segments()` — shared, mirroring `tests/slot_examples.py` |
-| `tests/test_fakes.py` | Conformance: signature equality, async-ness, AST scans |
-| `tests/test_fake_providers.py` · `test_fake_storage.py` · `test_fake_execution.py` | Semantics, per fake |
-| `tests/test_tier_resolver.py` · `test_frame_budget.py` | The resolver at full branch coverage |
-| `pyproject.toml` | `branch = true` under `[tool.coverage.run]` |
+| `Adapters` | Frozen dataclass, six fields (`llm`, `tts`, `storage`, `skills`, `queue`, `render`), one per interface ABC |
+| `build_adapters(env=None)` | Reads `RUNTIME_ENV` (`os.environ` by default, injectable for tests), returns a full `Adapters` on `azure`; **raises on `local`** — see below |
+| `close_adapters(adapters)` | Awaits `.aclose()` on whichever of the six resolved instances define one (`getattr` guard), best-effort via `asyncio.gather(..., return_exceptions=True)` |
+| `_storage` / `_skill_registry` / `_job_queue` / `_render_backend` | Real local **and** real Azure branches — both work today |
+| `_llm_provider` / `_tts_provider` | Real Azure branch; local branch raises `RuntimeError` naming Ollama/Kokoro |
 
-**Verify the DoD at any time** — both files must read 100% with an empty Missing column:
+**`RUNTIME_ENV=local` is deliberately incomplete (D64, user decision).** `build_adapters()` raises
+immediately under `RUNTIME_ENV=local` — before calling any of the four working local builders —
+naming that Ollama and Kokoro don't exist and pointing at decisionlog D58/D59. This was one of
+three options on the table (the others: signature-matched stub adapters à la T12, or narrowing
+`config.py`'s scope to skip `LLMProvider`/`TTSProvider` entirely); the user chose not to write any
+Ollama/Kokoro code, even raise-only, until a task actually claims T10. The four other builders are
+proven correct directly (`tests/test_config.py::test_each_local_builder_returns_the_local_adapter`)
+even though `build_adapters()` can't expose them under `local` yet. **Whichever future task builds
+Ollama/Kokoro only needs to fill in `_llm_provider`/`_tts_provider`'s local branch and delete
+`build_adapters()`'s upfront raise** — nothing else in `config.py` changes.
+
+**D55's `aclose()` question is closed (D65).** `config.py` owns the four adapters' off-contract
+`aclose()` (`AzureOpenAILLMProvider`, `BlobStorage`, `BlobSkillRegistry`,
+`PlaywrightHyperFramesRenderBackend`) via `close_adapters()`, generic over which four via `getattr`
+so a real `ServiceBusJobQueue`/`ContainerAppsRenderBackend` growing one at T34/T35 needs no edit
+here. It is best-effort — one adapter's `aclose()` raising does not stop the rest from closing —
+after `project-reviewer` caught a first version that stopped at the first failure, which would leak
+every later adapter once T19's FastAPI lifespan is the real caller.
+
+**`.env.example` grew two placeholder groups** the stub constructors need real args for:
+`AZURE_SERVICE_BUS_CONNECTION_STRING`/`AZURE_SERVICE_BUS_QUEUE` (unused until T34) and
+`AZURE_RESOURCE_GROUP`/`AZURE_CONTAINER_APPS_ENVIRONMENT` (unused until T35). Both read with
+`default=""` rather than `required=True` in `config.py`, since the stubs never dial out.
+
+**Verify at any time:**
 
 ```bash
-.venv/Scripts/python.exe -m pytest --cov=core.tier_resolver --cov=core.frame_budget \
-  --cov-report=term-missing
+pytest                        # full suite, offline, no network — includes tests/test_config.py
+ruff check . && ruff format --check .
 ```
 
-`--cov-branch` is no longer needed; `branch = true` is configured (D42).
+## Next task: T14 — LangGraph skeleton
 
-### The fakes, in one paragraph
+Graph state, checkpointing, per-segment fan-out, and resume-after-failure, scoped strictly to
+`core/graph/` (the only place `langgraph` may be imported). Depends on T6 (done) and T13 (done) —
+**ready to plan with no blockers.**
 
-They are **adapters**, held to the standard `adapter-parity` applies to the real ones at T13
-(D37): no vendor imports, errors only from `interfaces/errors.py`, and semantics matching the
-contract rather than merely the signature. Every one can be made to fail —
-`queue.fail_next("dequeue", RateLimited("throttled"))` — which is the only way T14's retry
-classifier can execute its own error paths offline. `FakeTTSProvider` writes a real WAV and
-derives the returned duration from the file (D38); `ffprobe` confirms a 9000ms synthesis as
-`duration=9.000000`, so T10's DoD is already satisfiable offline. `FakeStorage` and
-`FakeJobQueue` enforce two documented preconditions an in-process implementation would otherwise
-hide (D39), which **sets the spec T11 and T34 must match.**
+**What T14 should know going in:**
 
-## Next task: T7 — Runtime skill registry
-
-Versioned prompt packs the *pipeline* loads at runtime, so the system starts from accumulated
-knowledge rather than a cold prompt. **DoD: four packs load through the interface; pack content
-is data, not code.** Depends on T3 only — nothing blocks it.
-
-Most of the surface already exists:
-
-- **`interfaces/skill_registry.py` is written.** `SkillPack` (a pydantic model: `name`,
-  `version`, `content`, `metadata`) and three abstract methods — `load(name, version=None)`,
-  `versions(name)`, `list_packs()`. Do not change the contract to suit the implementation.
-- **`tests/fakes/skill_registry.py` is the reference semantics.** It already encodes the
-  asymmetry the contract specifies and T7 must reproduce: `load` raises `SkillPackNotFound` for
-  an unknown pack *or* an unknown version, while `versions` returns an **empty list** and never
-  raises, because that is the question you ask before committing to a pack.
-- **`runtime_skills/` exists and is empty.** T7 fills it. Note it is *not* `.claude/skills/` —
-  different audience, and CLAUDE.md is emphatic about the distinction.
-- The registry goes behind the interface now and gains a Blob-backed implementation at **T11**,
-  so the disk adapter must not leak filesystem assumptions into anything above it.
-
-Three things worth knowing before starting:
-
-1. **`version_key` in the fake is a promise T7 has to keep (D41).** `SkillRegistry.versions`
-   promises "newest first", and a string sort puts `2.10` below `2.9`. The fake defines a
-   numeric-aware rule; the real registry must adopt it or replace both. The two only diverge
-   once a pack has a second version, which is late and quiet. **This is T7's to close.**
-2. **"Pack content is data, not code" is the load-bearing half of the DoD.** The `SkillPack`
-   docstring already says it: content is interpolated into a prompt and nothing else — never
-   evaluated, never imported, never a template that can reach back into the process. A pack
-   format that needs `eval`, or a Jinja template with access to globals, fails this DoD.
-3. **Which four packs** is not specified anywhere. The pipeline's four LLM-facing steps are
-   outline (T15), scripting (T15), scene authoring (T16), and — plausibly — a shared house-style
-   pack. Decide it in plan mode; it determines what T15 and T16 can ask for.
+- **`config.py` exists now, but nothing calls it yet.** T14's nodes call interfaces, the same as
+  every other piece of `core/` — whatever wires an `Adapters` bundle into the graph's runnable
+  config is T14's own design decision, not something already decided for it.
+- **`build_adapters()` will raise if anything in T14's local test path tries `RUNTIME_ENV=local`.**
+  Tests should keep exercising the graph against `tests/fakes`, not `config.py`'s local branch,
+  until T10 lands — this is the same reasoning D25/D59 already established for staying
+  Azure-focused on the live path.
+- **D47's disk-I/O-under-concurrency question is still unmeasured, now for the third time flagged
+  as "next task's job."** `DiskStorage`/`DiskSkillRegistry` do synchronous I/O inside their
+  `async def`s. T14 is explicitly named in D47 and T12's carry-forward as the first task that runs
+  real concurrent jobs (per-segment fan-out) against local storage. **Measure this during T14,** or
+  say explicitly why it was skipped again.
+- `QueuedJob.attempt` is what `StructuredOutputError`'s "retry, but bounded" needs (D24's open
+  item) — T14 is named as the owner of that cap.
 
 ## Environment state
 
 | | |
 |---|---|
-| Models | Opus plans, Sonnet builds and reviews — `.claude/settings.json`, `build-task.md` frontmatter, agent files |
-| `RUNTIME_ENV` | `local` in `.env.example`; **flips to `azure` at T8** (D25) |
-| `.env` | **Still missing.** Copy `.env.example` before any Azure task — the session hook says so at each start |
+| Models | Opus plans, Sonnet builds and reviews |
+| `RUNTIME_ENV` | **`azure`** in both `.env` and `.env.example` (D25) — now genuinely wired: `config.build_adapters()` reads it for real |
+| `.env` | **Exists and is filled in.** Gitignored. Never commit it. **Not yet updated with the two new placeholder groups** `.env.example` gained this session (`AZURE_SERVICE_BUS_*`, `AZURE_RESOURCE_GROUP`/`AZURE_CONTAINER_APPS_ENVIRONMENT`) — harmless gap today since nothing reads `.env` directly except `config.py` via `build_adapters()`, which defaults them to `""` |
+| Azure sub | `d4a261bd-760c-41bd-9e22-ef58e2329ce0`, `az login` done |
+| Azure OpenAI | `skill-bites` (eastus) · deployment `gpt-5.4-mini` 2026-03-17, DataZoneStandard (D49) · api-version `2024-10-21` |
+| Azure Speech | `skill-bites-tts` (eastus), S0 (D48) · voice `en-US-AvaMultilingualNeural` |
+| Azure Storage | `sbitesartifacts25817` (eastus) · containers `explainer-artifacts`, `runtime-skills` |
 | Python | 3.11.0, venv at `.venv/`. Use `.venv/Scripts/python.exe` explicitly |
-| Toolchain | pydantic 2.13.4, pytest 9.1.1, pytest-asyncio 1.4.0, pytest-cov 7.1.0, coverage 7.15.4, ruff 0.16.4 |
-| Node | 24.16.0 · ffmpeg 8.1.1 on PATH (and `ffprobe`, which T6 used to verify the TTS fake) |
-| Azure | PAYG, $200/30-day credit. **Nothing provisioned** — that is T8 |
-| Git | on `master`. **T4, T5 and T6 committed together** — see the commit for why |
-| RepoWise | CLI on PATH and registered in `.mcp.json` |
+| Node | 24.16.0 · npm 11.13.0 · ffmpeg/ffprobe 8.1.1 on PATH |
+| HyperFrames CLI | Installed — 0.8.10, via `npx hyperframes`. Chrome Headless Shell cached at `~/.cache/hyperframes` |
+| Playwright browsers | Installed — both `chromium-1234` *and* `chromium_headless_shell-1234` at `%LOCALAPPDATA%\ms-playwright` |
+| Ollama, Kokoro | **Still not installed. Deliberately deferred (D59, reaffirmed D64)**, not forgotten |
+| Git | on `master`. **Nothing from T1 onward pushed or committed yet** — every task since T1/T2's two commits is still working-tree state |
 
 ## Before the next session
 
-Nothing blocks T7 — it is a registry and four text files, entirely offline.
-
-```bash
-az login                    # required by the Azure MCP server, and by T8
-```
-
-**T8 is the real deadline, and T7 is the last thing standing before it.** Nothing past T7 moves
-without a resource group, a model deployment, a Speech resource, a storage account, and a
-filled-in `.env`. T8's DoD deliberately demands a raw completion and a raw TTS call from the
-command line *before* any adapter code, because a subscription with zero TPM quota fails silently
-and looks like an adapter bug for hours.
+Nothing blocking. T14 is `core/graph/` design work against the already-`done` T6 fakes; it does not
+need `.env`, Azure credentials, or any new install. If T14's planning session decides to add the two
+new `.env.example` placeholder groups to the real `.env`, that's a one-minute copy — not required
+for anything to work, since `config.py` defaults them to `""`.
 
 ## Known gaps and open questions
 
-**New in T6:**
+**New in T13:**
 
-- **The fake and the real skill registry must agree on version ordering (D41). T7 owns it.**
-- **The fakes may be stricter than the real Azure adapters** on the two enforced preconditions
-  (D39). That is the cheap direction to be wrong in — a false failure at T11 is visible
-  immediately — but if a real adapter legitimately accepts something `check_key` rejects, the
-  fake is what changes, and the reasoning goes in the decision log.
-- **No coverage gate exists (D42).** Coverage can decay between checkpoints without anything
-  failing. `/checkpoint` re-runs the command; the resolver is the only module it is claimed for.
-- **`test_signatures_match_the_contract_exactly` compares annotation objects.** Two constraints
-  follow, and both produce confusing failures: no fake may use `from __future__ import
-  annotations`, and a fake must import the contract's own `TypeVar` rather than declaring one.
-- **`FakeRenderBackend.render` writes placeholder bytes, not a real MP4.** A valid MP4 needs
-  ffmpeg and an offline fake must not shell out to a binary. **T18's mux work must run against
-  the real local adapter** — this fake proves call plumbing, not media validity.
+- **`RUNTIME_ENV=local` cannot build a full adapter set** — `build_adapters()` raises by design
+  (D64) until a future task builds Ollama/Kokoro. Not a bug; see "What T13 produced" above for the
+  exact seam a future task fills in.
+- **`.env` itself was not updated with the two new placeholder var groups** — see Environment state
+  above. Low priority; `config.py` tolerates their absence.
 
-**Carried forward:**
+**Carried forward, unchanged:**
 
-- **`FRAME_BUDGET` is mistuned and cannot be fixed yet** (D32). 600 frames at 24fps buys 25s of
-  Tier-2 animation against a 28s average segment, so Tier 2 lands on the *shortest* segments,
-  not the most important — both `CRITICAL` segments demote. **Owned by T16**, once real measured
-  durations exist. `/tiers` is the cheap tuning loop. Do not tune it against a fixture.
-- **Below ~333ms at 24fps, Tier 2 is *cheaper* than Tier 1.** Left truthful on purpose; a floor
-  would make `frame_cost` lie about the cost model. Now pinned by a test. Only live if TTS ever
-  emits a sub-second clip.
-- **`core/tier_resolver.py` is at 198 of 200 lines.** `/newintent` step 5 adds a line to
-  `TIER_SUPPORT`, so **the seventh intent forces a split.** Split by responsibility.
-- **The strict-mode keyword list is the conservative set.** **Check live behaviour at T8** before
-  loosening it. Nothing has yet been validated against a real Azure call.
-- **`Segment.slots` is an untyped dict** (D29). Discriminated union deferred; needs `const`.
-  **Revisit at T24.**
-- **Six intents may prove too few.** Only visible at T18. `/newintent`, not a redesign — but see
-  the 198-line note.
-- **No family for "our own code judged this invalid" errors.** `CompositionInvalid` inherits
-  `Exception` directly (D23). **Decide at T17.**
-- **`StructuredOutputError` cannot say "retry, but bounded."** **T14 owns this**, via
-  `QueuedJob.attempt` — which now survives a requeue in the fake, so it is testable.
-- **A wrong endpoint URL looks retryable** (D24). T8's command-line verification is the mitigation.
-- **Scope: 35 tasks across 8 iterations.** Worth confirming with your manager whether RAG
-  (iteration 6) or frontend polish (iteration 5) matters more *before* iteration 4.
-- **HyperFrames is not installed.** Needed by T17. `npx hyperframes doctor` when we get there.
+- **D47's disk-I/O-under-concurrency question is still unmeasured**, now flagged a third time as
+  T14's job specifically (see "Next task" above) — T12's asyncio `JobQueue` made it measurable and
+  T14's per-segment fan-out is what will actually stress it.
+- **The composition-directory-layout assumption is unverified** (`hyperframes_cli.py` assumes one
+  composition per directory, named `index.html`). T17 is the first task that generates composition
+  files and picks a real layout — check this assumption then.
+- **`FRAME_BUDGET` is mistuned and cannot be fixed yet** (D32). Owned by T16, once real measured
+  durations exist.
+- **The `outline` pack may need a `1.1`.** T8's live call rated all three segments importance 5.
+  T15 owns this.
+- **`core/tier_resolver.py` is at 198 of 200 lines.** The seventh intent forces a split.
+- **No coverage gate exists (D42).**
+- **`FakeRenderBackend.render` writes placeholder bytes, not a real MP4.** T18's mux work must run
+  against the real local adapter, which exists (`PlaywrightHyperFramesRenderBackend`).
+- **`Segment.slots` is an untyped dict** (D29). Revisit at T24.
+- **No family for "our own code judged this invalid" errors** beyond `CompositionInvalid` itself
+  (D23). Decide at T17.
+- **`StructuredOutputError` cannot say "retry, but bounded."** T14 owns this, via `QueuedJob.attempt`.
+- **Scope: 35 tasks across 8 iterations**, and the local stack's priority is now unsettled a second
+  time over (T12's rescoping, and now T13's D64) — worth confirming with your manager before
+  iteration 4.
 
 ## Gotchas worth remembering
 
-- **A validation rule tested on one method of six is tested nowhere.** `project-reviewer` caught
-  `FakeStorage.exists` skipping `check_key` because the test only parametrised `put_bytes`. When
-  a rule applies across an interface, parametrise the test across the interface.
-- **`project-reviewer` reported a test count that was wrong** (172 against an actual 196). Its
-  reasoning about the code was sound and its two findings were real, but **re-run the numbers
-  yourself** rather than quoting an agent's.
-- The boundary hook blocks vendor imports in `core/`. If it fires, move the code into an adapter.
-- The hooks fire on `Write|Edit`, **not on Bash heredocs.** Use `Write` for `.py` files — it is
-  what runs ruff, the 200-line check, and the boundary check. The 200-line hook caught
-  `test_fake_services.py` at 236 and forced the split into `test_fake_storage.py` and
-  `test_fake_execution.py`. **Let it.**
-- **CLAUDE.md's boundary greps are plain text searches.** `core/tier_resolver.py` and
-  `core/frame_budget.py` both name `FRAME_BUDGET` and `FPS` in prose to say they do *not* read
-  them. Verify imports with AST, not text — which is what `tests/test_fakes.py` does.
-- Coverage runs write a `.coverage` file to wherever they are run from. It is gitignored as of
-  T6; before that it was not, and one nearly got committed.
+**New in T13:**
+
+- **A `PostToolUse` formatting hook can silently strip an import that isn't used *yet*.** Adding an
+  import in one edit and its first use in a later edit risks the hook's autofix (`ruff --fix`-style)
+  removing the "unused" import in between. Add an import in the same edit as its first use — this
+  is the same lesson as the existing "quality hook autofixes on write" gotcha below, hit again in a
+  new shape this session (`asyncio`/`logging` added before their uses, silently stripped, caught by
+  the next `pytest` run rather than by review).
+- **`getattr(instance, "method_name", None)` is the right shape for "does this adapter have an
+  optional lifecycle hook," and it composes cleanly with `asyncio.gather(..., return_exceptions=True)`
+  for "close everything, best-effort."** Worth reusing verbatim if a future interface ever grows a
+  second off-contract hook.
+
+**Carried forward:**
+
+- **Check the *SKU's* quota, not the model's availability** (D49).
+- **An SDK that "reports failures as results" can still raise** (D57).
+- **The quality hook autofixes on write** — add an import in the same edit as its first use.
+- **Windows path semantics**: a trailing dot is stripped on existence checks but not on directory
+  enumeration (D46).
+- **A generator raises where it is iterated, not where it is called** — wrap both the call and the
+  iteration in one `try`.
+- **A validation rule tested on one method of six is tested nowhere** (D39).
+- **`project-reviewer` is worth running and worth checking in both directions** — catches real bugs
+  across this project's history (T12's three, T13's `close_adapters` best-effort gap plus two minor
+  validation holes). **When re-running review after fixes, ask for a fresh full read, not just
+  verification of the named fixes.**
+- **The hooks fire on `Write|Edit`, not on Bash heredocs.** Use `Write` for `.py` files.
+- **CLAUDE.md's boundary greps are plain text searches.** Verify imports with AST, not text.
 - 200-line ceiling, enforced on write. Split by responsibility, don't compress.
 - `artifacts/` is gitignored. Nothing you need to keep goes there.

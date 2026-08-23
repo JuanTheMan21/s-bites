@@ -478,3 +478,365 @@ a coverage run is a *branch* coverage run without a flag anyone has to remember,
 is recorded in `handoff.md`.
 **Risk accepted:** coverage can decay between checkpoints without anything failing. `/checkpoint`
 re-runs the command.
+
+## 2026-08-23 · T7 — Runtime skill registry
+
+The last task before Azure. The contract and the reference semantics already existed, so this task
+was the real implementation, the four packs, and one inherited debt (D41) to close.
+
+### D43 — `version_key` is promoted to `interfaces/skill_registry.py`, closing D41
+**Rejected:** leaving it in the fake, and a shared module under `adapters/`.
+**Reasoning:** the second option is not merely worse, it is *impossible*. `tests/test_fakes.py`
+bans `adapters` as an import root inside fakes, so `FakeSkillRegistry` could never have imported
+it and the two implementations would have stayed divergent — which is the exact bug D41 opened.
+`interfaces/` is the one home both can reach, and it is the right one on merits too:
+`SkillRegistry.versions` *promises* "newest first", so defining what that phrase means belongs
+next to the promise rather than inside one of the things keeping it. D22's precedent, applied to
+a function instead of a model.
+
+Verified that a bare function in `interfaces/` breaks neither discovery mechanism:
+`test_interfaces.py` iterates a hand-written `CONTRACTS` map and `test_fakes.py`'s `contracts()`
+filters on `inspect.isclass` plus a non-empty `__abstractmethods__`. `tests/test_skill_registry_parity.py`
+now runs one set of assertions over both implementations, and T11's Blob registry joins by adding
+a line to `REGISTRIES`.
+
+### D44 — A pack is markdown with flat `key: value` frontmatter, not YAML
+**Rejected:** a JSON sidecar per version, and no metadata at all.
+**Reasoning:** `SkillPack.metadata` is `dict[str, str]`, and a parser that can produce *only* that
+is a stronger guarantee than a convention not to nest. YAML would have meant a new dependency
+whose whole selling point — nesting, tags, object construction — is the thing T7's definition of
+done says packs must not have. "Content is data, not code" is enforced by the format's inability
+to express code, rather than by everyone remembering.
+
+The sidecar was the close call: it needs no bespoke parser. It lost on two files per version and
+on separating metadata from the prose it describes. The parser it avoids is fifteen lines and is
+pinned by `tests/test_skill_pack_format.py`.
+
+Identity comes from the path — the directory is the name, the file stem is the version — so a
+pack cannot rename or re-version itself by editing its own frontmatter.
+
+### D45 — A malformed pack name raises `ValueError`, even from `versions()`
+**Rejected:** returning an empty list for anything that is not found, malformed or not.
+**Reasoning:** the contract says `versions` never raises for an *unknown* pack, and that stays
+true. Malformed is a different question (D39, exactly as `FakeStorage` distinguishes a bad key
+from an absent one): answering `../../secrets` with `[]` reports a traversal attempt as an
+ordinary miss, and the caller cannot tell the two apart. The interface docstring now says so, so
+the deviation is written down where T11 will read it. **This sets the spec the Blob registry
+must match.**
+
+### D46 — A pack name may not *end* in `.`, and the reason is written down in the code
+**Rejected:** validating only leading dots and separators, which is what shipped and what review
+caught.
+**Reasoning:** Windows strips a trailing dot when it resolves a path for an existence check but
+not when it enumerates a directory. On this project's primary platform that meant `outline.`
+passed validation, resolved to the `outline` directory, and returned a `SkillPack` whose `name`
+field was `"outline."` — a pack whose identity did not match what it was loaded from, which is
+the one thing `parse_pack` promises cannot happen. `outline..` passed the same existence check
+and then raised a raw `FileNotFoundError` out of `versions()`, straight through the adapter
+boundary and in direct violation of the never-raises promise.
+
+The rule looks like tidiness, so the rationale sits in a comment above `_check_segment` rather
+than only here. Both rejection lists in the tests now carry trailing-dot cases; neither did
+before, which is why it shipped.
+
+**A second fix came out of the same finding.** `DiskSkillRegistry._listing` now performs the
+`glob`/`iterdir` call *and* the iteration inside one `try`, translating `OSError` to
+`ProviderUnavailable`. `iterdir` and `glob` are generators, so a failure surfaces at the first
+item pulled rather than at the call — catching only one of the two positions leaves the other
+uncovered, and which one a given filesystem uses is not something this adapter should have to
+know. An unreadable directory is the backend failing, not a pack being absent, so it translates
+rather than returning a misleading `[]`.
+
+### D47 — Disk reads stay synchronous inside the `async def`s
+**Rejected:** wrapping every read and listing in `asyncio.to_thread`.
+**Reasoning:** a pack is a few kilobytes read once at the start of a job, so the thread handoff
+costs more than the blocking read it avoids — and it would give the appearance of an async
+filesystem that neither this adapter nor `pathlib` has. The parity that matters against the Blob
+registry is in return types and error behaviour, not in where the work runs.
+**Open:** raised in review and correct to revisit. Once T12's asyncio pool runs jobs concurrently
+on one loop, a slow read — network share, antivirus scan, contended disk — stalls every job
+sharing that loop rather than only the one reading. **Re-check at T12/T13**, when there is
+concurrency to measure against instead of speculate about.
+
+## 2026-08-23 · T8-T11 — Azure groundwork and the first real adapters
+
+Four tasks in one session, by user request. The first code in this project that leaves the
+machine, and the first time any of iteration 1's contracts had a second implementation — which is
+the only thing that ever tests whether a boundary was drawn in the right place.
+
+### D48 — Azure Speech runs on the existing S0 resource, not a new F0. D7 is reopened.
+**Rejected:** provisioning an F0 alongside it, which is what D7 chose.
+**Reasoning:** user decision, taken with the numbers in front of it. D7 picked F0 for 500k free
+neural characters a month, and that reasoning was sound when the alternative was paying for
+something. It is not free that was actually wanted, though — it was *cheap*, and S0 neural TTS at
+roughly $15/1M characters puts a 7-minute video at about **$0.09**, which against a $200 credit is
+noise. What F0 costs instead is a request-rate cap of 20 per 60 seconds, and T16 narrates ~15
+segments concurrently. So the free tier buys nothing here and constrains the one traffic shape
+this project actually generates. **D7's conclusion changes; its reasoning does not** — on a
+subscription with no credit, F0 would still be right.
+
+### D49 — The deployment is `gpt-5.4-mini` on **DataZoneStandard**, not GlobalStandard
+**Rejected:** GlobalStandard, which is the default and what an unthinking `az ... deployment
+create` produces. Also rejected: `gpt-5-mini` on GlobalStandard (500k TPM) and `gpt-4.1-mini`.
+**Reasoning:** this is the failure T8's definition of done was written for, met in the wild.
+`az cognitiveservices usage list -l eastus` reports `OpenAI.GlobalStandard.gpt-5.4-mini` with a
+limit of **0** and `OpenAI.DataZoneStandard.gpt-5.4-mini` with **200** (200k TPM). Deploying the
+obvious way yields a deployment that exists, reports `Succeeded`, and can never serve a token —
+and the resulting failure looks exactly like an adapter bug for as long as you are willing to
+stare at it. Same picture in westus3, so it is a subscription-level quota shape rather than a
+regional accident. **Check the SKU's quota, not just the model's availability**, before every
+future deployment.
+
+### D50 — `check_key` is promoted to `interfaces/storage.py`
+**Rejected:** a shared module under `adapters/`, and leaving the copy in `tests/fakes/storage.py`
+for the two real adapters to duplicate.
+**Reasoning:** D43's argument, applied a second time, and the first option is again not merely
+worse but *impossible*: `tests/test_fakes.py` bans `adapters` as an import root inside fakes, so
+`FakeStorage` could never import it and the three implementations would drift. `interfaces/` is
+the one home all three can reach, and it is right on merits — the `Storage` docstring is where
+"keys are relative POSIX strings" is promised, so the function enforcing it belongs beside the
+promise. D39 set this spec from inside a test; it is now production code that the test depends on
+rather than the other way round.
+
+### D51 — Adapters take explicit constructor arguments and never read `os.environ`
+**Rejected:** each adapter reading its own settings, which is shorter and is what the
+`LLMProvider` docstring's "adapter configuration read from the environment" could be taken to mean.
+**Reasoning:** `config.py` is the only module permitted to name a concrete adapter class, and
+T13's definition of done is that flipping `RUNTIME_ENV` swaps every adapter with no change in
+`core/`. An adapter that reads the environment itself makes that test vacuous — it would pass
+whether or not `config.py` did its job, because the adapters would be self-wiring. The environment
+is read in exactly two places, both outside the adapters: `scripts/verify_azure.py` and
+`tests/azure_live.py`.
+
+### D52 — The adapter owns the retry policy outright; the SDK's own retries are switched off
+**Rejected:** leaving `openai`'s default `max_retries=2` in place underneath tenacity.
+**Reasoning:** two independent retry loops compose by multiplication, not addition. A configured
+bound of 4 attempts silently becomes 12, and a rate limit that should surface in seconds takes
+minutes — with the retries that did the waiting invisible to every log line and every test. One
+policy, in one place, is worth more than two good ones. `max_retries=0` on the client is the whole
+fix and it is one line, but it is one line nobody adds by accident.
+
+### D53 — A 400 that rejects the *schema* is `ProviderMisconfigured`, not `StructuredOutputError`
+**Rejected:** routing every 400 to `StructuredOutputError` on the grounds that it concerns the
+structured-output request.
+**Reasoning:** `StructuredOutputError` promises "retry may help, bounded", and that is false here.
+The model never ran: Azure refused the schema before generation, and it will refuse it identically
+forever. Sending it to the retryable class burns every attempt T14 grants to arrive at the message
+the first attempt already had. The split is made on a substring match against the message, which is
+admittedly not a stable contract — but the *retry answer* is stable even when Azure's error bodies
+are not, and a 400 that is not about the schema stays `StructuredOutputError`, since that is a
+request this schema provoked.
+
+### D54 — `duration_ms` is measured from the written WAV, never read from the SDK
+**Rejected:** returning Azure Speech's `result.audio_duration`, which is available, free, and
+correct — T8's smoke run had it agree with `ffprobe` to the millisecond.
+**Reasoning:** Invariant 1 is not "the number is right", it is "the number is *measured*". Taking
+the SDK's word for it works until an adapter appears whose SDK offers no such field — Kokoro at
+T12 — at which point one adapter measures and the other reports, and the two agree right up until
+they do not. `adapters/audio_duration.py` is shared by both, so parity in the single most
+load-bearing number in the pipeline is structural rather than reviewed. D38 made this exact
+argument about `FakeTTSProvider`; this is the same argument surviving contact with a real backend.
+
+### D55 — `aclose()` exists on the Azure adapters and is deliberately *not* on the contracts
+**Rejected:** adding a `close`/`aclose` method to `Storage`, `LLMProvider` and `SkillRegistry`.
+**Reasoning:** the async Azure clients own connection pools and want closing; the disk adapters and
+the fakes have nothing to close. Putting it on the interface would oblige two implementations out
+of three to grow a no-op so that the third can be honest — the "written from one implementation's
+perspective" failure the `adapter-contract` skill names. The owner of the instance closes it:
+`config.py` at T13, the FastAPI lifespan at T19.
+**Open, and worth revisiting at T19:** this genuinely is a gap, not a non-issue. If T19 finds
+itself special-casing "does this adapter have an `aclose`", the interface was wrong and should
+grow the method — with the no-ops accepted as the price.
+
+### D56 — Live tests are a pytest marker, deselected by default, and most risk is pinned offline
+**Rejected:** no live tests at all (trusting `scripts/verify_azure.py` alone), and live tests that
+run by default.
+**Reasoning:** `pytest` must stay offline, network-free and runnable on every edit — so `addopts`
+carries `-m 'not live'` and the 25 live tests are opt-in via `pytest -m live`. The more important
+half is what is *not* live: a live test only ever exercises whichever branch the backend took that
+day, and it will never produce a 403, a truncated body and a 429 in one session. The translation
+tables and the retry policies are ours, are pure functions over exception objects, and import fine
+with no network — so they are tested exhaustively offline, and the live tests only have to prove a
+real call reaches the same code. Live tests **skip** rather than fail without credentials, so a
+fresh clone still runs green.
+
+### D57 — Both TTS failure surfaces translate, and the adapter retries. Found by review.
+**Rejected:** the version that shipped, which had no retry at all and let setup failures escape raw.
+**Reasoning:** `project-reviewer` caught `AzureSpeechTTS` raising `RateLimited` on the *first*
+throttle, against `interfaces/tts_provider.py`'s unconditional "the backend throttled the request
+**and retries were exhausted**". A caller told its retries are spent backs off at the job level
+over a blip that a few hundred milliseconds of backoff would have absorbed — and the sibling LLM
+adapter, written the same afternoon, got this right. Two adapters with opposite answers to "does
+this retry?" is invisible in either file alone.
+
+Chasing it down surfaced a second, sharper hole that the review had explicitly declined to raise.
+Speech fails in **two structurally different ways**: cancellations come back as *results*, but
+`SpeechConfig(subscription=..., region="")` **raises `RuntimeError: 5`** — verified, not assumed —
+before anything touches the network. That path was unguarded, so a single blank line in `.env`
+sent a bare builtin straight through the adapter boundary. It is now `ProviderMisconfigured` with
+a message naming all three settings, because the SDK's own message is the character `5`.
+**The general lesson: "this SDK reports failures as results" was true and still left an exception
+path uncovered.** Construction is not the same surface as invocation. The maps now live in
+`adapters/azure/speech_errors.py`, split out when the adapter passed 200 lines.
+
+### D58 — T10 ships its Azure half only; Kokoro moves to T12
+**Rejected:** installing Kokoro this session to close T10 as written.
+**Reasoning:** user decision. Kokoro needs `torch` (~2.5 GB), `soundfile`, and espeak-ng as a
+native Windows install for out-of-dictionary words — the dependency D6 cites as one of the two
+original reasons to reach for Docker. T12 already owns the local adapter set (Ollama, the asyncio
+pool, Playwright), so Kokoro joining its siblings costs nothing and keeps a large download and a
+real Windows risk off the critical path of a four-task session. **T10 stays `in-progress`**;
+`adapters/audio_duration.py` is already shared and waiting for it.
+
+## 2026-08-23 · T12 — Local render backend & job queue; Azure stubs
+
+D58's plan changed again before this session finished: the user chose to stay Azure-focused rather
+than build out the rest of the local stack right now. What actually shipped is narrower than
+`tasks.md`'s original description, and the render backend's design turned up two real bugs during
+manual smoke-testing that would not have been caught by any test written against assumption alone.
+
+### D59 — Ollama and Kokoro are cut from T12 entirely, pushed to a future (unnumbered) iteration
+**Rejected:** building all four local adapters as `tasks.md` originally scoped T12, and separately,
+building Kokoro alone while cutting only Ollama.
+**Reasoning:** user decision, made explicitly to stay Azure-focused rather than reopen D58's
+Windows risk (torch, native espeak-ng) a second time. Ollama was cut alongside it rather than kept
+— it is cheap and low-risk on its own, but there is no product reason to build a local LLM path
+right now if the local TTS path is not coming with it. **`RenderBackend` and `JobQueue` stay in
+scope** regardless of this cut: rendering is not a local-vs-Azure choice the way LLM/TTS are — the
+same Playwright+HyperFrames rendering code this task builds is what T35's Container Apps job will
+eventually run inside a container, not a local-only throwaway.
+**Ripple, not resolved here:** T10 cannot close via T12 anymore (D58's plan is void a second time).
+T13 lists T10 as a dependency and its DoD talks about `RUNTIME_ENV=local` swapping every adapter —
+that is not achievable until Ollama/Kokoro exist. `tasks.md` is updated to flag this; **T13's own
+planning session decides** whether to wire local without them, stub them, or defer T13's local-swap
+claim. Not decided here.
+
+### D60 — `RenderBackend.capture` drives Playwright directly; `render`/`lint` shell to the HyperFrames CLI
+**Rejected:** doing everything through the CLI, including stills, via `npx hyperframes snapshot
+--at <t1,t2,t3>`.
+**Reasoning:** the user's explicit priority is shortest time to video. `snapshot` boots a fresh
+Node process and browser per invocation; Tier 1 needs several stills per segment, across many
+segments per job, so that cost multiplies where a kept-alive browser page does not.
+`adapters/local/playwright_capture.py` launches Chromium once, lazily, and reuses it across every
+`capture()` call for the adapter's lifetime. `render` (full Tier-2 video) and `lint` (the
+composition-wide validation gate) stay on the CLI — CLAUDE.md already names those as the render
+adapter's job, and the CLI owns frame-accurate video encoding in a way reimplementing would not
+improve on.
+**Discovered as a real constraint while building this, not designed in advance:** `hyperframes
+lint`/`check` always validate a whole *project directory* (`index.html` + `compositions/`), with no
+flag to target one arbitrary file — confirmed empirically, not assumed, and it is the reason two
+composition files with `data-composition-id` in the same directory both fail lint
+(`multiple_root_compositions`). `hyperframes_cli.py` therefore assumes each composition already
+lives alone in its own directory, named literally `index.html`, and raises `RenderFailed` loudly
+rather than silently lint-validating the wrong file if that assumption is violated. **Flagged for
+T17 to confirm** once composition generation actually exists and picks a real directory layout.
+
+### D61 — Every `page.evaluate` seeking the GSAP timeline must discard its return value
+**Discovered, not decided** — a real bug that shipped in the first version of
+`playwright_capture.py` and was caught by manual smoke-testing, not by any test written in advance.
+`"([id, t]) => window.__timelines[id].seek(t, true)"` hung indefinitely on every call: GSAP's
+`.seek()` returns the timeline itself for chaining, and an implicit-return arrow function hands
+that back to Playwright, which then tries to structurally clone a large, circular, DOM-and-function
+-laden object across the browser/Python boundary rather than erroring outright.
+**Fix:** braces, not an implicit return — `"([id, t]) => { window.__timelines[id].seek(t, true); }"`
+— so nothing comes back to serialise. `project-reviewer` grepped the rest of the codebase for other
+`page.evaluate`/`eval_on_selector` calls during its pass; the remaining three all return plain
+primitives (a string, two numbers) and carry no equivalent risk. **Worth remembering generally:**
+an arrow function passed to `page.evaluate` should return nothing unless the caller actually wants
+the value back — GSAP's chaining convention makes this trap easy to hit by habit.
+
+### D62 — Three resource-leak / contract-escape bugs in the render adapter, found by `project-reviewer`, all fixed before checkpoint
+**Rejected:** the versions that shipped from the first build pass.
+**Reasoning:**
+1. `hyperframes_cli._run` cancelled `proc.communicate()` on an `asyncio.wait_for` timeout but never
+   touched `proc` itself, leaving the `hyperframes` process — and the node/chrome-headless-shell
+   children `npx` spawns under it on Windows — running orphaned. Combined with `render_backend.py`'s
+   retry (which does treat a timeout as retryable `RenderFailed`), a second attempt could start a
+   second writer pointed at the same destination path while the first was still running. Fixed with
+   a `_kill_tree` helper (`taskkill /T /F /PID`, with a `proc.kill()`/`proc.wait()` fallback) called
+   before re-raising. Pinned by
+   `tests/test_render_backend_parity.py::test_a_timeout_raises_render_failed_and_leaves_the_backend_usable`
+   — forces a nearly-zero timeout, asserts `RenderFailed`, then confirms a normal call afterward
+   still succeeds; run live against the real installed CLI, with a `tasklist` check afterward
+   confirming no orphaned browser process was left behind.
+2. `playwright_capture.PlaywrightCapture._ensure_browser` let a `chromium.launch()` failure escape
+   as a raw, untranslated exception — a caller catching `RenderFailed` per the interface contract
+   would not catch it — and on a second failed attempt would overwrite `self._playwright` without
+   stopping the first one, leaking a driver process per failed call. Fixed: launch failures are now
+   caught, the driver is stopped and reset to `None` before the exception is translated and
+   re-raised, so a failed launch leaves the object in a clean state for the next attempt.
+3. Found on a second, later review pass, after 1 and 2 were already fixed: `PlaywrightCapture.capture`
+   called `page = await browser.new_page()` *before* its own `try` block. A crashed browser most
+   often fails first at exactly that call (the first thing that has to reach it over CDP), not at
+   `goto`, so a browser crash there raised an untranslated exception instead of `RenderFailed` --
+   breaking the interface contract *and* silently defeating `render_backend.py`'s retry, which
+   matches only on `isinstance(exc, RenderFailed)`. This is the same shape of bug as 2, one call
+   later, and it shipped past the first review pass because that pass was scoped to the two bugs
+   named above rather than a fresh read of the whole file. Fixed by moving `new_page()` inside the
+   `try`, with `page = None` beforehand so the `finally` block's `page.close()` stays safe if the
+   browser itself is what failed.
+**General lesson, matching an existing one already in `handoff.md`'s Gotchas:** "check what
+`project-reviewer` dismisses, not only what it reports" (D57) held again in a new shape -- a review
+pass that is handed a specific list of things to verify can verify them perfectly and still miss a
+sibling bug one call away. All three were real, and none were things offline tests could have
+caught, since none reproduce without a real subprocess or a real (or deliberately broken) browser.
+
+### D63 — New pytest marker `local_live`, alongside `live`
+**Rejected:** reusing `live` for local-runtime-dependent tests too, and a separate whole test file
+outside the existing parity-file pattern.
+**Reasoning:** `live` is documented and understood specifically as "hits Azure, costs money, skips
+without credentials" (D56). Folding "needs Playwright's browser and the HyperFrames CLI actually
+installed" into the same marker would surprise a reader running `pytest -m live` expecting only an
+Azure bill. `local_live` copies `live`'s exact contract — deselected by default via
+`addopts = "-q -m 'not live and not local_live'"`, skips rather than fails when the dependency is
+absent — for a different kind of "real backend." `tests/test_render_backend_parity.py` follows the
+established `IMPLEMENTATIONS` fixture-parametrisation shape from `test_storage_parity.py` rather
+than becoming a bespoke file, with `"local"` wrapped in `pytest.param(..., marks=pytest.mark.local_live)`
+the same way `"blob"` is wrapped in `pytest.mark.live`.
+
+## 2026-08-23 · T13 — Config resolver & parity
+
+`config.py` closes the interface/adapter boundary: the one module still missing before flipping
+`RUNTIME_ENV` could mean anything. This session also closed two items several earlier tasks had
+left explicitly open for it -- T13's own T10 dependency gap, and D55's `aclose()` question.
+
+### D64 — `RUNTIME_ENV=local` resolves four adapters for real and raises loudly for the other two, rather than stubbing or omitting them
+**Rejected:** signature-matched `NotImplementedError` stubs for Ollama/Kokoro -- T12's exact
+pattern (`ServiceBusJobQueue`, `ContainerAppsRenderBackend`), applied symmetrically to the local
+side. Also rejected: narrowing `config.py`'s scope to skip `LLMProvider`/`TTSProvider` resolution
+entirely and only wire the four interfaces that have two real implementations.
+**Reasoning:** user decision, closing the three-way fork `tasks.md` and `handoff.md` both left for
+this task's own planning session (T13 lists T10 as a dependency; T10 is not `done` -- Ollama and
+Kokoro don't exist, D58/D59). `Storage`, `SkillRegistry`, `JobQueue` and `RenderBackend` all resolve
+for real under `RUNTIME_ENV=local` (`config._storage` et al, exercised directly by
+`tests/test_config.py::test_each_local_builder_returns_the_local_adapter`), but `build_adapters()`
+raises one `RuntimeError` naming both Ollama and Kokoro and pointing at D58/D59 -- before calling
+any of the four working local builders -- rather than assembling a partial bundle. The stub-adapter
+alternative was seriously considered and is the established precedent, but the user chose not to
+write any Ollama/Kokoro code, even raise-only, until a task actually claims T10; `_llm_provider`/
+`_tts_provider`'s local branch raises inline in `config.py` instead, so there is still no local
+implementation of either interface anywhere in the repo.
+**Open:** T10 stays `in-progress`. Whichever future task builds Ollama/Kokoro only has to fill in
+`_llm_provider`/`_tts_provider`'s local branch and delete `build_adapters()`'s upfront raise -- the
+Azure branch and the other four interfaces need no change.
+
+### D65 — `config.py` owns adapter lifetimes via `close_adapters()`, closing D55; best-effort by design
+**Rejected:** adding `aclose()` to the six interface contracts (D55's original rejection,
+reaffirmed rather than revisited), and a first-failure-stops-everything `close_adapters()`.
+**Reasoning:** D55 predicted `config.py` would be the module positioned to own the four adapters'
+off-contract `aclose()` (`AzureOpenAILLMProvider`, `BlobStorage`, `BlobSkillRegistry`,
+`PlaywrightHyperFramesRenderBackend`) once it existed -- this task is that module. `close_adapters()`
+closes whichever of the six resolved instances define `aclose()` via `getattr`, generic over which
+four so a future real `ServiceBusJobQueue`/`ContainerAppsRenderBackend` (T34/T35) growing one needs
+no edit here. `project-reviewer` caught the first version stopping at the first failing `aclose()`
+-- a real risk once T19's FastAPI lifespan is the caller, since a browser or connection-pool close
+raising during shutdown would otherwise leak every adapter ordered after it. Fixed with
+`asyncio.gather(..., return_exceptions=True)` plus a log line per failure, pinned by a regression
+test that one adapter's `aclose()` raising does not stop a later one's from running.
+**Also caught by the same review pass, fixed alongside:** `_env`'s `required` check treated a
+whitespace-only value (`AZURE_OPENAI_API_KEY="   "`) as satisfied, which would have failed later
+inside the vendor SDK with a far less clear error than `config.py`'s own; and the two
+`int(_env(...))` concurrency reads raised a bare `ValueError` instead of the module's usual named
+`RuntimeError`. Both are one-line fixes (`value.strip()`; a small `_env_int` helper), both pinned by
+new tests, and both are the same shape as D57/D62's standing lesson -- a review pass scoped to what
+it was asked to check can still turn up a sibling issue on a fresh read of the whole file.

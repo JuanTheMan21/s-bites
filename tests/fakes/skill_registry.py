@@ -2,29 +2,18 @@
 
 from collections.abc import Iterable
 
-from interfaces import SkillPack, SkillPackNotFound, SkillRegistry
+from interfaces import SkillPack, SkillPackNotFound, SkillRegistry, version_key
 from tests.fakes.failure_injection import FailureInjector
 
 
-def version_key(version: str) -> tuple[int, tuple[int, ...], str]:
-    """Sort key making "newest" mean something for both ``2.10`` and ``draft``.
-
-    All-numeric versions compare component by component as integers, so ``2.10`` is newer than
-    ``2.9`` -- which string ordering gets backwards. Anything else falls back to lexicographic
-    and sorts below every numeric version, since a named version is not a claim to be newest.
-
-    **T7 builds the real registry and must adopt this same rule.** Two different answers to
-    "which version is newest" between the fake and the disk-backed implementation is a bug that
-    only appears once a pack has more than one version, which is late.
-    """
-    parts = version.split(".")
-    if parts and all(part.isdigit() for part in parts):
-        return (1, tuple(int(part) for part in parts), "")
-    return (0, (), version)
-
-
 class FakeSkillRegistry(FailureInjector, SkillRegistry):
-    """In-memory prompt packs, keyed by name and version."""
+    """In-memory prompt packs, keyed by name and version.
+
+    ``version_key`` is imported rather than defined here, which is the whole point of T7's
+    change to it (D41): this fake and ``DiskSkillRegistry`` now answer "which version is
+    newest" out of one definition, so they cannot drift apart on a pack's second version.
+    ``tests/test_skill_registry_parity.py`` runs the same assertions over both.
+    """
 
     def __init__(self, packs: Iterable[SkillPack] = ()) -> None:
         self.packs: dict[tuple[str, str], SkillPack] = {(p.name, p.version): p for p in packs}

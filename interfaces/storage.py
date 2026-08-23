@@ -4,6 +4,38 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 
+def check_key(key: str) -> str:
+    """Return ``key`` if it is a usable storage key; raise ``ValueError`` if it is not.
+
+    Keys are ``/``-separated relative POSIX strings. The disk adapter roots them under a
+    directory, so an absolute key or a ``..`` climbs out of that root; a backslash becomes a
+    literal character in a blob name while silently working as a separator on Windows, so the
+    same key would address two different objects depending on the stack. A dict accepts all
+    three without complaint, which is why the rule cannot live only in the adapters that would
+    be harmed by breaking it.
+
+    This lives beside the contract rather than inside an implementation for the reason D43
+    settled for ``version_key``, and it is not merely a preference: ``tests/test_fakes.py`` bans
+    ``adapters`` as an import root inside fakes, so a shared module under ``adapters/`` is
+    literally unreachable from ``FakeStorage``. ``interfaces/`` is the one home every
+    implementation can reach -- and the right one on merits, since the class docstring below is
+    where "keys are relative POSIX strings" is *promised*.
+
+    Note this applies to ``exists`` too, which is not a contradiction of "never raises for a
+    missing key" (D39): malformed is not the same question as absent. Answering ``../../secrets``
+    with ``False`` reports a traversal attempt as an ordinary miss.
+    """
+    if not key:
+        raise ValueError("storage keys cannot be empty")
+    if "\\" in key:
+        raise ValueError(f"storage keys are POSIX and use '/', not '\\': {key!r}")
+    if key.startswith("/") or (len(key) > 1 and key[1] == ":"):
+        raise ValueError(f"storage keys are relative, never absolute: {key!r}")
+    if ".." in key.split("/"):
+        raise ValueError(f"storage keys cannot climb out of the root with '..': {key!r}")
+    return key
+
+
 class Storage(ABC):
     """Durable object storage addressed by key.
 

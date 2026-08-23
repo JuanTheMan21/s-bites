@@ -2,27 +2,14 @@
 
 from pathlib import Path
 
-from interfaces import ObjectNotFound, Storage
+from interfaces import ObjectNotFound, Storage, check_key
 from tests.fakes.failure_injection import FailureInjector
 
-
-def check_key(key: str) -> None:
-    """Reject a key the real adapters could not honour, at the point it is written.
-
-    Keys are ``/``-separated relative POSIX strings. The disk adapter roots them under a
-    directory, so an absolute key or a ``..`` escapes that root, and a backslash becomes a
-    literal character in a Blob name while silently working as a separator on Windows. A dict
-    accepts all three without complaint, which is exactly why the check belongs here: the bug
-    would otherwise be invisible until T11 runs the same test against a real backend.
-    """
-    if not key:
-        raise ValueError("storage keys cannot be empty")
-    if "\\" in key:
-        raise ValueError(f"storage keys are POSIX and use '/', not '\\': {key!r}")
-    if key.startswith("/") or (len(key) > 1 and key[1] == ":"):
-        raise ValueError(f"storage keys are relative, never absolute: {key!r}")
-    if ".." in key.split("/"):
-        raise ValueError(f"storage keys cannot climb out of the root with '..': {key!r}")
+# ``check_key`` was defined here through T6-T10 and is now ``interfaces.check_key``, promoted at
+# T11 so the disk and Blob adapters validate with the identical function rather than a copy of
+# it. Exactly D43's move for ``version_key``, and for the same hard reason: ``test_fakes.py``
+# bans ``adapters`` as an import root inside fakes, so ``interfaces/`` is the only home all
+# three implementations can reach. The rule this fake set (D39) is now the rule they share.
 
 
 class FakeStorage(FailureInjector, Storage):

@@ -5,6 +5,25 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
 
+def version_key(version: str) -> tuple[int, tuple[int, ...], str]:
+    """Sort key defining what "newest" means, for both ``2.10`` and ``draft``.
+
+    All-numeric versions compare component by component as integers, so ``2.10`` is newer than
+    ``2.9`` -- which string ordering gets backwards. Anything else falls back to lexicographic
+    and sorts below every numeric version, since a named version is not a claim to be newest.
+
+    This lives beside the contract rather than inside an implementation because
+    ``SkillRegistry.versions`` *promises* "newest first", and every implementation has to mean
+    the same thing by it. The in-memory fake, the disk registry and the Blob registry each sort
+    a different data structure, but they sort it with this. Two answers to "which version is
+    newest" only diverge once a pack has a second version, which is late and quiet (D41).
+    """
+    parts = version.split(".")
+    if parts and all(part.isdigit() for part in parts):
+        return (1, tuple(int(part) for part in parts), "")
+    return (0, (), version)
+
+
 class SkillPack(BaseModel):
     """A versioned pack of instructions the pipeline loads at runtime.
 
@@ -42,10 +61,11 @@ class SkillRegistry(ABC):
 
     @abstractmethod
     async def versions(self, name: str) -> list[str]:
-        """Return the available versions of ``name``, newest first.
+        """Return the available versions of ``name``, newest first per ``version_key``.
 
         Returns an empty list for an unknown pack rather than raising -- this is the
-        question you ask *before* committing to a pack.
+        question you ask *before* committing to a pack. A *malformed* name is a different
+        thing from an unknown one and implementations may reject it; absent is not invalid.
         """
 
     @abstractmethod

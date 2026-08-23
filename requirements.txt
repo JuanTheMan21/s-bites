@@ -15,6 +15,10 @@ tenacity>=9.0.0         # retry/backoff in adapters, never in core/
 azure-identity>=1.19.0
 azure-storage-blob>=12.24.0
 azure-cognitiveservices-speech>=1.41.0
+# Not optional and not transitive: azure-core's async transport is AioHttpTransport, so
+# `azure.storage.blob.aio` raises ImportError at *client construction* without this. Found the
+# hard way in T8 planning -- azure-storage-blob installs cleanly and then cannot be used async.
+aiohttp>=3.10.0
 
 # Scene authoring + rendering
 jinja2>=3.1.4

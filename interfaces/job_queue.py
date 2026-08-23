@@ -1,9 +1,28 @@
 """The contract for the work queue that sits between a request and a video."""
 
+import json
 from abc import ABC, abstractmethod
 from typing import Any
 
 from pydantic import BaseModel
+
+
+def check_serialisable(payload: dict[str, Any]) -> None:
+    """Raise ``ValueError`` if ``payload`` could not survive the trip to a real queue.
+
+    ``enqueue`` promises the payload is JSON-serialisable because Service Bus crosses a wire.
+    An in-process queue hands the very same object back, so a ``Path``, a ``datetime`` or a
+    model instance works perfectly there and fails only once a real queue is behind the
+    interface -- the local-only bug the class docstring warns about, in its most literal form.
+    Lives here rather than inside one implementation so every ``enqueue`` -- fake or real --
+    enforces the same precondition (D43/D50's move, applied to this contract).
+    """
+    try:
+        json.dumps(payload)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"job payload must be JSON-serialisable -- it crosses a wire on Service Bus: {exc}"
+        ) from exc
 
 
 class QueuedJob(BaseModel):

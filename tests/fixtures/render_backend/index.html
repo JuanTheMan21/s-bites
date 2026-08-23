@@ -1,0 +1,58 @@
+<!doctype html>
+<!--
+  Known-good fixture for adapters/local/render_backend.py's tests, copied from
+  rendering/templates/_reference_tier2.html (verified during the T4 toolchain spike) with the
+  GSAP <script> pointed at the vendored copy in this directory instead of a CDN, so tests
+  carrying this fixture need no network access.
+
+  Not a template -- note the hardcoded content and duration. T17 owns the real Jinja templates.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="./gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        margin: 0; width: 1920px; height: 1080px;
+        overflow: hidden; background: #0b1020;
+      }
+      body { font-family: "Segoe UI", Inter, sans-serif; color: #e8ecf8; }
+      .stage { padding: 120px 140px; }
+      #title { font-size: 82px; font-weight: 700; letter-spacing: -1.5px; }
+      #rule { height: 6px; width: 320px; background: #4f8cff; margin: 36px 0 56px; }
+      .bullet { font-size: 44px; line-height: 1.6; opacity: 0; }
+      .bullet span { color: #4f8cff; margin-right: 22px; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="3"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="scene" class="clip stage" data-start="0" data-duration="3" data-track-index="0">
+        <div id="title">SQL Injection</div>
+        <div id="rule"></div>
+        <div class="bullet" id="b0"><span>01</span>Untrusted input reaches the query</div>
+        <div class="bullet" id="b1"><span>02</span>The parser cannot tell data from code</div>
+        <div class="bullet" id="b2"><span>03</span>Parameterize, and the ambiguity disappears</div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      tl.from("#title", { opacity: 0, y: -40, duration: 0.6 }, 0);
+      tl.from("#rule", { scaleX: 0, transformOrigin: "left center", duration: 0.5 }, 0.4);
+      tl.to("#b0", { opacity: 1, duration: 0.4 }, 0.9);
+      tl.to("#b1", { opacity: 1, duration: 0.4 }, 1.4);
+      tl.to("#b2", { opacity: 1, duration: 0.4 }, 1.9);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

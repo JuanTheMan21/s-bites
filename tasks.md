@@ -71,7 +71,7 @@ which no fixture currently exercises. `--cov-branch` is not in `pyproject.toml` 
 passed or added. **The fakes are the larger half** — 21 async methods across six interfaces, and
 every task from T14 on is tested against them.
 
-### T7 — Runtime skill registry · `todo`
+### T7 — Runtime skill registry · `done`
 Versioned prompt packs the *pipeline* loads at runtime, so the system starts from accumulated
 knowledge rather than a cold prompt. Registry behind an interface; packs on disk locally, in Blob
 on Azure, updatable without redeploying code.
@@ -89,27 +89,38 @@ since it determines what T15 and T16 can ask for.
 
 ## Iteration 2 — Azure provisioning & adapters
 
-### T8 — Azure groundwork · `todo`
+### T8 — Azure groundwork · `done`
 Resource group, model deployment, Speech resource on the free tier, storage account, credentials
 into `.env`. **Verify non-zero TPM quota before writing any adapter code** — this is the step that
 fails silently on a mis-provisioned subscription.
 **DoD:** a raw completion and a raw TTS call both succeed from the command line.
 **Depends:** T1
 
-### T9 — Azure LLM adapter · `todo`
+### T9 — Azure LLM adapter · `done`
 Azure OpenAI behind `LLMProvider`, with strict JSON-schema structured output, retry/backoff on rate
 limits, and a concurrency bound matched to deployment throughput. All resilience lives here, never
 in `core/`.
 **DoD:** returns validated model instances; survives an induced rate-limit response.
 **Depends:** T3, T8
 
-### T10 — TTS adapters · `todo`
+### T10 — TTS adapters · `in-progress`
 Azure Speech (primary) and Kokoro (offline), both returning audio plus **measured** duration. That
 measured duration is what every downstream timing decision depends on.
 **DoD:** both satisfy `TTSProvider`; durations match `ffprobe` within tolerance.
 **Depends:** T3, T8
+**The Azure half is done.** `AzureSpeechTTS` ships with retry, both failure surfaces translated,
+and a live test asserting agreement with `ffprobe` within 50ms — observed delta is 0ms.
+**Kokoro does NOT close this via T12 after all (D59 reopens D58's plan a second time).** T12
+shipped Azure-focused by user decision — Ollama and Kokoro are both cut, pushed to a future,
+not-yet-numbered task. **This task stays `in-progress` with no task currently claiming it.** Pick
+the next local-stack task up when that priority returns; nothing about the Azure half needs
+revisiting then.
+**Duration is measured from the file, never reported by the SDK (D54).** Both adapters call
+`adapters/audio_duration.wav_duration_ms`, which needs a **RIFF PCM WAV** — Kokoro emits float
+arrays, so whatever writes them must produce PCM. If it cannot, widen `audio_duration.py`; do not
+add a second measurement path.
 
-### T11 — Storage adapters · `todo`
+### T11 — Storage adapters · `done`
 Blob and local disk behind `Storage`, plus the Blob-backed skill registry from T7.
 **DoD:** identical behavior for put/get/url across both; skill packs load from Blob.
 **Depends:** T3, T7, T8
@@ -119,19 +130,57 @@ absolute key escapes the disk adapter's root once there is a real filesystem beh
 that, or if a real backend legitimately accepts something the fake rejects, change the fake and
 record why. Note it applies to `exists` too, which is not a contradiction of "never raises for a
 missing key": malformed is not the same as absent.
+**T7 added two more rules the Blob registry must match, and reusable code to match them with.**
+`adapters/skill_pack_format.py` is backend-agnostic — the Blob registry parses the identical bytes
+with `parse_pack` and validates names with the same `check_pack_name`/`check_version`, so this is
+a fill-in rather than a reimplementation. The rules: a malformed name raises `ValueError` even
+from `versions()`, which the contract otherwise says never raises (D45); and a name may not end
+in `.` (D46) — that one is Windows-specific in origin but the aliasing it caused would be a blob
+naming bug too. Add the new registry to `REGISTRIES` in `tests/test_skill_registry_parity.py`;
+the assertions there already exist and should pass unchanged.
 
-### T12 — Local adapters & Azure stubs · `todo`
-Ollama, the asyncio-pool queue, the Playwright + HyperFrames render backend. Service Bus and
-Container Apps get signature-matched stubs that raise clearly — stubs are what make the interface
-boundary reviewable rather than aspirational.
-**DoD:** local stack complete; stubs match signatures exactly.
-**Depends:** T3
+### T12 — Local render backend & job queue; Azure stubs · `done`
+Playwright + the HyperFrames CLI behind `RenderBackend` (one persistent browser drives Tier 0/1
+stills, the CLI drives full renders and the lint gate), plus an in-process asyncio `JobQueue`.
+Service Bus and Container Apps get signature-matched stubs that raise clearly — stubs are what
+make the interface boundary reviewable rather than aspirational.
+**DoD:** `RenderBackend` and `JobQueue` local adapters complete; stubs match signatures exactly.
+**Depends:** T3 — met.
+**Rescoped during planning, by user decision (D59): Ollama and Kokoro are cut from this task**,
+pushed to a future, not-yet-numbered task — staying Azure-focused for now rather than reopening
+Kokoro's Windows risk (D6, D58) a second time. Only two local adapters shipped here, not four.
+**`RenderBackend`'s design is genuinely two implementations in one class (D60):** `capture`
+(Tier 0/1) drives Playwright directly, one browser kept alive across calls; `render`/`lint`
+(Tier 2, and the validation gate) shell to `npx hyperframes`. Not a local-vs-Azure split — the
+same code is what T35's Container Apps job runs inside a container later.
+**A real, load-bearing assumption for T17 to confirm (also D60):** the HyperFrames CLI's `lint`
+has no way to target one file — it always validates a whole project directory and hardcodes
+`index.html` as the entry point. This adapter assumes each composition lives alone in its own
+directory named `index.html`, and raises loudly rather than silently misbehaving if that's not
+true. Check this the moment T17 picks a real directory layout for generated compositions.
+**D47's open item did NOT get measured this task, despite being live now.** The asyncio `JobQueue`
+built here is the first thing capable of running jobs concurrently on one loop — but the actual
+measurement of whether `DiskStorage`/`DiskSkillRegistry`'s synchronous I/O stalls concurrent jobs
+never happened. **Still open, carried forward** — do it before or during whichever task first runs
+real concurrent jobs against local storage (likely T14 or T16, not necessarily T13).
+**Three bugs found by review and fixed before checkpoint (D61, D62)** — worth reading before
+touching `adapters/local/playwright_capture.py` or `hyperframes_cli.py` again: GSAP's `.seek()`
+must have its return value discarded in `page.evaluate` (implicit return hangs the whole call), a
+timed-out `hyperframes` subprocess must have its whole process tree killed on Windows or it leaks
+node/chrome-headless-shell children, and `page = await browser.new_page()` must be *inside* the
+try block that translates exceptions to `RenderFailed`, not before it.
 
-### T13 — Config resolver & parity · `todo`
+### T13 — Config resolver & parity · `done`
 `config.py` — the single module permitted to name concrete classes — plus parity tests proving both
 implementations of each interface agree on signature and semantics.
-**DoD:** flipping `RUNTIME_ENV` swaps every adapter with no change in `core/`.
-**Depends:** T9, T10, T11, T12
+**DoD:** flipping `RUNTIME_ENV` swaps every adapter with no change in `core/` — met for `azure`.
+**Depends:** T9, T11, T12 — met. **T10 is listed as a dependency and is still not `done`** (see its
+entry): Ollama and Kokoro don't exist yet, and there's no task currently building them. **Decided
+in T13's own planning (D64), by user choice:** `RUNTIME_ENV=local` resolves `Storage`,
+`SkillRegistry`, `JobQueue` and `RenderBackend` for real, and `build_adapters()` raises a clear,
+named `RuntimeError` for `LLMProvider`/`TTSProvider` under `local` rather than adding stub adapter
+classes or narrowing this task's scope. Whichever future task closes T10 only has to fill in
+`config._llm_provider`/`_tts_provider`'s local branch and drop `build_adapters()`'s upfront raise.
 
 ---
 
@@ -148,6 +197,11 @@ Topic to segments to narration, driven by the runtime skill packs. Produces roug
 a 7-minute target.
 **DoD:** structured output validates on every segment; skill packs demonstrably change behavior.
 **Depends:** T14
+**T7 shipped the packs this node loads.** Four exist, all at `1.0`: `outline` and `scripting` are
+this task's, `scene-authoring` is T16's, and `house-style` is interpolated **alongside** each of
+the other three rather than used alone. Load them through `SkillRegistry`, never by reading
+`runtime_skills/`. They have never been sent to a model — the DoD's "demonstrably change behavior"
+is the first real test of them, so expect to write a `1.1` of at least one.
 **T4 built the schemas this node fills.** Ask for `core.outline_schema.Outline` (the list is wrapped
 in an object because strict mode needs an object root), and take the segment count from
 `VideoJob.segment_count` — a literal 15 here is exactly what the T4 flag was written to prevent.
@@ -157,6 +211,10 @@ The ordering-critical stretch: narrate, measure, assign tiers against the real d
 scene slots. Scene authoring takes measured duration as a required input so it cannot run early.
 **DoD:** timing attributes derive only from measured audio; tier spread covers all three tiers.
 **Depends:** T15
+**The `scene-authoring` pack defers item counts to the schema field descriptions** and governs only
+how much text goes in each item, keyed off measured duration. That split was made in T7 review
+because the two contradicted each other, and strict mode drops length constraints so neither side
+is actually enforced — if you edit the pack, do not reintroduce a count.
 **Scene authoring goes through `core.slot_schemas.slot_schema_for(intent)`** — it returns the schema
 class to hand `LLMProvider.generate`, and the validated payload is stored on `Segment.slots` as a
 dict (D29). Validate it back through the same function rather than trusting the dict.

@@ -17,11 +17,11 @@ from interfaces.errors import (
     SkillPackNotFound,
     StructuredOutputError,
 )
-from interfaces.job_queue import JobQueue, QueuedJob
+from interfaces.job_queue import JobQueue, QueuedJob, check_serialisable
 from interfaces.llm_provider import LLMProvider
 from interfaces.render_backend import RenderBackend
-from interfaces.skill_registry import SkillPack, SkillRegistry
-from interfaces.storage import Storage
+from interfaces.skill_registry import SkillPack, SkillRegistry, version_key
+from interfaces.storage import Storage, check_key
 from interfaces.tts_provider import TTSProvider
 
 __all__ = [
@@ -42,4 +42,7 @@ __all__ = [
     "Storage",
     "StructuredOutputError",
     "TTSProvider",
+    "check_key",
+    "check_serialisable",
+    "version_key",
 ]
