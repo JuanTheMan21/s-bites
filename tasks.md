@@ -186,11 +186,23 @@ classes or narrowing this task's scope. Whichever future task closes T10 only ha
 
 ## Iteration 3 — Pipeline & rendering
 
-### T14 — LangGraph skeleton · `todo`
+### T14 — LangGraph skeleton · `done`
 Graph state, checkpointing, per-segment fan-out, and resume-after-failure. Scoped strictly to
 `core/graph/`; nodes call interfaces like everything else.
-**DoD:** a killed run resumes without repeating completed segments.
-**Depends:** T6, T13
+**DoD:** a killed run resumes without repeating completed segments — met, pinned by
+`tests/test_graph_pipeline.py::test_a_killed_run_resumes_without_repeating_completed_segments`
+against a real file-backed `AsyncSqliteSaver` (D68).
+**Depends:** T6, T13 — met.
+**`plan_segments` is a deliberate placeholder** (D70) — deterministic segments, no LLM call. T15
+replaces its *body*, not the graph shape in `core/graph/pipeline.py`.
+**D24's `StructuredOutputError` cap is only half-closed (D67).** `core/graph/retry_policy.py`
+gives it its own node-level bounded `RetryPolicy`, but the cross-*requeue* half D24 asked for
+(via `QueuedJob.attempt`) is structurally impossible from inside `core/graph/` — `GraphContext`
+deliberately excludes `JobQueue` (D66). Whichever future task builds the runner that calls
+`JobQueue.fail(..., requeue=True)` owns closing this for real.
+**D47's disk-concurrency question is measured, not carried forward again** — see D69.
+`scripts/measure_segment_concurrency.py` is the reusable script; re-run once T18 moves real
+rendered artifacts (not small WAVs) through `Storage`.
 
 ### T15 — Outline & scripting nodes · `todo`
 Topic to segments to narration, driven by the runtime skill packs. Produces roughly 15 segments for

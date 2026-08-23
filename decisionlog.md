@@ -840,3 +840,114 @@ inside the vendor SDK with a far less clear error than `config.py`'s own; and th
 `RuntimeError`. Both are one-line fixes (`value.strip()`; a small `_env_int` helper), both pinned by
 new tests, and both are the same shape as D57/D62's standing lesson -- a review pass scoped to what
 it was asked to check can still turn up a sibling issue on a fresh read of the whole file.
+
+## 2026-08-23 · T14 — LangGraph skeleton
+
+The first code to actually drive the six interfaces as a pipeline. `core/graph/` now holds state,
+a real `interfaces/errors.py`-aware retry classifier, three placeholder-ish nodes, and the
+`Send`-based fan-out/checkpoint/resume mechanics every later pipeline task hangs off. Two
+`project-reviewer` passes this session, both finding real issues in the same file -- D67 records
+both.
+
+### D66 — `GraphContext` is its own type, not `config.Adapters`, and drops `JobQueue`
+**Rejected:** reusing `config.Adapters` directly as the graph's `context_schema`.
+**Reasoning:** `config.py` is allowed to know about `core/graph/`; the reverse would tie `core/`
+to the concrete resolver module for no functional gain, since nothing here needs six adapters
+bound to five. `GraphContext` (`core/graph/context.py`) is typed only against `interfaces/` ABCs
+plus a `working_dir: Path`. `queue` is deliberately absent -- driving `JobQueue` (claim a job,
+complete/fail it) wraps a whole graph invocation from the outside; no node inside one run touches
+it, and no runner exists yet to do that wrapping (T18's CLI is the likely first one). Whoever
+builds that runner constructs a `GraphContext` from `config.build_adapters()`'s five matching
+fields -- a few lines, not a redesign.
+
+### D67 — D24's "retry, but bounded" cap is a per-error-type `RetryPolicy` pair, not `QueuedJob.attempt` -- and two review passes each found the first version's own claims about it wrong
+**Rejected (first pass, shipped then corrected same session):** one shared
+`RetryPolicy(max_attempts=3)` applied uniformly to every retryable error, justified by a claim in
+the module docstring that `RetryPolicy` only offers one `max_attempts` per node. **That claim was
+false** -- `project-reviewer` checked it against the installed `langgraph==1.2.11` source
+(`langgraph/pregel/_retry.py`) rather than taking the docstring's own reasoning at face value:
+`add_node`'s `retry_policy` accepts a `Sequence[RetryPolicy]`, and the runner picks the *first*
+policy whose `retry_on` matches the raised exception and applies *that policy's own*
+`max_attempts`. `core/graph/retry_policy.py` now returns `build_retry_policies()` -- two policies:
+`RateLimited`/`ProviderUnavailable`/`RenderFailed` at a looser cap (transient, may genuinely need
+a few tries), `StructuredOutputError` at a tighter one (sampling noise gets a couple of tries; a
+schema the model consistently can't satisfy gives up sooner). `ProviderMisconfigured`,
+`ObjectNotFound`/`SkillPackNotFound`, `CompositionInvalid` still match neither policy and
+propagate on the first attempt. Both policies and the full classification are unit-tested in
+`tests/test_retry_policy.py`, including that every retryable class matches exactly one policy
+(not zero, not two).
+
+**A second, independent fresh review pass on the corrected diff found a further wrinkle in the
+same fix, also corrected same session.** The two-policy split's own docstring claimed the caps
+apply "independently per exception type" -- checked again against the installed LangGraph source
+and confirmed also wrong: the runner keeps one shared `attempts` counter for the whole node
+invocation, incremented on every failure regardless of which policy matched, and only checks that
+shared counter against whichever policy matched the current exception. Reproduced empirically: a
+node that fails once with a transient-classified error and then only with `StructuredOutputError`
+gets just one further try at the bounded error, not the two `structured_output_max_attempts=2`
+promises in isolation -- a prior failure of a different family silently eats into a later
+family's budget. `retry_policy.py`'s docstring now states this precisely instead of overclaiming
+isolation, names it accepted rather than solved (no node in T14 itself can raise both families in
+one invocation -- `synthesize_segment` only calls `TTSProvider`/`Storage`), and tells a future
+mixed-failure node (T15's outline/scripting node, the first that can plausibly raise both) what to
+do instead of relying on this split: wrap the `LLMProvider.generate` call in its own explicit,
+locally-counted retry loop rather than depending on the graph-level `RetryPolicy` sequence for
+that isolation. Pinned by
+`tests/test_retry_policy.py::test_a_prior_transient_failure_eats_into_the_bounded_policys_own_budget`.
+
+**General lesson, matching D57/D62's standing one, in a third shape now:** a review pass scoped to
+verifying one named fix wrote a second bug into the same explanation it used to justify the fix --
+worth a fresh, independent read after any correction this size, not just a recheck of what was
+named.
+
+**Still genuinely open, not closed by either fix:** D24 literally said to cap
+`StructuredOutputError` "using `QueuedJob.attempt`" -- a counter that survives a *requeue*, not
+just a node-level counter that survives a *checkpoint resume*. Verified empirically that
+LangGraph's per-node attempt counter resets on every fresh `ainvoke` against the same thread, so a
+job requeued by a future runner after exhausting the cap above gets the full cap again,
+indefinitely -- the exact runaway-cost scenario D24 named T14 to prevent, not yet actually
+prevented. `GraphContext` deliberately excludes `JobQueue` (D66), so nothing in `core/graph/` can
+see `QueuedJob.attempt` to enforce a cross-requeue ceiling even in principle. **Whichever future
+task builds the runner that calls `JobQueue.fail(..., requeue=True)` owns closing this for real**
+-- it should refuse to requeue past some `QueuedJob.attempt` ceiling before this module's per-run
+cap is reached a second time.
+
+### D68 — Resume relies on LangGraph's own pending-writes durability, verified empirically
+**Verified, not assumed:** against the installed `langgraph==1.2.11` /
+`langgraph-checkpoint-sqlite==3.1.1` (newer than the `>=0.2.60` floor `requirements.txt` pins from
+T1) -- a spike confirmed that with a real file-backed `AsyncSqliteSaver` and `Send`-based fan-out,
+one segment's task raising an exception its `RetryPolicy` doesn't cover causes `ainvoke` to raise,
+but sibling segments' already-completed writes are checkpointed and are NOT recomputed when the
+same `thread_id` is invoked again via `ainvoke(None, config, context=..., durability="sync")`.
+`tests/test_graph_pipeline.py::test_a_killed_run_resumes_without_repeating_completed_segments`
+pins this: injects `ProviderMisconfigured` (never-retried, so it reliably escapes to `ainvoke`
+rather than being absorbed by the node's own policy) via `FakeTTSProvider.fail_next`, then
+reconnects a fresh saver/graph against the same sqlite file and thread id. `durability="sync"` is
+passed explicitly on every `ainvoke` rather than relying on whatever the library's default is, so
+the crash simulation stays meaningful regardless of that default.
+**Gotcha found along the way:** `FakeTTSProvider.synthesize` calls `self._maybe_fail("synthesize")`
+*before* appending to `self.calls`, so a failed call is never logged. The resume test's assertions
+account for this (`calls_before_resume == segment_count - 1`, final
+`len(fake_tts.calls) == segment_count`, not `+1`) -- worth remembering if a future test on this
+fake assumes failed calls are logged.
+
+### D69 — D47's disk-I/O-under-concurrency question, measured
+**Measured:** `scripts/measure_segment_concurrency.py` runs 15 segments through the real graph
+against real `DiskStorage` (fake TTS, to isolate disk contention from network/synthesis time).
+Observed **0.417s total, 27.8ms/segment**, run via `python -m scripts.measure_segment_concurrency`.
+**Reasoning:** in this skeleton, every step inside a segment's task (`FakeTTSProvider.synthesize`,
+`DiskStorage.put_file`) is synchronous with no internal `await`, so concurrent `Send` tasks don't
+actually interleave I/O -- they run back-to-back within the event loop, same as a plain loop
+would. That confirms the shape of D47's concern rather than disproving it: synchronous disk I/O
+*does* serialize under this adapter's current implementation. What the measurement adds is scale:
+at narration-file size (a few KB-MB of WAV), the absolute cost is small enough not to matter
+(order of tens of ms per segment). **Open, carried forward:** this may look different once T18
+pushes rendered MP4 segments (tens of MB each) through the same `Storage.put_file` pattern -- worth
+re-measuring there rather than assuming today's number holds.
+
+### D70 — `plan_segments` is a deliberate placeholder T15 replaces, not redesigns
+`plan_segments` (`core/graph/nodes/plan.py`) builds deterministic placeholder segments (fixed
+`VisualIntent.TITLE_CARD`/`Importance.NORMAL`, a templated narration sentence) rather than calling
+an `LLMProvider` -- no outline schema/prompt exists until T15. T15's job is to replace this
+function's *body* with a real `LLMProvider.generate` call against `core.outline_schema.Outline`;
+the graph shape (this node feeding the `Send` fan-out) does not need to change.
