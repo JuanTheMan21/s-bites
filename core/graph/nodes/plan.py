@@ -1,31 +1,32 @@
-"""Stands in for T15's real outline+script node. Pure -- no interface call -- because narration
-worth calling an ``LLMProvider`` for doesn't exist until T15 writes it. What this node fixes is
-the graph *shape*: something before the fan-out has to turn a ``VideoJob`` into a list of
-segments. T15 replaces this function's body; the node it plugs into and the fan-out reading its
-output don't change.
+"""The graph node that turns a ``VideoJob`` into narrated segments.
+
+Still one node, at the same position T14 left it (D70): ``plan_segments`` still runs once,
+before the ``Send`` fan-out, with the same return shape (``{"segments": {index: Segment}}``).
+What changed is its body -- it now runs one real ``LLMProvider`` call for the outline plus one
+more per segment for its narration, instead of building a deterministic placeholder.
+``core/graph/nodes/outline.py`` and ``.../scripting.py`` hold each call's own prompt-building and
+schema; this module just sequences them.
 """
 
+from langgraph.runtime import Runtime
+
+from core.graph.context import GraphContext
+from core.graph.nodes.outline import generate_outline
+from core.graph.nodes.scripting import write_narration
 from core.graph.state import GraphState
-from core.models import Importance, Segment, VisualIntent
 
 
-async def plan_segments(state: GraphState) -> dict:
-    """Deterministic placeholder segments, one per ``VideoJob.segment_count``.
+async def plan_segments(state: GraphState, runtime: Runtime[GraphContext]) -> dict:
+    """Outline the job, then narrate every segment the outline produced.
 
-    Narration is a fixed placeholder sentence rather than anything derived from the topic --
-    there is no scripting node yet to derive it from, and inventing prose here would only have
-    to be thrown away at T15.
+    Both calls happen inside this one node invocation rather than as separate graph nodes, so a
+    transient failure anywhere in it retries the whole thing under the node-level ``RetryPolicy``
+    already attached in ``pipeline.py`` -- redoing an outline call on retry is wasted tokens, not
+    a correctness risk, unlike redoing TTS.
     """
+    context = runtime.context
     job = state["job"]
-    segments = {
-        index: Segment(
-            index=index,
-            title=f"Segment {index}",
-            summary=f"Placeholder segment {index} of {job.topic!r}.",
-            visual_intent=VisualIntent.TITLE_CARD,
-            importance=Importance.NORMAL,
-            narration=f"This is placeholder narration for segment {index}.",
-        )
-        for index in range(job.segment_count)
-    }
+
+    segments = await generate_outline(context.llm, context.skills, job)
+    segments = await write_narration(context.llm, context.skills, segments)
     return {"segments": segments}

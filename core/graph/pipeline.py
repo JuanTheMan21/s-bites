@@ -1,6 +1,11 @@
 """Wires the nodes into a graph: ``plan`` -> fan out one ``Send`` per segment -> ``synthesize`` ->
-``finalize``. The only file in the repo permitted to build a ``StateGraph`` -- everything else
-under ``core/graph/`` supplies state, context, nodes, or policy for this to assemble.
+``assign_tiers`` -> fan out again -> ``author_scene`` -> ``finalize``. The only file in the repo
+permitted to build a ``StateGraph`` -- everything else under ``core/graph/`` supplies state,
+context, nodes, or policy for this to assemble.
+
+The two fan-outs are separated by a join on purpose, and the join is what enforces Invariant 1's
+ordering structurally: ``assign_tiers`` needs *every* segment's measured duration, so it cannot run
+until the TTS fan-out converges, and ``author_scene`` therefore cannot run until tiers exist.
 """
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -9,8 +14,14 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from core.graph.context import GraphContext
-from core.graph.nodes import finalize, plan_segments, synthesize_segment
-from core.graph.retry_policy import build_retry_policies
+from core.graph.nodes import (
+    assign_tiers,
+    author_scene,
+    finalize,
+    plan_segments,
+    synthesize_segment,
+)
+from core.graph.retry_policy import build_retry_policies, build_transient_retry_policy
 from core.graph.state import GraphState, SegmentTask
 
 
@@ -24,23 +35,48 @@ def _fan_out_to_segments(state: GraphState) -> list[Send]:
     ]
 
 
+def _fan_out_to_scene_authoring(state: GraphState) -> list[Send]:
+    """The same shape again, after ``assign_tiers``: one ``author_scene`` task per segment, each
+    carrying the measured *and* tiered segment the join node just wrote back."""
+    return [
+        Send("author_scene", SegmentTask(job_id=state["job"].job_id, segment=segment))
+        for segment in state["segments"].values()
+    ]
+
+
 def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> CompiledStateGraph:
     """Compile the skeleton graph. ``checkpointer`` is required for resume to mean anything --
     without one, LangGraph keeps no state between ``ainvoke`` calls at all."""
     builder = StateGraph(GraphState, context_schema=GraphContext)
 
-    builder.add_node("plan_segments", plan_segments)
+    # Not build_retry_policies(): plan_segments isolates its own StructuredOutputError retries
+    # internally (core/graph/nodes/structured_retry.py) -- attaching the bounded policy here too
+    # would let an exhausted local retry re-trigger a whole-node retry for the same error.
+    builder.add_node("plan_segments", plan_segments, retry_policy=build_transient_retry_policy())
     builder.add_node(
         "synthesize_segment",
         synthesize_segment,
         input_schema=SegmentTask,
         retry_policy=build_retry_policies(),
     )
+    # No retry policy: assign_tiers reaches nothing outside the process, so there is no transient
+    # failure for one to absorb. Its only error is an unmeasured segment, which a retry cannot fix.
+    builder.add_node("assign_tiers", assign_tiers)
+    # Transient-only, for the same reason plan_segments is -- author_scene's LLM call carries its
+    # own StructuredOutputError budget (D73).
+    builder.add_node(
+        "author_scene",
+        author_scene,
+        input_schema=SegmentTask,
+        retry_policy=build_transient_retry_policy(),
+    )
     builder.add_node("finalize", finalize)
 
     builder.add_edge(START, "plan_segments")
     builder.add_conditional_edges("plan_segments", _fan_out_to_segments, ["synthesize_segment"])
-    builder.add_edge("synthesize_segment", "finalize")
+    builder.add_edge("synthesize_segment", "assign_tiers")
+    builder.add_conditional_edges("assign_tiers", _fan_out_to_scene_authoring, ["author_scene"])
+    builder.add_edge("author_scene", "finalize")
     builder.add_edge("finalize", END)
 
     return builder.compile(checkpointer=checkpointer)

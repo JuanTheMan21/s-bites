@@ -951,3 +951,210 @@ re-measuring there rather than assuming today's number holds.
 an `LLMProvider` -- no outline schema/prompt exists until T15. T15's job is to replace this
 function's *body* with a real `LLMProvider.generate` call against `core.outline_schema.Outline`;
 the graph shape (this node feeding the `Send` fan-out) does not need to change.
+
+## 2026-08-24 · T15 — Outline & scripting nodes
+
+The first task to make a real, non-placeholder `LLMProvider` call from inside the graph. Scoped
+down from the user's initial "T15,T16 together" ask, and the session that found -- and fixed -- a
+new instance of D67's shared-retry-counter risk in the wild, in a shape severe enough to redo an
+entire node's work silently rather than fail loudly.
+
+### D71 — Outline and scripting stay one graph node's body, in two code modules
+**Rejected:** two sequential graph nodes (`plan_segments` for the outline, a new node for
+scripting) feeding the existing `Send` fan-out, which is one reading of the task's own title,
+"Outline & scripting **nodes**" (plural).
+**Reasoning:** T14's handoff already pinned `plan_segments`'s contract for this exact task --
+"same node name, same position in the graph, same return shape... the graph shape doesn't need to
+change." A second graph node would also have required reasoning through whether LangGraph's
+`Send`-based fan-out composes safely when its source is itself downstream of another node's
+completion, in a resumability-sensitive area this project has already spent real effort getting
+right (D68). "Nodes" plural is honoured at the code level instead: `core/graph/nodes/outline.py`
+(`generate_outline`) and `.../scripting.py` (`write_narration`) are two small, single-responsibility
+modules, both called in sequence from `plan.py::plan_segments`, which remains the graph's one node.
+
+### D72 — T16 is not built this session, despite the user's initial request to combine it with T15
+**Rejected:** planning and building T15+T16 together, as literally asked.
+**Reasoning:** raised to the user directly, with reasoning, before planning began; they agreed to
+split. T16 adds its own materially separate surface on top of T15's already-nontrivial first real
+LLM integration -- wiring `core/tier_resolver.py` into the graph, a new scene-authoring LLM node,
+and revisiting `FRAME_BUDGET` per D32 -- and this project's own history (D62, D67) already showed
+that even a single node's diff can need a second independent review pass to catch a real bug.
+That held again in this exact session (D73). T16 now starts against a finished, real T15 instead
+of a planned one.
+
+### D73 — `plan_segments` must register with a transient-only `RetryPolicy`; found and fixed by review, then independently re-verified against LangGraph's own source
+**Rejected:** the version that shipped first, which attached `build_retry_policies()` (both the
+transient policy and the `StructuredOutputError`-bounded one) to `plan_segments`'s node
+registration, mirroring how `synthesize_segment` is already registered.
+**Reasoning:** this node makes up to `1 + segment_count` (~16) sequential `LLMProvider.generate`
+calls in one invocation -- T14's nodes made one interface call each -- which is exactly the
+condition `retry_policy.py`'s own docstring (D67) names as the point its shared-attempt-counter
+gap stops being inert: a transient failure on one call could silently spend budget a later call's
+`StructuredOutputError` cap gets checked against. `core/graph/nodes/structured_retry.py::
+generate_with_bounded_retries` was added to close that -- a small, local, per-call retry loop
+giving each individual `generate` call its own independent `StructuredOutputError` budget, letting
+every other exception propagate immediately to the node-level policy.
+
+That fix was necessary but, as first wired, not sufficient. The node-level `RetryPolicy` still
+matched `StructuredOutputError` too, so once a call's *local* budget was exhausted and it
+re-raised, LangGraph's node-level retry mechanism caught the same exception and silently retried
+the **entire node** -- redoing the outline call and every already-narrated segment to reattempt a
+call D24 already says a retry can never fix. Worse than merely wasteful: in the common case (no
+further armed failures), the redo would quietly succeed, masking the fact that the "isolated"
+retry budget was never actually isolated -- this would have shipped as apparently-correct
+behaviour until a schema failure persistent enough to survive a whole-node redo too. Caught by a
+`project-reviewer` pass, which reproduced it concretely against the real code (8 raw LLM calls for
+a scenario that should have needed at most 4, and the queued failure silently consumed by a redo
+rather than raised).
+
+**Fix:** `core/graph/retry_policy.py::build_transient_retry_policy()` -- the transient half of
+`build_retry_policies()` alone -- and `plan_segments` now registers with that instead. A second,
+independent review pass verified the fix directly against the installed `langgraph==1.2.11`
+source (`pregel/_retry.py`), not just the module's own docstring claims, per this project's
+standing D57/D62/D67 lesson that a confident retry-semantics claim in a docstring is a claim, not
+a fact, until checked against the library itself. Manually reproduced both ways: the old wiring
+silently redoes the node and reports success; the fixed wiring raises `StructuredOutputError` for
+good, pinned by
+`tests/test_plan_segments_retry.py::test_a_persistent_structured_output_error_propagates_without_redoing_the_whole_node`.
+**Rule for future nodes, recorded in both functions' docstrings:** any node using
+`structured_retry.py`'s local isolation must register with `build_transient_retry_policy()`, never
+`build_retry_policies()`, or the isolation is defeated in a different, harder-to-notice way than
+not having it at all.
+
+### D74 — The outline call's segment count is a target, not an enforced invariant
+**Rejected:** raising `StructuredOutputError` from `generate_outline` if the model returns a
+different number of segments than `job.segment_count` asked for.
+**Reasoning:** Azure strict mode has no length keyword (`minItems`/`maxItems` are unsupported per
+D26), so there is no way to make the model structurally honour an exact count -- only ask for one
+in the prompt. Nothing downstream requires an exact match either: the `Send` fan-out and
+`core/tier_resolver.py` both operate over however many segments actually exist. Enforcing it would
+invent a new failure/retry mode over a property the DoD, and the rest of the pipeline, do not
+actually depend on.
+
+### D75 — The `outline` and `scripting` packs work at `1.0`; no `1.1` was needed
+**Verified, not decided.** T7 and T14's handoff both flagged that these packs had never been sent
+to a real model and might need a `1.1` once they were. The live test
+(`tests/test_live_plan_segments.py`) and a manual run against the real Azure deployment for a
+"SQL injection" topic both came back clean on inspection: short declarative sentences, no
+markdown, correct second/third-person voice per house-style, narration in the 63-67 word range
+against the scripting pack's ~70-80-word target (under, not padded -- which the pack itself
+prefers). No pack edit was made this session. Left open for a future session if a different topic
+or model version surfaces a real gap; not treated as a settled "never needs revisiting."
+
+## 2026-08-24 · T16 — TTS, tiering & scene authoring
+
+The task that finally connected `core/tier_resolver.py` and `core/frame_budget.py` to the graph --
+both were built whole at T5/T6 and had never been called from anything -- and the task where D32's
+suspicion about `FRAME_BUDGET` was replaced with a measurement that turned out worse than the
+suspicion.
+
+### D76 — Scene authoring is a second `Send` fan-out after a tiering join, not part of `synthesize_segment`
+**Rejected:** folding scene authoring into `synthesize_segment`'s existing per-segment task (one
+task doing TTS then slots), and a sequential join node looping over segments the way
+`write_narration` does inside `plan_segments`.
+**Reasoning:** the first was rejected on ordering and on cost. Tier assignment needs *every*
+segment's measured duration, so it can only be a join after the fan-out converges -- which means
+folding scene authoring into that same fan-out puts slots *before* tiers, inverting the order
+`tasks.md` states ("assign tiers against real measured durations, then fill scene slots"). It also
+puts a billed Speech synthesis and an LLM call in one node, so a whole-node retry of a failed scene
+call re-synthesises audio that was already correct. The sequential join was rejected for latency
+and blast radius: ~15 serial calls, and a transient failure retries the node, redoing every scene
+already authored. The second fan-out reuses machinery T14 already proved durable and gets
+per-segment resume for free -- verified, not assumed, by
+`tests/test_graph_resume.py::test_a_kill_during_scene_authoring_does_not_repeat_narration`, which
+confirms a kill inside the second fan-out re-authors exactly one segment and makes zero further
+TTS calls.
+
+### D77 — `frame_budget` and `fps` live on `GraphContext`, not on `GraphState`
+**Rejected:** carrying them as state channels alongside `job` and `segments`.
+**Reasoning:** `core/frame_budget.py`'s docstring already anticipated an edge-read: the budget and
+the frame rate arrive as parameters precisely so neither it nor the resolver learns that
+`FRAME_BUDGET` and `FPS` exist. Context is the edge. It is also re-supplied on every invocation,
+where state is checkpointed -- so a resumed run picks up the current configuration rather than
+being pinned to whatever the run first started with, which matters specifically because this is
+tuning configuration someone changes *between* runs. `TierPlan` was likewise kept out of state:
+`Segment.tier` is what downstream consumers need, and demotion detail exists for `/tiers` to
+report, which builds its own plan directly.
+
+### D78 — `FRAME_BUDGET` is 1400, and D32 understated the problem
+**Measured, not decided.** D32 predicted that at 600 frames Tier 2 would buy *shortness* rather
+than importance, because 600 frames at 24fps is 25s of animation against a 28s average segment.
+Against real measured narration the answer was worse: **600 bought nothing at all.** A live run
+(`scripts/tier_dry_run.py`, "teach me about SQL injection") produced 15 segments measured at a
+uniform 19-29 seconds -- there are no short segments in real narration, because the scripting pack
+narrates a title card at the same length as everything else. Spread at 600 was **T0=0 T1=15 T2=0**,
+using 120 of 600 frames: every segment reveal-tiered, nothing animated, 480 frames unspent because
+no single segment could afford the ~600-frame step up to Tier 2.
+
+Measured curve at those real durations: 900 buys 1 animated scene, **1400 buys 2**, 2000 buys 3 --
+each step roughly 600 frames apart, because that is what a 25-second animation costs. 1400 was
+chosen as the smallest budget meeting D9's original "2-3 Tier-2 scenes" floor, at ~8-13 minutes of
+rendering against D16's measured 1.7-2.7 frames/sec. 2000 was rejected: a third animated scene
+costs another ~6 minutes of render for a seven-minute video.
+**Rejected:** tuning against `tests/segment_examples.py`, which T5 wrote by hand and which contains
+a 9-second title card and a 12-second stat callout. Those short segments are what made a 2/11/2
+spread look achievable at 600. Real narration has no such segments, and T16's own task description
+said not to tune against a fixture -- this is why.
+
+### D79 — Tier 0 is a rendering floor, not a target, and the DoD's "all three tiers" is met for two
+**Decided by the user, on measured evidence.** The DoD asks that "tier spread covers all three
+tiers." At real durations no workable budget produces that. A reveal costs 8 frames, so any budget
+large enough to animate anything is far more than enough to reveal *everything* -- Tier 0 and Tier
+2 are effectively mutually exclusive at these durations. Tier 0 is reachable only when a segment's
+*ideal* is `STATIC`, i.e. when the outline rates it `ASIDE`, and the model rated nothing `ASIDE` in
+either live run.
+
+**Rejected:** rebalancing `IDEAL_TIER` so `MINOR` maps to `STATIC`, which was measured to give
+T0=2 T1=11 T2=2 deterministically and would have met the DoD as written. Rejected because Tier 0's
+purpose, per `core/tier_resolver.py` and the `scene-templates` skill, is that *every* intent must
+degrade to a single static frame since the budget can put any segment there -- it exists so a
+segment always **can** render, not so that one **must**. An explainer whose budget is adequate
+enough that nothing falls to Tier 0 is working, not broken. The DoD item is over-specified;
+recorded as met for Tier 1 and Tier 2 rather than quietly claimed in full.
+**Consequence for T17:** every template still needs its Tier 0 form. Tier 0 being empty on a
+typical run makes it *less* likely to be exercised, not less necessary -- it is the degradation
+path, and the resolver will use it the moment a budget is tight or a segment is rated `ASIDE`.
+
+### D80 — An `outline` pack `1.1` was written, measured, and deleted rather than shipped
+**Rejected:** shipping `runtime_skills/outline/1.1.md`, which rewrote the importance section after
+the first live run showed the model rating 9 of 15 segments 4-5 and nothing 1 -- rating on merit
+rather than the ranking the pack asks for.
+**Reasoning:** it was written to make Tier 0 reachable by getting one segment rated `ASIDE`. It did
+not: the second live run still produced no `ASIDE`, and the distribution barely moved (4/5/5/1/0 to
+3/6/4/2/0 across CRITICAL..ASIDE), with 9 segments still wanting Tier 2 both times. Once D79
+settled that Tier 0 is not a target, its motivation was gone and its measured effect was nil.
+Shipping it would have left a future session believing the over-rating problem had been addressed.
+Packs are immutable once versioned (D44/D46), so an unproven version is not free -- it is a file
+every later run loads and every later reader has to account for.
+**The finding it was chasing is real and is carried forward, unfixed:** the outline model rates on
+merit rather than ranking, so most segments carry an "ideal" tier the budget can never honour. That
+is a prompt problem for a future session with a hypothesis better than "ask harder", and it costs a
+few cents per attempt to test with `scripts/tier_dry_run.py`.
+
+### D81 — `/tiers` gets a script, and its own documentation was stale
+**Discovered mid-task.** `.claude/commands/tiers.md` described a table column of "estimated
+duration" and a cost of "one LLM call". Both predate T14 and T15: duration is measured, never
+estimated (Invariant 1), and a real run is 1 + `segment_count` completions plus `segment_count`
+syntheses. The command also had no implementation -- nothing in the repo could run a pipeline "as
+far as tier assignment". `scripts/tier_dry_run.py` is that implementation, in `scripts/` rather
+than `core/` because it names concrete adapters through `config.py` (D51's precedent).
+**Caught by review, and worth recording as a class of bug:** the script's summary line divided
+animated frame cost by a literal `24` rather than the run's configured `fps`, so the "seconds of
+animation" figure -- the one number someone tuning `FRAME_BUDGET` actually reads -- would have been
+overstated by 2.5x at `FPS=60`. A tuning tool that is silently wrong exactly when the knob it
+reports on is changed is worse than no tool. `FRAME_BUDGET` and `FPS` are now read through a helper
+that raises rather than defaulting, so those numbers live only in `.env`/`.env.example` and cannot
+drift into a third copy.
+
+### D82 — The three-pass review rhythm paid for itself again, in the same shape as D73
+**Reconfirmed, not decided.** Pass one found nothing above trivial. Pass two -- a fresh full read,
+not a re-verification -- found the `fps`/24 unit bug above, and correctly showed that a test
+loosening made earlier in the session had become tautological (`load(name)` and `versions(name)`
+resolve through the same private helper in `DiskSkillRegistry`, so asserting they agree asserts
+nothing). Pass three confirmed both fixes and found nothing new. That is the fourth consecutive
+task where the *second* independent pass, asked for a fresh full read rather than a check of named
+fixes, is the one that found the real bug (D57, D62, D67, D73, now this).
+**Also worth noting:** the tautological-test finding came from work done to accommodate the
+`outline` `1.1` that D80 then deleted. Reverting `tests/test_runtime_skills.py` to its committed
+state was the correct fix, and the episode is a small argument for making the speculative change
+and the test change in separate steps, so that abandoning one does not leave the other stranded.

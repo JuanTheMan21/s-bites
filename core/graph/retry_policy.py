@@ -43,8 +43,13 @@ whichever future task builds the runner that calls ``JobQueue.fail(..., requeue=
 should refuse to requeue past some ``QueuedJob.attempt`` ceiling before this module's per-run cap
 is ever reached a second time.
 
-Reused by every future node that can raise these -- T15's outline/scripting node, T16's TTS and
-scene-authoring nodes, T17's render node -- rather than each re-deriving the classification.
+Reused by every future node that can raise these, rather than each re-deriving the classification.
+**A node that isolates its own ``StructuredOutputError`` retries internally (T15's outline/
+scripting node, via ``core/graph/nodes/structured_retry.py``) registers with
+``build_transient_retry_policy()`` alone, not this function** -- see that function's docstring for
+why attaching the bounded policy too would silently defeat the isolation. A node that never raises
+``StructuredOutputError`` at all (``synthesize_segment``, which only calls ``TTSProvider``/
+``Storage``) can keep using either -- the bounded half is simply never matched for it.
 """
 
 from langgraph.types import RetryPolicy
@@ -80,3 +85,19 @@ def build_retry_policies(
             retry_on=lambda exc: isinstance(exc, BOUNDED),
         ),
     )
+
+
+def build_transient_retry_policy(*, max_attempts: int = 5) -> RetryPolicy:
+    """The transient half of ``build_retry_policies()``, alone -- for a node that isolates its own
+    ``StructuredOutputError`` retries internally (``core/graph/nodes/structured_retry.py``) rather
+    than relying on this module's bounded policy for that.
+
+    Attaching the bounded policy *as well* to such a node would defeat that isolation: a call
+    whose local retry budget is exhausted re-raises ``StructuredOutputError`` into a node-level
+    policy that still matches it, retrying the **entire node** -- redoing every other
+    already-completed call inside it -- to re-attempt the one call a local retry already gave up
+    on for good reason (D24: a schema the model consistently cannot satisfy is a prompt bug, not
+    sampling noise, so redoing everything else buys nothing). T15's outline/scripting node is the
+    first to need this.
+    """
+    return RetryPolicy(max_attempts=max_attempts, retry_on=lambda exc: isinstance(exc, TRANSIENT))

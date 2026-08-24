@@ -27,8 +27,14 @@ class GraphState(TypedDict):
 
 
 class SegmentTask(TypedDict):
-    """What one ``Send("synthesize_segment", ...)`` call carries -- one segment's worth of work,
-    plus the job id it belongs to (segment paths are scoped per job)."""
+    """What one ``Send`` task carries -- one segment's worth of work, plus the job id it belongs
+    to (segment paths are scoped per job).
+
+    Shared by both fan-outs: ``synthesize_segment`` and ``author_scene`` want the same thing, one
+    segment, and only differ in how far along that segment is when they get it. ``author_scene``
+    never uses ``job_id`` -- it writes no files -- but a near-duplicate TypedDict differing by one
+    unused field would cost more than it explains.
+    """
 
     job_id: str
     segment: Segment

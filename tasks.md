@@ -204,49 +204,78 @@ deliberately excludes `JobQueue` (D66). Whichever future task builds the runner 
 `scripts/measure_segment_concurrency.py` is the reusable script; re-run once T18 moves real
 rendered artifacts (not small WAVs) through `Storage`.
 
-### T15 — Outline & scripting nodes · `todo`
+### T15 — Outline & scripting nodes · `done`
 Topic to segments to narration, driven by the runtime skill packs. Produces roughly 15 segments for
 a 7-minute target.
-**DoD:** structured output validates on every segment; skill packs demonstrably change behavior.
-**Depends:** T14
+**DoD:** structured output validates on every segment; skill packs demonstrably change behavior —
+met. `core/graph/nodes/outline.py::generate_outline` and `.../scripting.py::write_narration` make
+the real calls; both are exercised live in `tests/test_live_plan_segments.py` against the real
+Azure deployment and the real disk-loaded packs.
+**Depends:** T14 — met.
 **T7 shipped the packs this node loads.** Four exist, all at `1.0`: `outline` and `scripting` are
 this task's, `scene-authoring` is T16's, and `house-style` is interpolated **alongside** each of
-the other three rather than used alone. Load them through `SkillRegistry`, never by reading
-`runtime_skills/`. They have never been sent to a model — the DoD's "demonstrably change behavior"
-is the first real test of them, so expect to write a `1.1` of at least one.
-**T4 built the schemas this node fills.** Ask for `core.outline_schema.Outline` (the list is wrapped
-in an object because strict mode needs an object root), and take the segment count from
-`VideoJob.segment_count` — a literal 15 here is exactly what the T4 flag was written to prevent.
+the other three rather than used alone (via `core/graph/nodes/skill_prompt.py::load_step_prompt`,
+reusable by T16). **They worked at `1.0` against a real model — no `1.1` was needed** (D75).
+**T4 built the schemas this node fills.** `core.outline_schema.Outline` and the new
+`core.scripting_schema.Narration`; segment count comes from `VideoJob.segment_count`, never a
+literal, per the T4 flag. The outline call does not enforce the model returned exactly that many
+segments (D74) — nothing downstream needs an exact count.
+**A real retry-policy bug shipped in this task's first version and was caught by review (D73):**
+a node making several sequential `LLMProvider` calls (this one makes up to `1 + segment_count`)
+needs its own local `StructuredOutputError` isolation (`core/graph/nodes/structured_retry.py`)
+*and* must register with the new `core/graph/retry_policy.py::build_transient_retry_policy()`
+rather than `build_retry_policies()` — attaching both silently defeats the isolation by letting
+an exhausted local retry re-trigger a whole-node redo. **T16's scene-authoring node will hit the
+same trap if it copies `synthesize_segment`'s registration pattern instead of this one's.**
 
-### T16 — TTS, tiering & scene authoring · `todo`
-The ordering-critical stretch: narrate, measure, assign tiers against the real durations, then fill
-scene slots. Scene authoring takes measured duration as a required input so it cannot run early.
-**DoD:** timing attributes derive only from measured audio; tier spread covers all three tiers.
-**Depends:** T15
-**The `scene-authoring` pack defers item counts to the schema field descriptions** and governs only
-how much text goes in each item, keyed off measured duration. That split was made in T7 review
-because the two contradicted each other, and strict mode drops length constraints so neither side
-is actually enforced — if you edit the pack, do not reintroduce a count.
-**Scene authoring goes through `core.slot_schemas.slot_schema_for(intent)`** — it returns the schema
-class to hand `LLMProvider.generate`, and the validated payload is stored on `Segment.slots` as a
-dict (D29). Validate it back through the same function rather than trusting the dict.
-**T5 flagged that `FRAME_BUDGET=600` is mistuned, and this task owns the fix (D32).** 600 frames
-at 24fps buys 25s of Tier-2 animation against a 28s average segment, so Tier 2 lands on the
-*shortest* segments rather than the most important. The DoD's "tier spread covers all three
-tiers" is achievable at 600 — T5 measured `2/11/2` on a realistic outline — but only because
-title cards and stat callouts are short. Once real measured durations exist, use `/tiers` to
-decide between raising the budget, shortening segments, or accepting short-segment Tier 2 as the
-product. Do not tune it against a fixture.
+### T16 — TTS, tiering & scene authoring · `done`
+The ordering-critical stretch: assign tiers against real measured durations, then fill scene slots.
+**DoD:** timing attributes derive only from measured audio — **met**; tier spread covers all three
+tiers — **met for Tier 1 and Tier 2 only, and the item is recorded as over-specified (D79).**
+**Depends:** T15 — met.
+**Graph shape, decided (D76):** `synthesize_segment` → `assign_tiers` (join, needs every duration)
+→ a *second* `Send` fan-out → `author_scene` → `finalize`. Rejected folding scene authoring into
+`synthesize_segment` (it would put slots before tiers, and make a scene retry re-synthesise billed
+audio) and a sequential join node (~15 serial calls, and a retry redoes every authored scene).
+`core/graph/nodes/tiering.py` and `.../scene_author.py` hold the two new nodes; `GraphContext`
+gained `frame_budget` and `fps` (D77).
+**Invariant 1 is structural here:** `fill_slots` takes `duration_ms` as a required parameter, so a
+caller who has not measured cannot satisfy the signature, and `author_scene` raises before any LLM
+call on an unmeasured segment.
+**`FRAME_BUDGET` is now 1400, and D32 understated the problem (D78).** At real measured durations
+600 bought **zero** Tier-2 scenes — real narration runs a uniform 19-29s per segment, so there are
+no short segments for Tier 2 to land on, not even title cards. Measured curve: 900→1 animated,
+1400→2, 2000→3. Tuned with `scripts/tier_dry_run.py` against a live run, never a fixture.
+**An `outline` `1.1` was written, measured, and deleted (D80)** — it did not change the outcome.
+The finding it chased is carried forward: the outline model rates importance on merit rather than
+ranking, so most segments ask for a tier the budget cannot afford.
+**`/tiers` is now executable** — `scripts/tier_dry_run.py`, and the command file's stale "estimated
+duration" / "one LLM call" claims were corrected (D81).
 
 ### T17 — The three renderers · `todo`
 Static screenshot, multi-state reveal with crossfade, and full HyperFrames animation — one module
 per tier, with composition linting before render.
 **DoD:** each tier produces a valid clip; invalid compositions are caught before rendering.
-**Depends:** T16
+**Depends:** T16 — met.
 **This task owns six Jinja templates, one per visual intent** (D30) — the tier modules are the three
 capture strategies, but every intent needs markup. Each template must also degrade to a sensible
 single static frame, since the resolver can put any segment on Tier 0. `tests/slot_examples.py` has
 a realistic payload per intent to render against.
+**Tier 0 will be empty on most real runs (D79), so it is the least-exercised path these templates
+have.** That makes it easy to ship a broken static form and not notice. Render every template at
+all three tiers explicitly in tests rather than trusting a realistic job to cover them — a real job
+at `FRAME_BUDGET=1400` is roughly 2 animated · 13 reveal · 0 static, and essentially every frame
+goes to the two Tier-2 scenes.
+**`Segment.slots` is really populated now** — by T16's `author_scene`, validated on the way in
+against `slot_schema_for(segment.visual_intent)` and stored as an untyped dict (D29). Validate it
+back through the same function at the point of use; `tests/test_scene_author.py` shows the round
+trip.
+**The composition-directory-layout assumption is still unverified and this task owns it.**
+`adapters/local/hyperframes_cli.py` assumes one composition per directory named `index.html`. This
+is the first task that generates composition files and picks a real layout — check it, don't
+inherit it.
+**`core/tier_resolver.py` is at 198 of 200 lines**, so registering an intent in `TIER_SUPPORT` with
+no meaningful reveal form forces a split first.
 
 ### T18 — Mux & CLI · `todo`
 Per-segment audio mux, then concat, then the CLI entrypoint. **This task produces the first
