@@ -1302,3 +1302,20 @@ ever lints a whole project *directory* (D60, discovered after this hook was writ
 source template (`{{ }}`/`{% %}`) is not valid standalone HTML in the first place. Fixed narrowly:
 skip linting a `.html` file that contains Jinja delimiters, leaving `_reference_tier2.html` (a
 literal, Jinja-free composition) linted exactly as before.
+
+### D90 — Checkpoint's own git state must be read from `git log`/`git remote -v`, never carried
+forward from the previous handoff
+**Discovered, not decided,** during this checkpoint rather than the build itself. T16's handoff
+claimed "T15 and T16 are uncommitted"; that was already false by the time this session started --
+`6b52ec2` (visible in plain `git log`) already contained both. A second, independent staleness in
+the same section: the same handoff claimed no git remote was configured, when `origin` -> GitHub
+already existed and `origin/master` already matched local history through `6b52ec2`. Both claims
+were carried forward, unverified, into this session's own first handoff draft before being caught
+by actually running `git log`/`git remote -v`/`git status -sb` rather than trusting the prior
+file's prose.
+**Reasoning this is worth a decision entry rather than just a fix:** the Git row in handoff.md's
+environment table is exactly the kind of fact that goes stale silently -- nothing in the normal
+build loop re-verifies it, since `/checkpoint` writes it once and the next session reads it as
+ground truth. Two wrong claims in a row in the same three-line table is a pattern, not a fluke.
+**Rule going forward: `/checkpoint`'s Git row is always written from a fresh `git log --oneline`
+and `git remote -v` in the same session, never copied from the previous handoff and edited.**

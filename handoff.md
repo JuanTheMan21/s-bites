@@ -128,16 +128,13 @@ grep -rE "langgraph" core/ --include=*.py | grep -v "^core/graph/"           # m
 | HyperFrames CLI | **0.8.12** (drifted up from 0.8.10 — see above), via `npx hyperframes`. Chrome Headless Shell cached at `~/.cache/hyperframes` |
 | Playwright browsers | Installed — both `chromium-1234` *and* `chromium_headless_shell-1234` at `%LOCALAPPDATA%\ms-playwright` |
 | Ollama, Kokoro | **Still not installed. Deliberately deferred (D59, reaffirmed D64)**, not forgotten |
-| Git | on `master`. T1-T16 are committed (5 commits, `6b52ec2` latest — verified against `git log`, not assumed; a prior handoff had this stale, claiming T15/T16 were still uncommitted when they were not). **T17 is uncommitted working-tree state.** There is **no git remote configured**, so nothing has been pushed anywhere and `/push` has nowhere to go until one is added |
+| Git | on `master`, **7 commits, `5e0eb9a` latest** (T1-T17 all committed). `origin` → `github.com/JuanTheMan21/s-bites.git` **does exist** — verified via `git remote -v`, not assumed; two prior handoffs in a row had this stale, one claiming T15/T16 uncommitted after they'd already landed in `6b52ec2`, both claiming no remote when one was already configured. `origin/master` matched through `6b52ec2` as of this session; whether this session's two new commits (`2ca6f9d` T17, `5e0eb9a` a RepoWise index-metadata sync) are pushed depends on what the user chose at this checkpoint's push prompt — **check `git status -sb` rather than trusting this line**, given the above |
 | Azure spend | Unchanged this task — T17 did no LLM/TTS calls, only local rendering. Still no budget alerts configured; check with `/costs` |
 
 ## Before the next session
 
 Nothing blocking. T18 is CLI/mux work against the real local `PlaywrightHyperFramesRenderBackend`
 and real ffmpeg, both installed, plus wiring `render_segment` into a runner.
-
-**Worth deciding soon, carried forward again:** the repo still has no remote, so even a committed
-`master` has nowhere to push to. Adding one is a five-minute job that has been deferred since T1.
 
 ## Known gaps and open questions
 
