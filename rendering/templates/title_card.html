@@ -1,0 +1,110 @@
+{% import "_tokens.html" as tokens %}
+<!doctype html>
+<!--
+  VisualIntent.TITLE_CARD -- opening card / section boundary. Data Drift style (T17 plan):
+  centered headline with a focused hero bloom behind it, optional subtitle anchored below.
+  Rules composed: spring-pop-entrance (headline) + ambient-glow-bloom (hero bloom).
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>title_card</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    {{ tokens.tokens_style() }}
+    <style>
+      #stage {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 0 220px;
+        box-sizing: border-box;
+      }
+      .hero-bloom {
+        position: absolute;
+        width: 1100px;
+        height: 1100px;
+        top: 50%;
+        left: 50%;
+        margin: -550px 0 0 -550px;
+        border-radius: 50%;
+        background: radial-gradient(circle, var(--accent-purple), transparent 65%);
+        filter: blur(160px);
+        will-change: opacity, transform;
+      }
+      #headline {
+        font-weight: 900;
+        font-size: 104px;
+        line-height: 1.08;
+        letter-spacing: -0.02em;
+        max-width: 100%;
+        will-change: opacity, transform;
+      }
+      #tc-underline {
+        width: 260px;
+        height: 4px;
+        margin-top: 44px;
+        background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan));
+        transform-origin: center;
+        display: block;
+        will-change: transform;
+      }
+      #subtitle {
+        margin-top: 40px;
+        font-weight: 400;
+        font-size: 36px;
+        color: var(--accent-cyan);
+        max-width: 80%;
+        will-change: opacity, transform;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="title-card"
+      data-start="0"
+      data-duration="{{ duration_sec }}"
+      data-width="1920"
+      data-height="1080"
+    >
+      {{ tokens.background_markup('tc', duration_sec) }}
+      <div id="content" class="clip df-content-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="1">
+        <div id="tc-hero-bloom" class="hero-bloom"></div>
+        <div id="stage">
+          <h1 id="headline">{{ slots.headline }}</h1>
+          <span id="tc-underline"></span>
+          {% if slots.subtitle %}
+          <p id="subtitle">{{ slots.subtitle }}</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      {{ tokens.background_script('tc', duration_sec) }}
+
+      // Hero bloom lands as the headline settles -- one beat, glow behind, headline in front.
+      tl.fromTo("#tc-hero-bloom", { opacity: 0, scale: 0.85 }, { opacity: 0.3, scale: 1, duration: 0.9, ease: "power2.out" }, 0.15);
+
+      // Headline: smooth spring-pop entrance, no bounce (Data Drift is "nothing hard").
+      tl.fromTo("#headline", { scale: 0.7, opacity: 0, y: 24 }, { scale: 1, opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.2);
+
+      // Structural underline draws in right after the headline lands.
+      tl.fromTo("#tc-underline", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.out" }, 0.75);
+
+      {% if slots.subtitle %}
+      tl.fromTo("#subtitle", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 0.95);
+      {% endif %}
+
+      window.__timelines["title-card"] = tl;
+    </script>
+  </body>
+</html>

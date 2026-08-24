@@ -252,36 +252,39 @@ ranking, so most segments ask for a tier the budget cannot afford.
 **`/tiers` is now executable** — `scripts/tier_dry_run.py`, and the command file's stale "estimated
 duration" / "one LLM call" claims were corrected (D81).
 
-### T17 — The three renderers · `todo`
+### T17 — The three renderers · `done`
 Static screenshot, multi-state reveal with crossfade, and full HyperFrames animation — one module
 per tier, with composition linting before render.
-**DoD:** each tier produces a valid clip; invalid compositions are caught before rendering.
+**DoD:** each tier produces a valid clip — met, verified against the real backend for all 6
+`VisualIntent` × 3 `Tier` combinations (`tests/test_render_segment_live.py`); invalid compositions
+are caught before rendering — met, `render_segment.py`'s lint gate.
 **Depends:** T16 — met.
-**This task owns six Jinja templates, one per visual intent** (D30) — the tier modules are the three
-capture strategies, but every intent needs markup. Each template must also degrade to a sensible
-single static frame, since the resolver can put any segment on Tier 0. `tests/slot_examples.py` has
-a realistic payload per intent to render against.
-**Tier 0 will be empty on most real runs (D79), so it is the least-exercised path these templates
-have.** That makes it easy to ship a broken static form and not notice. Render every template at
-all three tiers explicitly in tests rather than trusting a realistic job to cover them — a real job
-at `FRAME_BUDGET=1400` is roughly 2 animated · 13 reveal · 0 static, and essentially every frame
-goes to the two Tier-2 scenes.
-**`Segment.slots` is really populated now** — by T16's `author_scene`, validated on the way in
-against `slot_schema_for(segment.visual_intent)` and stored as an untyped dict (D29). Validate it
-back through the same function at the point of use; `tests/test_scene_author.py` shows the round
-trip.
-**The composition-directory-layout assumption is still unverified and this task owns it.**
-`adapters/local/hyperframes_cli.py` assumes one composition per directory named `index.html`. This
-is the first task that generates composition files and picks a real layout — check it, don't
-inherit it.
-**`core/tier_resolver.py` is at 198 of 200 lines**, so registering an intent in `TIER_SUPPORT` with
-no meaningful reveal form forces a split first.
+**Six Jinja templates shipped, one per visual intent** (D30), sharing one design system
+(`rendering/templates/_tokens.html`, "Data Drift" style, D83) rather than each inventing its own.
+**The composition-directory-layout question is closed** (D85): always the sole file
+`dest_dir/index.html`. **`mux/frames_to_clip.py` also shipped here**, ahead of T18, since ffmpeg
+calls belong in `mux/` project-wide per CLAUDE.md regardless of task number (D84) — T18 only needs
+to add audio mux + concat alongside it.
+**Real bugs found only by the live toolchain** (`npx hyperframes check`, real Playwright seeks),
+none catchable offline — full detail in decisionlog.md D89. The one every future template author
+needs to know: **ambient/idle motion must be a genuine GSAP property tween, never a manual
+`onUpdate` DOM write** — HyperFrames' `seek(id, t, true)` convention (D15) skips `onUpdate`
+callbacks entirely.
 
 ### T18 — Mux & CLI · `todo`
 Per-segment audio mux, then concat, then the CLI entrypoint. **This task produces the first
 complete video.**
 **DoD:** `python cli.py "<topic>"` yields a playable ~7-min MP4 on both stacks; no drift.
-**Depends:** T17
+**Depends:** T17 — met.
+**`rendering/render_segment.py::render_segment` exists and is proven against the real backend, but
+is not wired into `core/graph/` or a runner** — that wiring, and the artifact-directory convention
+for where compositions/clips live (a `SEGMENT_COMPOSITION_KEY`-shaped constant, the way
+`synthesize.py` owns `SEGMENT_AUDIO_KEY`), is this task's to decide, not inherited from T17.
+**`mux/frames_to_clip.py` already exists** (T17, D84) with `hold_frame`/`crossfade` — this task's
+audio-mux/concat functions belong in the same directory, following the same ffmpeg-subprocess
+pattern (timeout → kill → `RenderFailed`, `-t`-pinned exact duration), not a new one.
+**`FakeRenderBackend.render` still writes placeholder bytes, not a real MP4** — anything here that
+cares about real output must run against the real local backend.
 
 ---
 

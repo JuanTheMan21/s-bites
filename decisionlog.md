@@ -1158,3 +1158,147 @@ fixes, is the one that found the real bug (D57, D62, D67, D73, now this).
 `outline` `1.1` that D80 then deleted. Reverting `tests/test_runtime_skills.py` to its committed
 state was the correct fix, and the episode is a small argument for making the speculative change
 and the test change in separate steps, so that abandoning one does not leave the other stranded.
+
+## 2026-08-24 · T17 — The three renderers
+
+The first task to turn a filled slot payload into pixels. Planning had already produced a
+minimal-but-correct plan (six bare-bones templates, matching `_reference_tier2.html`'s dark-navy
+reference styling) before the user interrupted with two reference screenshots of what they
+explicitly did not want -- a generic auto-diagram export: flat circles, crossing connector lines,
+mid-word text truncation, zero motion -- and asked for something "production grade... cool, vibrant
+and fun to watch." Everything below D83 is downstream of that redirect.
+
+### D83 — Visual identity is "Data Drift" (`hyperframes-creative`'s named style), not the reference
+tier-2 composition's cyan-on-navy
+**Rejected:** extending `_reference_tier2.html`'s existing dark-navy/cyan palette as-is (the
+default a minimal-scope plan would have produced), and three other named styles offered to the
+user (Swiss Pulse refined, Deconstructed, a custom style).
+**Reasoning:** user's explicit choice, from a set curated for this project's actual content
+(tech/security/ML explainers) after loading `hyperframes-creative`/`hyperframes-animation`. Worth
+recording because the reference template's cyan-on-dark-navy scheme is *exactly* what
+`house-style.md` names as a lazy AI default ("Cyan-on-dark / purple-to-blue gradients") -- a
+literal reuse of it would have shipped the very thing the user was pointing at in the screenshots.
+Concrete system: `--bg:#0b0a14`, accents `--accent-purple:#7c3aed`/`--accent-cyan:#06b6d4` (a
+lighter `--accent-purple-text:#b794f6` for small text -- see D89.5), **Montserrat** (statement
+voice, 400/900 only -- the family's real bundled weights) + **JetBrains Mono** (data/technical
+voice: stat values, code, labels), a shared background layer (two radial glows, a 24-particle
+field, one accent rule) reused identically across all six templates. Declared in one Jinja partial,
+`rendering/templates/_tokens.html`, imported by every template rather than copy-pasted six times.
+**DIAGRAM_FLOW specifically fixes the screenshot's crossing-lines failure**, structurally: nodes
+sit on one straight rail in array order, never a free-floating graph layout, so two connectors can
+never cross by construction.
+
+### D84 — `mux/frames_to_clip.py` is populated in T17, ahead of T18
+**Rejected:** putting Tier 0/1's stills-to-video ffmpeg calls inside `rendering/` itself, deferring
+`mux/` entirely to T18 as `tasks.md`'s own title ("Mux & CLI") might suggest.
+**Reasoning:** CLAUDE.md's layout table is a project-wide, task-independent rule -- "ffmpeg
+subprocess calls" live in `mux/`, full stop -- not a T18-scoped one. Tier 0 (hold one screenshot)
+and Tier 1 (crossfade several) both need ffmpeg to become a clip at all, so honouring the rule
+means starting `mux/` here. T18's own scope (audio mux + concat) is unaffected and unblocked.
+
+### D85 — Every composition is the sole file `dest_dir/index.html`, closing D60's open item
+**Verified, not chosen freely.** `adapters/local/hyperframes_cli.py::lint` (D60) already hard-requires
+this -- literal filename `index.html`, alone in its directory -- so `rendering/compose.py` simply
+enforces it by construction (always writes `dest_dir / "index.html"`) rather than trusting a future
+caller to know the constraint exists. T17's functions take an explicit `dest_dir`/`dest` from the
+caller and invent no job/segment path convention of their own; that belongs to whichever task first
+wires rendering into the graph (T18), the same way `SEGMENT_AUDIO_KEY` belongs to `synthesize.py`.
+
+### D86 — No new error family for "our own code judged this invalid" beyond `CompositionInvalid`
+**Rejected:** a new exception class, which `handoff.md` and D23 both left as an open question for
+T17 to decide.
+**Reasoning:** `CompositionInvalid` (D23) already means exactly "our code decided a lint finding
+was fatal" -- the composition-level gate `render_segment.py` raises before all three tiers. Slot-
+*payload*-level invalidity is a separate concern, closed by `rendering/compose.py` validating
+`segment.slots` back through `slot_schema_for` (D29's "point of use") and letting pydantic's own
+`ValidationError` propagate -- consistent with how `Segment`/`VideoJob` validation already works
+elsewhere in this codebase, never translated to an `AdapterError` since nothing outside the process
+is at fault. Two failure points, two pre-existing exception types.
+
+### D87 — `TIER_SUPPORT`'s no-op `ALL_TIERS` map is confirmed correct, not edited, closing D36
+**Verified, not decided.** D36 left `core/tier_resolver.py::TIER_SUPPORT` as a no-op registration
+point specifically for T17 -- "the first code in a position to know" whether any intent lacks a
+meaningful reveal or static form. What T17 found: every template is one seekable GSAP timeline
+(D15); Tier 0 and Tier 1 differ from Tier 2 only in *how many times and when* that timeline is
+seeked and screenshotted, never in the markup. Every intent genuinely supports all three tiers, so
+the map is correct as it stood. `core/tier_resolver.py` is untouched -- its 198/200-line headroom
+is not spent here, and the next intent still forces a split when it comes.
+
+### D88 — `render_segment`'s lint gate treats any finding as fatal, applied before all three tiers
+**Rejected:** parsing `severity` out of `RenderBackend.lint`'s formatted finding strings and only
+failing on `"error"`; also rejected gating only before Tier 2 (the expensive path) and letting
+Tier 0/1 screenshot a composition lint never approved.
+**Reasoning:** simpler than severity-parsing, and consistent with this project's "catch it at
+write time, no repair loop" stance (D2, scene-templates skill) -- lint is cheap, and a broken
+composition is equally wrong screenshotted as rendered. `npx hyperframes check`'s own layout/
+contrast/motion audits stay *outside* this gate deliberately (see D89) -- stricter and slower than
+what should block an ordinary job, so that extra scrutiny lives in template-authoring's own test
+suite (`tests/test_render_segment_live.py`) rather than the render path itself.
+
+### D89 — Five real bugs found only by the live toolchain, none catchable by the offline suite alone
+**Discovered, not decided.** Every template passed its own authoring review and the offline test
+suite before any of these surfaced -- all five needed a real `npx hyperframes check` or a real
+Playwright seek to show up, which is why `handoff.md`'s "render every template at all three tiers
+explicitly" instruction (D79) mattered more than it looked like it would.
+
+1. **Unsized composition root.** `_tokens.html`'s `#root` never got explicit `width`/`height` --
+   exactly `hyperframes-core`'s documented "silent layout bug" (every child is `position:absolute`,
+   so the root collapses toward 0 and everything piles into the top-left, with no lint error).
+   Confirmed via Playwright: `#root`'s rendered height was `0`. Fixed with explicit
+   `width:1920px; height:1080px;`.
+2. **Manual `onUpdate` DOM writes are invisible under this renderer's seek convention.** The
+   particle field's ambient drift was written as a phase-driven `onUpdate` proxy (`sine-wave-loop`
+   `.md`'s own documented "onUpdate form"). HyperFrames seeks with `suppressEvents=true` -- this
+   project's own `_SEEK = "...seek(id, t, true)"` convention (D15), used both by
+   `playwright_capture.py` and, evidently, by `hyperframes check`'s own driver -- and GSAP's
+   `suppressEvents` explicitly skips `onUpdate`/`onStart`/`onComplete` callbacks while still
+   applying a *tracked property's* own interpolated value. Verified empirically: a probed
+   particle's `style.transform` stayed the empty string across every seek, while a sibling
+   `opacity` tween (a real tracked property, not a manual write) updated correctly. **Rule for any
+   future ambient motion in this project's templates: use genuine GSAP property tweens
+   (`fromTo`/`to` on `x`/`y`/`scale`/`opacity`/etc.), never a manual `onUpdate` DOM write** --
+   `sine-wave-loop.md`'s onUpdate form does not render under this project's capture/check pipeline,
+   only its own preview tooling.
+3. **`hyperframes check`'s frozen-sweep guard (`sweep_static`) treats opacity below 0.2 as
+   invisible.** `isVisibleElement`'s default opacity floor, read from the installed CLI's own
+   source (`layout-audit.browser.js`), excludes anything with a computed opacity chain under 0.2
+   from its per-sample geometry fingerprint -- regardless of how much it is actually moving. The
+   particle field's resting opacity (0.16, chosen for subtlety) sat just below that floor, so its
+   drift never registered even after fix #2. Raised to 0.22, still inside `video-composition.md`'s
+   12-25% decorative-opacity range.
+4. **SVG `stroke-dasharray`/`stroke-dashoffset` animation never changes an element's own
+   `getBoundingClientRect()`.** `diagram_flow.html`'s rail-segment draw (`svg-path-draw.md`) is
+   real and correct, but is *structurally invisible* to any bbox-based liveness/motion check --
+   the geometric endpoints of a `<line>` never move, only its rendered dash pattern does. This is
+   why `diagram_flow` alone still tripped `sweep_static` after fixes #1-#3: it was the one template
+   whose only non-background motion was an SVG stroke draw, invisible by construction, plus an
+   entrance that fully settles before the check's first layout sample. No template code change was
+   needed once the shared particle field (fix #3) gave every template genuine, checker-visible
+   ambient motion throughout the full duration.
+5. **libx264 refuses odd, and *zero*, width/height.** `mux/frames_to_clip.py`'s even-dimensions
+   filter initially used `trunc(iw/2)*2`, which rounds a 1px source (the offline test fixture's
+   `FakeRenderBackend` still writes a 1x1 PNG) down to 0 -- also refused. Switched to
+   `2*ceil(iw/2):2*ceil(ih/2)`, which rounds up instead and is a no-op for any already-even real
+   capture (1920x1080).
+
+**A sixth, related bug came from `project-reviewer`'s fresh pass, not the live toolchain directly,
+and is worth recording alongside these because it is the same class of mistake as #2/#3 in a new
+place:** `comparison.html`'s counter-phase idle card bob used a hardcoded `repeat: 1`
+(`duration:1.3`), covering only 2.6s starting at 1.8s -- both cards froze for the remainder of any
+segment longer than 4.4s, which is essentially every real segment. The particle field had already
+been made duration-aware (computing `repeat` from `duration_sec`, per fix #2/#3's fallout) but that
+fix was never generalised to this second, template-local ambient tween.
+`tests/test_render_segment_live.py`'s own fixture duration (4000ms, chosen short deliberately to
+keep an 18-case real-render matrix tractable) happened to end *inside* the bob's original active
+window, so the test suite passed for the wrong reason and never exercised the tail of a realistic
+segment. Fixed the same way the particle field was: `repeat` computed from `duration_sec` via
+`ceil` plus a margin. Verified directly with `npx hyperframes check` at a realistic 21s duration
+(clean), not just the short test fixture.
+
+**Also fixed along the way, infrastructure rather than a template bug:** `scripts/hook_asset_quality.py`
+(T2-era) called `npx hyperframes lint <single-file>` on every `.html` write under
+`rendering/templates/` -- broken twice over, independently of anything in this task: the CLI only
+ever lints a whole project *directory* (D60, discovered after this hook was written), and a Jinja
+source template (`{{ }}`/`{% %}`) is not valid standalone HTML in the first place. Fixed narrowly:
+skip linting a `.html` file that contains Jinja delimiters, leaving `_reference_tier2.html` (a
+literal, Jinja-free composition) linted exactly as before.

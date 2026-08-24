@@ -1,0 +1,186 @@
+{% import "_tokens.html" as tokens %}
+<!doctype html>
+<!--
+  VisualIntent.COMPARISON -- two things set against each other. Data Drift style (T17 plan):
+  symmetric 3D "book-open" split, mirrored tilts, counter-phase idle bob.
+  Rule composed: split-tilt-cards (this is that rule's own comparison-split blueprint shape).
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>comparison</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    {{ tokens.tokens_style() }}
+    <style>
+      #stage {
+        width: 100%;
+        height: 100%;
+        box-sizing: border-box;
+        padding: 120px 160px 100px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      #headline {
+        font-weight: 900;
+        font-size: 64px;
+        text-align: center;
+        max-width: 80%;
+        opacity: 0;
+        will-change: opacity, transform;
+      }
+      #split-scene {
+        width: 100%;
+        flex: 1;
+        display: grid;
+        place-items: center;
+        perspective: 1600px;
+        margin-top: 56px;
+      }
+      .split-stage {
+        display: flex;
+        gap: 90px;
+        transform-style: preserve-3d;
+      }
+      .card {
+        width: 700px;
+        transform-style: preserve-3d;
+        box-sizing: border-box;
+        padding: 56px;
+        border-radius: 20px;
+        border: 2px solid rgba(231, 229, 240, 0.16);
+        background: rgba(231, 229, 240, 0.04);
+        will-change: opacity, transform;
+      }
+      .card-left { box-shadow: -30px 40px 90px rgba(124, 58, 237, 0.25); }
+      .card-right { box-shadow: 30px 40px 90px rgba(6, 182, 212, 0.25); }
+      .card-eyebrow {
+        font-family: "JetBrains Mono", "Courier New", monospace;
+        font-size: 22px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent-cyan);
+        opacity: 0;
+        will-change: opacity, transform;
+      }
+      .card-right .card-eyebrow { color: var(--accent-purple-text); }
+      .card-headline {
+        font-weight: 900;
+        font-size: 40px;
+        margin-top: 18px;
+        opacity: 0;
+        will-change: opacity, transform;
+      }
+      .card-body {
+        margin: 26px 0 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .card-body li {
+        font-weight: 400;
+        font-size: 30px;
+        line-height: 1.35;
+        opacity: 0;
+        will-change: opacity, transform;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="comparison"
+      data-start="0"
+      data-duration="{{ duration_sec }}"
+      data-width="1920"
+      data-height="1080"
+    >
+      {{ tokens.background_markup('cp', duration_sec) }}
+      <div id="content" class="clip df-content-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="1">
+        <div id="stage">
+          <h1 id="headline">{{ slots.headline }}</h1>
+          <div id="split-scene">
+            <div class="split-stage">
+              <div class="card card-left" id="cp-card-left">
+                <div class="card-eyebrow" id="cp-eyebrow-left">{{ slots.left_label }}</div>
+                <ul class="card-body">
+                  {% for item in slots.left_items %}
+                  <li class="cp-item-left">{{ item }}</li>
+                  {% endfor %}
+                </ul>
+              </div>
+              <div class="card card-right" id="cp-card-right">
+                <div class="card-eyebrow" id="cp-eyebrow-right">{{ slots.right_label }}</div>
+                <ul class="card-body">
+                  {% for item in slots.right_items %}
+                  <li class="cp-item-right">{{ item }}</li>
+                  {% endfor %}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      {{ tokens.background_script('cp', duration_sec) }}
+
+      const TILT = 14;
+      const TILT_OVERSHOOT = 8;
+
+      tl.fromTo("#headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 0.1);
+
+      // Entry -- from outside, opposing tilts settle with a small pivot (split-tilt-cards).
+      tl.fromTo(
+        "#cp-card-left",
+        { x: -260, rotateY: TILT + TILT_OVERSHOOT, opacity: 0 },
+        { x: 0, rotateY: TILT, opacity: 1, duration: 0.8, ease: "power3.out" },
+        0.5,
+      );
+      tl.fromTo(
+        "#cp-card-right",
+        { x: 260, rotateY: -TILT - TILT_OVERSHOOT, opacity: 0 },
+        { x: 0, rotateY: -TILT, opacity: 1, duration: 0.8, ease: "power3.out" },
+        0.65,
+      );
+
+      // Copy fades up during each card's settle -- one fromTo per group, opacity + y together
+      // (two separate tweens on the same property/element at the same position is the exact
+      // silent-kill trap motion-principles.md warns about).
+      tl.fromTo(
+        ["#cp-eyebrow-left", "#cp-card-left .cp-item-left"],
+        { opacity: 0, y: 16 },
+        { opacity: 1, y: 0, duration: 0.4, ease: "power2.out", stagger: 0.08 },
+        0.85,
+      );
+      tl.fromTo(
+        ["#cp-eyebrow-right", "#cp-card-right .cp-item-right"],
+        { opacity: 0, y: 16 },
+        { opacity: 1, y: 0, duration: 0.4, ease: "power2.out", stagger: 0.08 },
+        1.0,
+      );
+
+      // Counter-phase idle bob -- opposite signs so the pair reads alive, not a conveyor belt.
+      // repeat count is duration-aware, not a fixed 1: a hardcoded repeat covers only
+      // duration * (repeat + 1) seconds and then freezes for whatever's left of the segment --
+      // exactly the bug _tokens.html's particle field was fixed to avoid (found by
+      // project-reviewer on a fresh pass; a fixed `repeat: 1` here left both cards frozen for the
+      // back ~16s of a realistic ~21s segment, invisible to the live test suite only because its
+      // own fixture duration happened to end inside the bob's original active window).
+      {% set bob_half = 1.3 %}
+      {% set bob_start = 1.8 %}
+      {% set bob_reps = ([1, ((duration_sec - bob_start) / bob_half) | round(0, "ceil") | int] | max) + 2 %}
+      tl.to("#cp-card-left", { y: -6, duration: {{ bob_half }}, ease: "sine.inOut", yoyo: true, repeat: {{ bob_reps }} }, {{ bob_start }});
+      tl.to("#cp-card-right", { y: 6, duration: {{ bob_half }}, ease: "sine.inOut", yoyo: true, repeat: {{ bob_reps }} }, {{ bob_start }});
+
+      window.__timelines["comparison"] = tl;
+    </script>
+  </body>
+</html>

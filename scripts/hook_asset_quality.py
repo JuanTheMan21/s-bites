@@ -24,6 +24,16 @@ def run(cmd: list[str], timeout: int = 90) -> subprocess.CompletedProcess | None
 def lint_scene_template(path: Path) -> int:
     if not shutil.which("npx"):
         return 0
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    if "{{" in text or "{%" in text:
+        # A Jinja source template (T17): not valid standalone HTML until slots are filled in, so
+        # `hyperframes lint` cannot parse it -- and separately, the CLI only lints a whole project
+        # directory (D60), never a single file, which this call would violate for a literal
+        # composition too. A rendered composition is linted where it is actually produced --
+        # `rendering/render_segment.py`'s call to `RenderBackend.lint`, against the real filled-in
+        # output -- not here against its uncompiled source. A literal, hardcoded composition like
+        # `_reference_tier2.html` (no Jinja delimiters) still gets linted below as before.
+        return 0
     result = run(["npx", "--no-install", "hyperframes", "lint", str(path)])
     if result is None or result.returncode == 0:
         return 0
