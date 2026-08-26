@@ -21,7 +21,7 @@ from core.slot_schemas import TitleCardSlots
 from interfaces import ProviderMisconfigured
 from interfaces.llm_provider import T
 from tests.fakes import FakeLLMProvider, FakeStorage, FakeTTSProvider
-from tests.graph_pipeline_fixtures import a_context, a_job, seeded_llm, slot_payloads
+from tests.graph_pipeline_fixtures import a_context, a_job, needs_ffmpeg, seeded_llm, slot_payloads
 
 
 class FailsOnceForSchema(FakeLLMProvider):
@@ -51,9 +51,14 @@ def _scene_calls(llm: FakeLLMProvider) -> int:
     return sum(1 for call in llm.calls if call.schema is TitleCardSlots)
 
 
+@needs_ffmpeg
 async def test_a_kill_during_narration_does_not_repeat_completed_segments(tmp_path: Path) -> None:
     job = a_job()
-    fake_tts = FakeTTSProvider()
+    # Comfortably longer than 2x mux.concat_segments.DEFAULT_TRANSITION_S -- see the identical
+    # comment in test_graph_pipeline.py. A failed synthesize call never pops the queue (it raises
+    # before reaching that line), so seeding exactly segment_count entries here still covers every
+    # successful call across both the pre-kill and post-resume phases below.
+    fake_tts = FakeTTSProvider(durations=[3000] * job.segment_count)
     fake_storage = FakeStorage()
     # Fails whichever segment's task happens to call synthesize first -- deliberately not
     # ProviderUnavailable/RateLimited, which the node's own RetryPolicy would absorb before it
@@ -107,6 +112,7 @@ async def test_a_kill_during_narration_does_not_repeat_completed_segments(tmp_pa
     assert len(fake_tts.calls) == job.segment_count
 
 
+@needs_ffmpeg
 async def test_a_kill_during_scene_authoring_does_not_repeat_narration(tmp_path: Path) -> None:
     """The second fan-out's version of the same guarantee, and the more expensive one to get
     wrong: by the time ``author_scene`` runs, every segment has already been narrated by a *billed*
@@ -114,7 +120,8 @@ async def test_a_kill_during_scene_authoring_does_not_repeat_narration(tmp_path:
     again -- and, worse, re-measure, which is the one number Invariant 1 says must not move.
     """
     job = a_job()
-    fake_tts = FakeTTSProvider()
+    # See the identical comment in test_graph_pipeline.py / the first test above.
+    fake_tts = FakeTTSProvider(durations=[3000] * job.segment_count)
     fake_storage = FakeStorage()
     db_path = str(tmp_path / "checkpoints.sqlite")
     config = {"configurable": {"thread_id": job.job_id}}

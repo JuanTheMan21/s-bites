@@ -1,13 +1,12 @@
 {#
-  Shared design system for every scene template (T17, "Data Drift" style — see decisionlog.md
-  and the T17 plan). Not a composition on its own: three Jinja macros, {% import %}'d by each
-  of the six intent templates so the video reads as one produced piece rather than six unrelated
-  scenes (house-style.md: "same background across all scenes").
+  Shared design system for every scene template. Not a composition on its own: three Jinja
+  macros, {% import %}'d by each of the six intent templates so the video reads as one produced
+  piece rather than six unrelated scenes (house-style.md: "same background across all scenes").
 
-  tokens_style()                       -- CSS custom properties + the shared background classes.
-  background_markup(prefix, duration_sec) -- the #bg clip's inner HTML (glows, particles, rule).
-  background_script(prefix, duration_sec) -- the GSAP lines that animate that markup, appended
-                                             to the caller's own `tl` at the caller's chosen point.
+  tokens_style()                       -- font loading + CSS custom properties + shared classes.
+  background_markup(prefix, duration_sec) -- the #bg clip's inner HTML (the one ambient element).
+  background_script(prefix, duration_sec) -- the GSAP lines that animate it, appended to the
+                                             caller's own `tl` at the caller's chosen point.
 
   `prefix` namespaces element ids per template (e.g. "tc" for title_card) -- each composition is
   a standalone single-file index.html, so collision is not a runtime risk, but distinct ids make
@@ -16,25 +15,34 @@
   Non-negotiable per hyperframes-core: no element below carries its animated end-state in static
   CSS (a CSS initial `transform` paired with a GSAP tween on the same property is a lint failure,
   `gsap_css_transform_conflict`) -- every from-state here is set in JS via `fromTo`, never in CSS.
+
+  Revised after the first real video: the previous "Data Drift" identity (near-black + blurred
+  purple/cyan glow blobs + a 24-particle ambient field) read as generic AI dark-mode despite
+  trying to avoid that -- named cliches are specific instances, not the whole territory. This
+  version is flatter and more diagrammatic: true black, two flat colors used for what they mean
+  rather than for mood, no blur, no gradients, one restrained ambient device instead of a
+  decorative field. Colors carry meaning, not decoration: --accent-primary marks emphasis (the
+  point of the scene -- a headline's mark, a stat's value); --accent-secondary marks structure
+  (diagrams, data, code, markers -- things that organize information rather than assert it).
 #}
 
 {% macro tokens_style() %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0b0a14;
-    --fg: #e7e5f0;
-    --accent-purple: #7c3aed;
-    --accent-cyan: #06b6d4;
-    /* Lighter than --accent-purple specifically for small text: #7c3aed against --bg fails WCAG
-       AA (3.19:1, found live via `npx hyperframes check`'s contrast audit). Decorative uses
-       (glows, borders, gradients) keep --accent-purple; text uses this instead. */
-    --accent-purple-text: #b794f6;
+    --bg: #08080a;
+    --fg: #eeeeee;
+    --fg-muted: #8b8b93;
+    --accent-primary: #ffb703;
+    --accent-secondary: #4fa8ff;
   }
   html, body { margin: 0; padding: 0; }
   body {
     background: var(--bg);
     color: var(--fg);
-    font-family: "Montserrat", "Segoe UI", sans-serif;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   }
   .voice-data { font-family: "JetBrains Mono", "Courier New", monospace; }
   /* Explicit pixel size is required, not decorative -- hyperframes-core's "Root must be sized"
@@ -43,104 +51,50 @@
   #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
   .df-bg-layer { position: absolute; inset: 0; z-index: 0; }
   .df-content-layer { position: absolute; inset: 0; z-index: 1; }
-  .df-glow {
+  .df-frame {
     position: absolute;
-    width: 900px;
-    height: 900px;
-    border-radius: 50%;
-    filter: blur(140px);
-    will-change: opacity, transform;
-  }
-  .df-glow-purple {
-    top: -320px;
-    left: -220px;
-    background: radial-gradient(circle, var(--accent-purple), transparent 70%);
-  }
-  .df-glow-cyan {
-    bottom: -320px;
-    right: -220px;
-    background: radial-gradient(circle, var(--accent-cyan), transparent 70%);
-  }
-  .df-particle {
-    position: absolute;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--accent-cyan);
-    /* Default hidden: background_script fades these in with a plain `.to()` (no explicit "from"
-       state), so without this they'd render fully opaque before their own tween ever fires. */
+    inset: 56px;
+    border: 1.5px solid var(--accent-secondary);
+    /* Default hidden: background_script fades this in with the entrance beat, then breathes it
+       for the rest of the duration -- without this it would render at full opacity before its
+       own tween ever fires. */
     opacity: 0;
-    will-change: opacity, transform;
-  }
-  .df-particle:nth-child(3n) { background: var(--accent-purple); }
-  .df-rule {
-    position: absolute;
-    left: 8%;
-    width: 84%;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, var(--accent-purple), var(--accent-cyan), transparent);
-    transform-origin: left center;
-    display: block;
-    will-change: transform;
+    pointer-events: none;
+    will-change: opacity;
   }
 </style>
 {% endmacro %}
 
 {% macro background_markup(prefix, duration_sec) %}
 <div id="{{ prefix }}-bg" class="clip df-bg-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="0">
-  {# Deliberately bleeds off-canvas (video-composition.md: "radial glows... bleeding off-frame"
-     is the documented antidote to a flat/empty background) -- declared intentional so
-     `hyperframes check`'s layout audit doesn't flag it as a stray panel. #}
-  <div id="{{ prefix }}-glow-a" class="df-glow df-glow-purple" data-layout-allow-overflow="true"></div>
-  <div id="{{ prefix }}-glow-b" class="df-glow df-glow-cyan" data-layout-allow-overflow="true"></div>
-  <div id="{{ prefix }}-rule" class="df-rule" style="top: 12%;"></div>
-  {% for i in range(24) %}
-  <div id="{{ prefix }}-p{{ i }}" class="df-particle" style="left: {{ (i * 53) % 100 }}%; top: {{ (i * 37 + 11) % 100 }}%;"></div>
-  {% endfor %}
+  <div id="{{ prefix }}-frame" class="df-frame"></div>
 </div>
 {% endmacro %}
 
 {% macro background_script(prefix, duration_sec) %}
-  // Background layer -- one shared recipe, every template. Ambient motion never sits on a bare
-  // gsap.to(): it is attached to this scene's own `tl` so it scrubs deterministically under seek.
-  tl.fromTo("#{{ prefix }}-glow-a", { opacity: 0, scale: 0.85 }, { opacity: 0.22, scale: 1, duration: 1.2, ease: "power2.out" }, 0);
-  tl.fromTo("#{{ prefix }}-glow-b", { opacity: 0, scale: 0.85 }, { opacity: 0.18, scale: 1, duration: 1.4, ease: "power2.out" }, 0.15);
-  tl.fromTo("#{{ prefix }}-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.9, ease: "power2.out" }, 0.1);
-
+  // The one ambient device: a hairline frame that fades in with the scene, then breathes slowly
+  // for the rest of the duration. This is load-bearing, not decorative -- `hyperframes check`'s
+  // frozen-sweep guard fails a composition with no genuine animated property across its full
+  // length, and every template's own entrance tweens finish in the first second or two. Genuine
+  // GSAP property tween on `opacity`, never a manual `onUpdate` proxy: HyperFrames seeks this
+  // timeline with `suppressEvents` (D15's `seek(t, true)` convention), which skips onUpdate
+  // callbacks entirely but still applies a tracked property's own interpolated value -- caught
+  // live once already on a manual onUpdate particle drift that rendered fine in preview and did
+  // nothing under this project's actual capture/render/check pipeline.
+  //
+  // 0.22 floor / 0.32 peak, never lower: `hyperframes check`'s frozen-sweep guard treats opacity
+  // below 0.2 as invisible for its own liveness fingerprint (D89.3) -- the range here stays
+  // comfortably clear of that floor at every point in the cycle, not just at its peak, the same
+  // proven-safe 0.22 baseline the particle field this replaced already used for the same reason.
+  tl.fromTo("#{{ prefix }}-frame", { opacity: 0 }, { opacity: 0.22, duration: 1.0, ease: "power2.out" }, 0);
   (function () {
-    var particles = [];
-    for (var i = 0; i < 24; i++) {
-      particles.push(document.getElementById("{{ prefix }}-p" + i));
-    }
-    // One fade-in beat for the whole field, then per-particle ambient drift -- index-derived
-    // amplitude/period (never Math.random) so they don't move in lockstep. 0.22, not something
-    // lower within the 12-25% decorative range: `hyperframes check`'s layout audit treats
-    // anything below opacity 0.2 as invisible for its own frozen-sweep fingerprint (isVisibleElement's
-    // default floor), so a dimmer resting opacity would make this genuine drift undetectable to
-    // it -- found live, on a composition whose only other motion (an SVG stroke-dashoffset draw)
-    // is *also* invisible to a bbox-based fingerprint, since dash animation never changes an SVG
-    // element's geometric bounding box.
-    tl.to(particles, { opacity: 0.22, duration: 1.0, stagger: 0.02, ease: "power1.out" }, 0.2);
-
-    // Genuine GSAP property tweens on `y`, NOT a manual onUpdate proxy (sine-wave-loop's
-    // "onUpdate form"): HyperFrames seeks this timeline with suppressEvents (D15's
-    // `seek(t, true)` convention, also this project's own capture/lint/render path), which skips
-    // onUpdate callbacks entirely but still applies a tracked property's own interpolated value.
-    // A manual onUpdate DOM write is therefore invisible under render -- caught live, via
-    // `npx hyperframes check`'s sweep_static guard, not assumed. `y`/opacity are both on the
-    // animatable-property allowlist and GSAP's own engine applies them regardless of suppressed
-    // callbacks, which is why the opacity fade above scrubs correctly under seek.
     var totalDur = {{ duration_sec }};
-    particles.forEach(function (el, i) {
-      var amp = 4 + (i % 3) * 2;
-      var half = 1.1 + (i % 5) * 0.15;
-      var start = 0.3 + (i % 7) * 0.05;
-      // Must comfortably outlast the composition, not just "a while" -- a repeat count that
-      // runs out mid-composition freezes every particle for however much duration is left,
-      // which is exactly what tripped `sweep_static` (found live): ceil() plus a small margin,
-      // never floor(), so it always covers to the end regardless of duration_ms.
-      var reps = Math.max(1, Math.ceil((totalDur - start) / half)) + 2;
-      tl.to(el, { y: amp, duration: half, ease: "sine.inOut", yoyo: true, repeat: reps }, start);
-    });
+    var half = 1.75;
+    var start = 1.0;
+    // Duration-aware repeat, never a fixed count: a hardcoded repeat covers only
+    // duration * (repeat + 1) seconds and then freezes for whatever's left of the segment --
+    // the exact bug a fixed `repeat: 1` produced once already on this project's idle-bob motion.
+    var reps = Math.max(1, Math.ceil((totalDur - start) / half)) + 2;
+    tl.to("#{{ prefix }}-frame", { opacity: 0.32, duration: half, ease: "sine.inOut", yoyo: true, repeat: reps }, start);
   })();
 {% endmacro %}

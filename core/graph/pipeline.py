@@ -1,11 +1,14 @@
 """Wires the nodes into a graph: ``plan`` -> fan out one ``Send`` per segment -> ``synthesize`` ->
-``assign_tiers`` -> fan out again -> ``author_scene`` -> ``finalize``. The only file in the repo
-permitted to build a ``StateGraph`` -- everything else under ``core/graph/`` supplies state,
-context, nodes, or policy for this to assemble.
+``assign_tiers`` -> fan out again -> ``author_scene`` -> ``collect_scenes`` -> fan out a third time
+-> ``render_scene`` -> ``finalize``. The only file in the repo permitted to build a
+``StateGraph`` -- everything else under ``core/graph/`` supplies state, context, nodes, or policy
+for this to assemble.
 
-The two fan-outs are separated by a join on purpose, and the join is what enforces Invariant 1's
+Each fan-out is separated from the next by a join, and the joins are what enforce Invariant 1's
 ordering structurally: ``assign_tiers`` needs *every* segment's measured duration, so it cannot run
-until the TTS fan-out converges, and ``author_scene`` therefore cannot run until tiers exist.
+until the TTS fan-out converges; ``author_scene`` therefore cannot run until tiers exist; and
+``render_scene`` (which composes and renders a segment's *authored* scene) cannot run until slots
+exist either.
 """
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -19,6 +22,7 @@ from core.graph.nodes import (
     author_scene,
     finalize,
     plan_segments,
+    render_scene,
     synthesize_segment,
 )
 from core.graph.retry_policy import build_retry_policies, build_transient_retry_policy
@@ -42,6 +46,28 @@ def _fan_out_to_scene_authoring(state: GraphState) -> list[Send]:
         Send("author_scene", SegmentTask(job_id=state["job"].job_id, segment=segment))
         for segment in state["segments"].values()
     ]
+
+
+def _fan_out_to_rendering(state: GraphState) -> list[Send]:
+    """The same shape a third time, after ``collect_scenes``: one ``render_scene`` task per
+    segment, each carrying the measured, tiered, *and* authored segment."""
+    return [
+        Send("render_scene", SegmentTask(job_id=state["job"].job_id, segment=segment))
+        for segment in state["segments"].values()
+    ]
+
+
+async def _collect_scenes(state: GraphState) -> dict:
+    """A deliberately empty join, between ``author_scene``'s fan-out and ``render_scene``'s.
+
+    LangGraph only converges a superstep's concurrent ``Send`` tasks at a *named node* -- the same
+    reason ``assign_tiers`` sits between the first two fan-outs -- but unlike ``assign_tiers``,
+    nothing needs computing here: each segment renders independently of every other, so there is
+    no cross-segment step the way tier assignment is one. This node exists purely so
+    ``render_scene``'s fan-out has a converged, complete ``segments`` dict (every slot filled) to
+    read, not because it does anything to that dict itself.
+    """
+    return {}
 
 
 def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> CompiledStateGraph:
@@ -70,13 +96,28 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> CompiledStat
         input_schema=SegmentTask,
         retry_policy=build_transient_retry_policy(),
     )
-    builder.add_node("finalize", finalize)
+    # No policy: purely structural, returns {} unconditionally, cannot fail (see its docstring).
+    builder.add_node("collect_scenes", _collect_scenes)
+    # Transient-only: render_scene makes no LLMProvider call, so there is no StructuredOutputError
+    # to isolate -- only RenderFailed (retryable) and CompositionInvalid (our own gate, matches
+    # neither policy, propagates immediately).
+    builder.add_node(
+        "render_scene",
+        render_scene,
+        input_schema=SegmentTask,
+        retry_policy=build_transient_retry_policy(),
+    )
+    # finalize now does real I/O (concat + Storage.put_file) that can raise RenderFailed, where it
+    # previously did none -- transient-only, same reasoning as render_scene.
+    builder.add_node("finalize", finalize, retry_policy=build_transient_retry_policy())
 
     builder.add_edge(START, "plan_segments")
     builder.add_conditional_edges("plan_segments", _fan_out_to_segments, ["synthesize_segment"])
     builder.add_edge("synthesize_segment", "assign_tiers")
     builder.add_conditional_edges("assign_tiers", _fan_out_to_scene_authoring, ["author_scene"])
-    builder.add_edge("author_scene", "finalize")
+    builder.add_edge("author_scene", "collect_scenes")
+    builder.add_conditional_edges("collect_scenes", _fan_out_to_rendering, ["render_scene"])
+    builder.add_edge("render_scene", "finalize")
     builder.add_edge("finalize", END)
 
     return builder.compile(checkpointer=checkpointer)

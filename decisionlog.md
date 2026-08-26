@@ -1319,3 +1319,138 @@ build loop re-verifies it, since `/checkpoint` writes it once and the next sessi
 ground truth. Two wrong claims in a row in the same three-line table is a pattern, not a fluke.
 **Rule going forward: `/checkpoint`'s Git row is always written from a fresh `git log --oneline`
 and `git remote -v` in the same session, never copied from the previous handoff and edited.**
+
+## 2026-08-26 · T18 — Mux & CLI
+
+The task that produced the first complete, playable video -- and then, once a real person actually
+watched and listened to it, the session that found how much "the offline suite is green" still
+doesn't tell you. Two real videos got made; the second exists specifically because the first one's
+problems could only be found by looking and listening, not by any test.
+
+### D91 — `render_scene`/`finalize` extend the graph with a third `Send` fan-out, chosen over a CLI-side loop
+**Rejected:** driving `render_segment`/mux/concat from `cli.py` directly, outside the graph, once
+each segment's synthesize/tier/author steps complete -- the shape `handoff.md`'s own T17 close-out
+leaned toward as "most likely."
+**Reasoning:** raised as an explicit fork and decided by the user. Extending the graph means a
+killed run resumes without re-rendering already-finished segments -- T14/D68's guarantee, now
+covering the one stage that actually costs real wall-clock minutes (D78's animated-tier render
+time), where the CLI-side alternative would have to redo it from nothing on every crash.
+`collect_scenes` (`core/graph/pipeline.py`) is a deliberately empty join node between the second and
+third fan-outs, existing only because LangGraph needs a named node to converge a superstep before
+fanning out again -- the same structural reason `assign_tiers` sits between the first two.
+
+### D92 — `RUNTIME_ENV=azure` cannot drive a render end to end yet; T18's DoD was met by hand-mixing adapters, not by `cli.py` alone
+**Discovered while running T18's own DoD command, not assumed.** `python cli.py "<topic>"` under
+`RUNTIME_ENV=azure` reaches `render_scene` and immediately raises `NotImplementedError` from
+`ContainerAppsRenderBackend.lint` -- `config.py`'s azure branch for `RenderBackend`, unchanged since
+T12/D25, is still exactly the stub it always was; real implementation doesn't land until T35.
+`RUNTIME_ENV=local` cannot substitute either, since its `LLMProvider`/`TTSProvider` still don't
+exist (D58/D59/D64). **No single `RUNTIME_ENV` value can currently produce a real video** -- a gap
+that predates this task and stayed invisible until an actual end-to-end render was attempted.
+**Rejected:** waiting for T35 before calling T18 done, and separately, quietly changing `config.py`
+so `RUNTIME_ENV=azure` silently resolves local rendering -- which would make "azure" a lie about
+what actually runs.
+**Reasoning:** the real videos this task's DoD asks for were produced by resolving Azure's
+`LLMProvider`/`TTSProvider`/`Storage`/`SkillRegistry` and the *local* `RenderBackend` by hand,
+calling `config.py`'s own per-interface builder functions directly against two different `env`
+mappings rather than through `build_adapters()`'s single-stack resolution -- a one-off, explicitly
+not committed as a new code path, since silently mixing stacks would defeat `config.py`'s whole
+reason for existing. T18A's local entrypoint is where this mixing becomes real, labeled, permanent
+code instead of a manual step; T35 is what closes the gap for good.
+
+### D93 — Real crossfade transitions between segments, not a hard cut -- and the audio design mistake it produced
+**Rejected (the version that shipped, then was found wrong by actually listening to it):**
+`mux/concat_segments.py` chaining `xfade` (video) and `acrossfade` (audio) together at the same
+`transition_s`, on the reasoning that a smooth visual dissolve needed a matching audio treatment.
+**Reasoning for the original change:** the second real video's biggest complaint was reading as "15
+independent slides," and the previous stream-copy concat (D3/D18-era, `-c copy`, zero transition)
+was a real contributor on top of every segment being composed independently regardless. The
+`xfade`/`acrossfade` chain fixed the hard-cut symptom and is verified correct on its own terms --
+offset/cumulative-duration math checked by hand and independently by `project-reviewer`, both
+against real mixed-tier renders (a Tier 0/1 clip and a Tier 2 clip in the same chain, the specific
+risk flagged when this was built).
+**What was wrong with it, found only by listening:** `acrossfade` blends the *tail of one segment's
+narration with the head of the next* for the full transition window -- two different sentences
+audibly overlapping, which reads exactly like the narrator interrupting themselves. Every duration
+and sync assertion passed throughout, because they only ever checked timing, never content -- the
+same class of lesson D89 already drew about rendering bugs (only a real render, or here a real
+listen, catches it), arriving in a new medium.
+**Deferred to T18A, not fixed here.** The correct fix is designed, not yet built: pad each non-last
+clip's *video* stream with a held last frame (`tpad`) so `xfade` consumes only that padding, never
+real narrated time, while audio becomes a plain, unshrunk `concat` with no blending at all --
+landing both streams at exactly `sum(durations_ms)`, and eliminating every bit of speech overlap.
+Recorded here so `mux/concat_segments.py`'s current `acrossfade` is understood as a known,
+accepted-for-now defect rather than a silent one.
+
+### D94 — `diagram_flow`'s node markers are too transparent to hide the rail line behind them
+**Discovered by the user, from the actual rendered video** -- not caught by any test or review pass
+in this task. `.df-node-marker`'s fill (`rgba(79, 168, 255, 0.1)`, 10% opacity) doesn't occlude the
+SVG rail line drawn at the same position, so the connecting line visibly cuts through every node
+circle instead of appearing to pass behind it.
+**Deferred to T18A, not fixed here.** Recorded rather than left implicit because the fix is narrow
+and easy to lose track of otherwise: an opaque (or near-opaque) marker background, e.g. `var(--bg)`,
+occludes the line regardless of the exact stacking cause -- worth confirming empirically what that
+cause actually was, not just patching the symptom, when T18A picks this up.
+
+### D95 — The redesigned visual identity replaces glow/gradient with two flat colors used for meaning, not mood -- and quietly fixes a font that was never actually loading
+**Rejected:** the "Data Drift" identity D83 chose at T17 (near-black + blurred purple/cyan glow
+blobs + a particle field), after the second real video's own screenshots showed it still reading as
+generic "AI dark-mode" despite D83's stated intent to avoid exactly that. A named cliché is a
+specific instance, not the whole territory it warns about.
+**Reasoning:** `--accent-primary` (`#ffb703`, flat amber) marks emphasis; `--accent-secondary`
+(`#4fa8ff`, flat blue) marks structure/data -- no gradients, no blur, anywhere.
+**Found in passing while doing this:** no template ever linked a Google Fonts stylesheet, so
+"Montserrat"/"JetBrains Mono" in the CSS had been silently falling back to system fonts (Segoe UI)
+since T17 shipped -- decisionlog and handoff both described a typographic identity that was never
+actually rendering. Fixed alongside the palette change (a real `<link>`, IBM Plex Sans replacing
+Montserrat as the display face) rather than left to compound further.
+**The particle field's replacement -- a single breathing hairline frame -- initially shipped with
+its opacity range (0.14-0.2) sitting at or below D89.3's documented 0.2 floor** for
+`hyperframes check`'s frozen-sweep guard, found by `project-reviewer`'s checkpoint pass reasoning
+from that exact prior lesson before any render proved it either way. Fixed to 0.22-0.32, comfortably
+clear of the floor at every point in the cycle, matching the particle field's own proven-safe 0.22
+baseline exactly.
+**Still open, from the same content:** the user's own read after the fix landed -- "still reads navy
+blue" -- is a fair miss on its own terms. This specific video's content mix (8 of 15 segments were
+`diagram_flow`, which leans almost entirely on the blue token) made blue dominant regardless of the
+palette itself having changed. Not resolved here; carried into T18A's discussion of a richer diagram
+intent that can lean amber instead.
+
+### D96 — `hyperframes check` is non-deterministically flaky at the CLI version currently resolved (0.8.15), independent of anything in this diff
+**Discovered while re-verifying D95's opacity fix, not assumed.** Running `npx hyperframes check
+--json` repeatedly against the *same, unchanged* composition directory produced `ok: false` (a
+`sweep_static` finding claiming `[data-composition-id]` "did not advance under seek," with an
+all-zero bounding box) on some runs and `ok: true` on others -- 2 of 5 runs failed, no code change
+between them. The CLI has drifted again (0.8.10 at T16 -> 0.8.12 at T17 -> 0.8.15 now), each time
+with no project-level pin (still no `package.json` at the repo root).
+**Not fixed here -- cannot be, from this codebase.** Recorded as a real, current gap: any future
+session leaning on `hyperframes check` as a hard gate should expect occasional false failures at
+this CLI version and re-run before treating one red result as real, or investigate pinning the CLI
+to something known-stable.
+
+### D97 — Resume durability across the render/finalize fan-out is unverified, and narrower than the graph's earlier stages
+**Found by `project-reviewer`'s checkpoint pass, not fixed here.** `render_scene`/`finalize` both
+reconstruct local-disk paths (`local_narration_path`, `local_clip_path`) for files an *earlier*
+superstep wrote, with no fallback to `Storage` if that file is gone -- new territory, since no node
+before this task ever needed to re-read another node's on-disk output across a potential resume
+boundary. `tests/test_graph_resume.py` covers a kill/resume across the first two fan-outs only;
+there is no case covering one that crosses `render_scene` or `finalize`.
+**Accepted, not solved, here.** For the CLI's own single-machine, job-id-keyed `working_dir` this is
+unlikely to bite in practice, but it is a real, untested narrowing of what "resume" guarantees in a
+codebase that has otherwise treated resume-durability as verified (D68) rather than assumed.
+Whichever future task next touches resume (T18A's local entrypoint, or T35's cloud render backend,
+where `working_dir` surviving between processes is a real question) should close this for real
+rather than continue inheriting the assumption.
+
+### D98 — T18A, not a renumbered T19-T35, for the follow-on work the second real video surfaced
+**Rejected:** cascading every task from old-T19 onward up by one to make room for the new work as a
+clean "T19" -- fully drafted (`tasks.md`, plus every in-code comment/docstring/test referencing
+T19-T35) before the user reconsidered mid-edit and asked for a lettered insertion instead.
+**Reasoning:** user's explicit call. A renumber touches far more than `tasks.md` --
+`tests/test_adapter_stubs.py` asserts on the literal string "T34"/"T35" inside exception messages
+the Azure stubs raise, and half a dozen other files carry the same numbers in docstrings/comments
+(`config.py`, `core/models.py`, `adapters/local|azure/*`, more) -- all reverted back to original
+once the direction changed. `T18A` sits between T18 and the untouched original T19, with its own
+"task numbers are identity, not order" note in `tasks.md` (the same device already used for
+T34/T35's Iteration 5.5 insertion) -- zero blast radius on anything already numbered, at the cost of
+one non-sequential label.

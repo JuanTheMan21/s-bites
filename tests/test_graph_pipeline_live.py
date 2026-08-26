@@ -1,0 +1,166 @@
+"""The full graph against the real local render backend -- the mixed-tier concat risk flagged in
+T18's plan, exercised for real: does ``mux/concat_segments.py``'s crossfade concat actually
+tolerate a Tier 0 clip (encoded by this project's own ``mux/frames_to_clip.py``) and a Tier 2 clip
+(encoded by the HyperFrames CLI, D15) sitting in the same ``xfade``/``acrossfade`` chain?
+
+``local_live``, following ``test_render_segment_live.py``'s shape: real
+``PlaywrightHyperFramesRenderBackend``, ``aclose()`` in ``finally``. LLM and TTS stay fake -- this
+tests the render/mux/concat path, not Azure, so there is no reason to spend real money proving it.
+
+Both segments share one visual intent and one measured duration, deliberately: the ``author_scene``
+and ``synthesize_segment`` fan-outs are concurrent, so the order either fake's queue gets popped in
+is not guaranteed to match segment index -- identical entries make that irrelevant rather than
+flaky, the same reasoning ``tests/graph_pipeline_fixtures.py::slot_payloads`` already documents.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from core.graph import GraphContext, build_graph
+from core.models import Importance, Tier, VideoJob, VisualIntent
+from core.outline_schema import Outline, SegmentPlan
+from core.scripting_schema import Narration
+from core.slot_schemas import TitleCardSlots
+from interfaces import SkillPack
+from mux.concat_segments import DEFAULT_TRANSITION_S
+from tests.fakes import FakeLLMProvider, FakeSkillRegistry, FakeStorage, FakeTTSProvider
+
+pytestmark = pytest.mark.local_live
+
+DURATION_MS = 2_000
+# Comfortably above 2x mux.concat_segments.DEFAULT_TRANSITION_S (1.0s) -- a duration right at
+# that boundary made the one crossfade transition below too tight against the STATIC clip's own
+# length to render reliably.
+#
+# FRAME_BUDGET chosen against core/tier_resolver.py's own arithmetic (checked by hand, not
+# guessed): base cost is 2 (one STATIC frame per segment). Promoting the CRITICAL segment to
+# REVEAL costs +7 (spent=9); promoting it on to ANIMATED at DURATION_MS/FPS costs +40 more
+# (ceil(2000/1000*24)=48, minus the 8 it already cost at REVEAL) for spent=49. 55 clears that with
+# room, while never affording the ASIDE segment (ideal STATIC) anything beyond Tier 0.
+FRAME_BUDGET = 55
+FPS = 24
+
+
+def _seeded_llm() -> FakeLLMProvider:
+    outline = Outline(
+        segments=[
+            SegmentPlan(
+                title="An aside",
+                summary="Barely matters.",
+                visual_intent=VisualIntent.TITLE_CARD,
+                importance=Importance.ASIDE,
+            ),
+            SegmentPlan(
+                title="The point",
+                summary="The whole reason for the video.",
+                visual_intent=VisualIntent.TITLE_CARD,
+                importance=Importance.CRITICAL,
+            ),
+        ]
+    )
+    narrations = [Narration(text="Narration one."), Narration(text="Narration two.")]
+    slots = [
+        TitleCardSlots(headline="Headline 0", subtitle=None),
+        TitleCardSlots(headline="Headline 1", subtitle=None),
+    ]
+    return FakeLLMProvider([outline, *narrations, *slots])
+
+
+def _seeded_skills() -> FakeSkillRegistry:
+    return FakeSkillRegistry(
+        [
+            SkillPack(name=name, version="1.0", content=f"{name} pack")
+            for name in ("outline", "scripting", "house-style", "scene-authoring")
+        ]
+    )
+
+
+async def test_a_mixed_tier_job_renders_muxes_and_concats_to_one_playable_video(
+    tmp_path: Path,
+) -> None:
+    from adapters.local.render_backend import PlaywrightHyperFramesRenderBackend
+
+    real_render = PlaywrightHyperFramesRenderBackend(
+        quality="draft", max_attempts=1, timeout_s=90.0
+    )
+    storage = FakeStorage()
+    job = VideoJob(job_id="live-mixed-tier", topic="a nice topic")
+
+    try:
+        context = GraphContext(
+            llm=_seeded_llm(),
+            tts=FakeTTSProvider(durations=[DURATION_MS, DURATION_MS]),
+            storage=storage,
+            skills=_seeded_skills(),
+            render=real_render,
+            working_dir=tmp_path / "work",
+            frame_budget=FRAME_BUDGET,
+            fps=FPS,
+        )
+        graph = build_graph()  # no checkpointer -- this test proves rendering, not resume
+        config = {"configurable": {"thread_id": job.job_id}}
+
+        result = await graph.ainvoke({"job": job, "segments": {}}, config, context=context)
+    finally:
+        await real_render.aclose()
+
+    result_job: VideoJob = result["job"]
+    assert result_job.status.value == "succeeded"
+
+    tiers = {segment.tier for segment in result_job.segments}
+    assert tiers == {Tier.STATIC, Tier.ANIMATED}, (
+        f"expected exactly one STATIC and one ANIMATED segment to exercise the mixed-tier concat "
+        f"path, got {tiers} -- FRAME_BUDGET's arithmetic above may need revisiting"
+    )
+
+    assert result_job.video_key is not None
+    final_bytes = storage.objects[result_job.video_key]
+    assert len(final_bytes) > 0
+
+    final_path = tmp_path / "final.mp4"
+    final_path.write_bytes(final_bytes)
+    probe = _ffprobe(final_path)
+    assert probe["stream_types"] == {"video", "audio"}
+    # One crossfade transition (two clips) eats DEFAULT_TRANSITION_S off the naive sum, by design.
+    expected_ms = 2 * DURATION_MS - DEFAULT_TRANSITION_S * 1000
+    assert probe["duration_ms"] == pytest.approx(expected_ms, abs=300)
+
+
+def _ffprobe(path: Path) -> dict:
+    import subprocess
+
+    streams = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "csv=p=0",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    duration = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nw=1:nk=1",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return {
+        "stream_types": {line.strip() for line in streams.splitlines() if line.strip()},
+        "duration_ms": round(float(duration) * 1000),
+    }

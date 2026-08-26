@@ -1,7 +1,7 @@
 {% import "_tokens.html" as tokens %}
 <!doctype html>
 <!--
-  VisualIntent.STAT_CALLOUT -- a single number, given room to land. Data Drift style (T17 plan).
+  VisualIntent.STAT_CALLOUT -- a single number, given room to land.
   `value` is a free-form STRING ("1 in 5", "3.2 billion") per core/slot_schemas.py -- not
   guaranteed numeric -- so this adapts counting-dynamic-scale's escalating-weight *mechanic*
   (scale grow, no digit count-up) rather than its literal onUpdate counter, and gives the value
@@ -32,7 +32,7 @@
       #sc-bracket-bottom {
         width: 420px;
         height: 3px;
-        background: linear-gradient(90deg, transparent, var(--accent-purple), var(--accent-cyan), transparent);
+        background: var(--accent-primary);
         transform-origin: center;
         display: block;
         will-change: transform;
@@ -59,7 +59,7 @@
         font-family: "JetBrains Mono", "Courier New", monospace;
         font-weight: 400;
         font-size: 56px;
-        color: var(--accent-cyan);
+        color: var(--accent-secondary);
         opacity: 0;
         will-change: opacity, transform;
       }

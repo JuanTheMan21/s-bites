@@ -1,9 +1,11 @@
 {% import "_tokens.html" as tokens %}
 <!doctype html>
 <!--
-  VisualIntent.TITLE_CARD -- opening card / section boundary. Data Drift style (T17 plan):
-  centered headline with a focused hero bloom behind it, optional subtitle anchored below.
-  Rules composed: spring-pop-entrance (headline) + ambient-glow-bloom (hero bloom).
+  VisualIntent.TITLE_CARD -- opening card / section boundary. Centered headline on flat black,
+  a flat underline as the one accent mark, optional subtitle anchored below. No hero bloom --
+  a blurred radial-gradient glow behind the headline was the single most "generic AI dark-mode"
+  element in the previous version; content and type carry this scene now, not ambient glow.
+  Rule composed: spring-pop-entrance (headline).
 -->
 <html lang="en">
   <head>
@@ -24,20 +26,8 @@
         padding: 0 220px;
         box-sizing: border-box;
       }
-      .hero-bloom {
-        position: absolute;
-        width: 1100px;
-        height: 1100px;
-        top: 50%;
-        left: 50%;
-        margin: -550px 0 0 -550px;
-        border-radius: 50%;
-        background: radial-gradient(circle, var(--accent-purple), transparent 65%);
-        filter: blur(160px);
-        will-change: opacity, transform;
-      }
       #headline {
-        font-weight: 900;
+        font-weight: 700;
         font-size: 104px;
         line-height: 1.08;
         letter-spacing: -0.02em;
@@ -48,7 +38,7 @@
         width: 260px;
         height: 4px;
         margin-top: 44px;
-        background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan));
+        background: var(--accent-primary);
         transform-origin: center;
         display: block;
         will-change: transform;
@@ -57,7 +47,7 @@
         margin-top: 40px;
         font-weight: 400;
         font-size: 36px;
-        color: var(--accent-cyan);
+        color: var(--fg-muted);
         max-width: 80%;
         will-change: opacity, transform;
       }
@@ -74,7 +64,6 @@
     >
       {{ tokens.background_markup('tc', duration_sec) }}
       <div id="content" class="clip df-content-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="1">
-        <div id="tc-hero-bloom" class="hero-bloom"></div>
         <div id="stage">
           <h1 id="headline">{{ slots.headline }}</h1>
           <span id="tc-underline"></span>
@@ -91,10 +80,7 @@
 
       {{ tokens.background_script('tc', duration_sec) }}
 
-      // Hero bloom lands as the headline settles -- one beat, glow behind, headline in front.
-      tl.fromTo("#tc-hero-bloom", { opacity: 0, scale: 0.85 }, { opacity: 0.3, scale: 1, duration: 0.9, ease: "power2.out" }, 0.15);
-
-      // Headline: smooth spring-pop entrance, no bounce (Data Drift is "nothing hard").
+      // Headline: smooth spring-pop entrance, no bounce.
       tl.fromTo("#headline", { scale: 0.7, opacity: 0, y: 24 }, { scale: 1, opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.2);
 
       // Structural underline draws in right after the headline lands.

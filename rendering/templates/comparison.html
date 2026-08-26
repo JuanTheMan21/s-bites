@@ -1,8 +1,10 @@
 {% import "_tokens.html" as tokens %}
 <!doctype html>
 <!--
-  VisualIntent.COMPARISON -- two things set against each other. Data Drift style (T17 plan):
-  symmetric 3D "book-open" split, mirrored tilts, counter-phase idle bob.
+  VisualIntent.COMPARISON -- two things set against each other. Symmetric 3D "book-open" split,
+  mirrored tilts, counter-phase idle bob. Cards are flat hairline panels, not glass -- no blur,
+  no glow shadow; both sides use the same accent color since position (left/right) already
+  distinguishes them and neither side is inherently "wrong."
   Rule composed: split-tilt-cards (this is that rule's own comparison-split blueprint shape).
 -->
 <html lang="en">
@@ -23,7 +25,7 @@
         align-items: center;
       }
       #headline {
-        font-weight: 900;
+        font-weight: 700;
         font-size: 64px;
         text-align: center;
         max-width: 80%;
@@ -48,25 +50,22 @@
         transform-style: preserve-3d;
         box-sizing: border-box;
         padding: 56px;
-        border-radius: 20px;
-        border: 2px solid rgba(231, 229, 240, 0.16);
-        background: rgba(231, 229, 240, 0.04);
+        border-radius: 5px;
+        border: 1.5px solid rgba(238, 238, 238, 0.18);
+        background: rgba(238, 238, 238, 0.03);
         will-change: opacity, transform;
       }
-      .card-left { box-shadow: -30px 40px 90px rgba(124, 58, 237, 0.25); }
-      .card-right { box-shadow: 30px 40px 90px rgba(6, 182, 212, 0.25); }
       .card-eyebrow {
         font-family: "JetBrains Mono", "Courier New", monospace;
         font-size: 22px;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: var(--accent-cyan);
+        color: var(--accent-secondary);
         opacity: 0;
         will-change: opacity, transform;
       }
-      .card-right .card-eyebrow { color: var(--accent-purple-text); }
       .card-headline {
-        font-weight: 900;
+        font-weight: 700;
         font-size: 40px;
         margin-top: 18px;
         opacity: 0;

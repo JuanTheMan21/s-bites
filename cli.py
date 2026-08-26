@@ -1,0 +1,119 @@
+"""``python cli.py "<topic>"`` -- the fastest inner loop this project has (D8), and the thing
+T18's DoD is verified against: outline, narrate, tier, author every scene, render, mux, and concat,
+all the way to one playable MP4, honoring ``RUNTIME_ENV``.
+
+Not under ``core/``, so the boundary hook does not restrict it -- imports ``langgraph`` directly,
+the same as ``tests/test_graph_pipeline.py`` already does, with no wrapper needed.
+"""
+
+import argparse
+import asyncio
+import os
+import time
+import uuid
+from collections import Counter
+from pathlib import Path
+
+from dotenv import load_dotenv
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+from config import build_adapters, close_adapters
+from core.graph import GraphContext, build_graph
+from core.models import DEFAULT_TARGET_DURATION_MS, VideoJob
+
+# Azure Speech S0's published rate (D48) -- used only for the estimated-cost line in the summary
+# below, never for anything that decides behaviour.
+AZURE_SPEECH_S0_USD_PER_MILLION_CHARS = 15.0
+
+
+def _required_int(name: str) -> int:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is not set. Copy .env.example to .env and fill it in.")
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer, got {value!r}") from exc
+
+
+def _print_summary(job: VideoJob, *, elapsed_s: float) -> None:
+    spread = Counter(segment.tier for segment in job.segments)
+    total_chars = sum(len(segment.narration or "") for segment in job.segments)
+    estimated_tts_usd = total_chars / 1_000_000 * AZURE_SPEECH_S0_USD_PER_MILLION_CHARS
+
+    print(f"\nsegments: {len(job.segments)}")
+    print(
+        "tiers:    " + "  ".join(f"T{int(tier)}={count}" for tier, count in sorted(spread.items()))
+    )
+    print(f"elapsed:  {elapsed_s:.1f}s")
+    print(
+        f"narration: {total_chars} characters (~${estimated_tts_usd:.3f} estimated TTS cost, "
+        "Azure Speech S0 rate -- LLM cost is not itemized here; run /costs for the real total)"
+    )
+
+
+async def _run(topic: str, *, target_duration_ms: int, job_id: str) -> VideoJob:
+    load_dotenv()
+    frame_budget = _required_int("FRAME_BUDGET")
+    fps = _required_int("FPS")
+
+    job = VideoJob(job_id=job_id, topic=topic, target_duration_ms=target_duration_ms)
+    working_dir = Path("artifacts") / "_cli_run" / job.job_id
+    # AsyncSqliteSaver.from_conn_string opens the file with sqlite3.connect, which does not
+    # create missing parent directories -- every graph test gets this for free from pytest's
+    # tmp_path fixture, but a fresh job_id here means working_dir genuinely does not exist yet.
+    working_dir.mkdir(parents=True, exist_ok=True)
+
+    adapters = build_adapters()
+    try:
+        context = GraphContext(
+            llm=adapters.llm,
+            tts=adapters.tts,
+            storage=adapters.storage,
+            skills=adapters.skills,
+            render=adapters.render,
+            working_dir=working_dir,
+            frame_budget=frame_budget,
+            fps=fps,
+        )
+        async with AsyncSqliteSaver.from_conn_string(
+            str(working_dir / "checkpoints.sqlite")
+        ) as saver:
+            graph = build_graph(saver)
+            config = {"configurable": {"thread_id": job.job_id}}
+            result = await graph.ainvoke(
+                {"job": job, "segments": {}}, config, context=context, durability="sync"
+            )
+        finished: VideoJob = result["job"]
+
+        local_final = working_dir / finished.job_id / "final.mp4"
+        print(f"\nlocal copy:  {local_final}")
+        if finished.video_key is not None:
+            print(f"storage url: {await adapters.storage.url(finished.video_key)}")
+        return finished
+    finally:
+        await close_adapters(adapters)
+
+
+async def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("topic", help="the prompt as a user would type it")
+    parser.add_argument(
+        "--target-duration-ms",
+        type=int,
+        default=DEFAULT_TARGET_DURATION_MS,
+        help="requested video length; segment count and frame budget both derive from it",
+    )
+    parser.add_argument(
+        "--job-id", default=None, help="defaults to a fresh uuid4 -- pass one to resume a run"
+    )
+    args = parser.parse_args()
+
+    job_id = args.job_id or str(uuid.uuid4())
+    started = time.perf_counter()
+    finished = await _run(args.topic, target_duration_ms=args.target_duration_ms, job_id=job_id)
+    _print_summary(finished, elapsed_s=time.perf_counter() - started)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

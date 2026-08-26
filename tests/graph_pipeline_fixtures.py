@@ -5,7 +5,10 @@ Not a test module -- the same role ``tests/plan_segments_fixtures.py`` plays for
 Split out when the graph grew a second fan-out and the resume cases outgrew one file's 200 lines.
 """
 
+import shutil
 from pathlib import Path
+
+import pytest
 
 from core.graph import GraphContext
 from core.models import Importance, VideoJob, VisualIntent
@@ -21,13 +24,21 @@ from tests.fakes import (
     FakeTTSProvider,
 )
 
+needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
+
 # 100s targets 4 segments (round(100_000 / 1000 / 28) == 4) -- enough to make fan-out and a
 # single failure among several concurrent tasks meaningful, small enough to stay fast.
 TARGET_DURATION_MS = 100_000
 
-# The .env defaults. At this job's length they scale to a budget every segment fits inside, so
-# every segment gets a tier -- what varies with the budget is tested in test_tiering_node.py.
-FRAME_BUDGET = 1400
+# Zero, not the .env default -- T18's render_scene fan-out now sits downstream of tiering, and
+# core/tier_resolver.py starts every segment on Tier.STATIC unconditionally, only promoting a
+# segment if doing so fits the budget. A budget of 0 therefore keeps every segment on Tier 0
+# deterministically, regardless of FakeTTSProvider's (tiny) synthesized durations -- which matters
+# here specifically because Tier 0/1 render through real ffmpeg (mux/frames_to_clip.py) and
+# produce a real MP4, where Tier 2 would dispatch to FakeRenderBackend.render's placeholder bytes
+# (its own docstring: "T18's mux work must run against the real local adapter, not this"). What
+# varies *with* the budget is tested in test_tiering_node.py, which builds its own context.
+FRAME_BUDGET = 0
 FPS = 24
 
 

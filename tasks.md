@@ -1,6 +1,6 @@
 # Task Backlog
 
-35 tasks across 8 iterations. **One task per session.** Descriptions are deliberately high-level —
+36 tasks across 8 iterations. **One task per session.** Descriptions are deliberately high-level —
 detail is negotiated in plan mode at the start of each session, not pre-baked here.
 
 Status: `todo` · `in-progress` · `done` · `blocked`
@@ -271,20 +271,41 @@ needs to know: **ambient/idle motion must be a genuine GSAP property tween, neve
 `onUpdate` DOM write** — HyperFrames' `seek(id, t, true)` convention (D15) skips `onUpdate`
 callbacks entirely.
 
-### T18 — Mux & CLI · `todo`
-Per-segment audio mux, then concat, then the CLI entrypoint. **This task produces the first
+### T18 — Mux & CLI · `done`
+Per-segment audio mux, then concat, then the CLI entrypoint. **This task produced the first
 complete video.**
-**DoD:** `python cli.py "<topic>"` yields a playable ~7-min MP4 on both stacks; no drift.
+**DoD:** `python cli.py "<topic>"` yields a playable ~7-min MP4 on both stacks; no drift — met for
+`RUNTIME_ENV=azure`'s LLM/TTS paired with the real local render backend by hand (see decisionlog);
+`cli.py` itself cannot yet run either stack fully standalone, since `RUNTIME_ENV=azure`'s
+`RenderBackend` is still T35's stub. Two real bugs found only by watching/listening to the actual
+output (a rendered rail line showing through its own node markers; crossfaded narration audio
+reading as the narrator interrupting themselves) are carried forward into T18A, not fixed here.
 **Depends:** T17 — met.
-**`rendering/render_segment.py::render_segment` exists and is proven against the real backend, but
-is not wired into `core/graph/` or a runner** — that wiring, and the artifact-directory convention
-for where compositions/clips live (a `SEGMENT_COMPOSITION_KEY`-shaped constant, the way
-`synthesize.py` owns `SEGMENT_AUDIO_KEY`), is this task's to decide, not inherited from T17.
-**`mux/frames_to_clip.py` already exists** (T17, D84) with `hold_frame`/`crossfade` — this task's
-audio-mux/concat functions belong in the same directory, following the same ffmpeg-subprocess
-pattern (timeout → kill → `RenderFailed`, `-t`-pinned exact duration), not a new one.
-**`FakeRenderBackend.render` still writes placeholder bytes, not a real MP4** — anything here that
-cares about real output must run against the real local backend.
+
+---
+
+Task numbers are identity, not order: **T18A runs here**, right after T18 and before iteration 4,
+so nothing already numbered T19 onward has to shift.
+
+### T18A — Fix the render/audio bugs, ship a local entrypoint, add a real network-diagram intent · `todo`
+Two bugs the second real video surfaced get fixed first: `diagram_flow`'s connecting rail rendering
+through its own node markers (an under-opaque marker fill), and `mux/concat_segments.py`
+crossfading *narration audio* along with picture, which reads as the narrator interrupting
+themselves rather than a clean transition. Then a small local-only entry point — one FastAPI route
+reusing `cli.py`'s own pipeline call, one static page with a text box and a video player — so a
+topic can be typed and a video played back without a manual script. Then
+`VisualIntent.NETWORK_DIAGRAM` via `/newintent`: layered nodes with real weighted connections, a
+materially richer generic shape than `diagram_flow`'s straight rail, for content (neural networks,
+org charts, state machines) the existing six intents currently render as an abstract, topic-blind
+process. If time allows within scope, a storyboard step ahead of `plan_segments` that lets one
+visual motif carry across several segments instead of every scene starting cold.
+**DoD:** both bugs verified fixed by a real render and a real listen, not only by tests; a topic
+typed into the local page produces a playable video with no manual script involved; the new intent
+renders validly at all three tiers.
+**Depends:** T18 — met.
+**Explicitly not this task:** fully bespoke per-topic animation (composing scenes from primitives
+an LLM directs freely, rather than picking from a fixed template set) — discussed and deliberately
+scoped out as a much larger, research-shaped undertaking; see decisionlog.
 
 ---
 
@@ -374,7 +395,8 @@ D15) plus vendored GSAP, since the scaffold's CDN pull will not survive a locked
 Expect fewer parallel workers than local: Container Apps caps at 4 vCPU against this machine's 16.
 **DoD:** a Tier-2 segment renders in the cloud and its duration matches the local render of the
 same composition within tolerance; `RUNTIME_ENV=azure` runs a job end to end with nothing executing
-on the developer machine.
+on the developer machine. **Closes the gap T18/T18A worked around by hand** — once this exists,
+`cli.py` runs a full job on `RUNTIME_ENV=azure` alone, no manual adapter-mixing needed.
 **Depends:** T34
 
 ---

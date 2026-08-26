@@ -123,6 +123,11 @@ class Segment(BaseModel):
         "because the shape varies by intent; validate it with "
         "core.slot_schemas.slot_schema_for(visual_intent).",
     )
+    clip_key: str | None = Field(
+        default=None,
+        description="Storage key of this segment's final clip (rendered video + narration "
+        "audio, muxed). Set only by core/graph/nodes/render_scene.py, once slots are filled.",
+    )
 
 
 class VideoJob(BaseModel):
@@ -142,6 +147,11 @@ class VideoJob(BaseModel):
     status: JobStatus = JobStatus.QUEUED
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     segments: list[Segment] = Field(default_factory=list)
+    video_key: str | None = Field(
+        default=None,
+        description="Storage key of the finished, concatenated video. Set only by "
+        "core/graph/nodes/finalize.py, once every segment's clip has been rendered and muxed.",
+    )
 
     @property
     def segment_count(self) -> int:

@@ -1,22 +1,18 @@
 """Turning Tier 0/1 stills into a silent video clip via ffmpeg.
 
-Per CLAUDE.md, ffmpeg subprocess calls live in ``mux/`` and only here -- ``rendering/static.py``
-and ``rendering/reveal.py`` call into this module rather than shelling out themselves. This is the
-one place in the repo besides T18's future audio mux that touches ffmpeg.
+Per CLAUDE.md, ffmpeg subprocess calls live in ``mux/`` -- this module, plus T18's
+``audio_mux.py``/``concat_segments.py``, all sharing one spawn/timeout/kill implementation in
+``mux/ffmpeg_run.py`` rather than each repeating it.
 
 Both functions pin the output's duration to ``duration_ms`` *exactly* via ``-t`` on the final
 encode, the same discipline D18 used for audio mux -- the internal timing math below is built to
 land at or past that mark, and ``-t`` is what makes the guarantee exact rather than approximate.
 """
 
-import asyncio
-import contextlib
 from collections.abc import Sequence
 from pathlib import Path
 
-from interfaces import RenderFailed
-
-_FFMPEG_TIMEOUT_S = 60.0
+from mux.ffmpeg_run import run_ffmpeg
 
 # libx264 refuses odd width/height ("width not divisible by 2"). Real captures are always the
 # composition's own even data-width/data-height, but nothing here should assume that -- an odd
@@ -29,7 +25,7 @@ _EVEN_DIMENSIONS_FILTER = "scale=2*ceil(iw/2):2*ceil(ih/2)"
 async def hold_frame(image: Path, dest: Path, *, duration_ms: int, fps: int) -> Path:
     """Hold a single still for ``duration_ms`` -- Tier 0's whole clip. Returns ``dest``."""
     duration_s = duration_ms / 1000
-    await _run_ffmpeg(
+    await run_ffmpeg(
         [
             "-y",
             "-loop",
@@ -107,35 +103,5 @@ async def crossfade(images: Sequence[Path], dest: Path, *, duration_ms: int, fps
         "libx264",
         str(dest),
     ]
-    await _run_ffmpeg(args, context=f"crossfade {n} images")
+    await run_ffmpeg(args, context=f"crossfade {n} images")
     return dest
-
-
-async def _run_ffmpeg(args: list[str], *, context: str) -> None:
-    dest = Path(args[-1])
-    dest.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    except OSError as exc:
-        raise RenderFailed(f"{context}: could not start ffmpeg: {exc}") from exc
-
-    try:
-        _, stderr = await asyncio.wait_for(proc.communicate(), _FFMPEG_TIMEOUT_S)
-    except TimeoutError as exc:
-        proc.kill()
-        with contextlib.suppress(Exception):
-            await proc.wait()
-        raise RenderFailed(f"{context}: ffmpeg timed out after {_FFMPEG_TIMEOUT_S}s") from exc
-
-    if proc.returncode != 0:
-        raise RenderFailed(
-            f"{context}: ffmpeg exited {proc.returncode}: {stderr.decode(errors='replace')[-2000:]}"
-        )
-    if not dest.exists() or dest.stat().st_size == 0:
-        raise RenderFailed(f"{context}: ffmpeg exited 0 but wrote no video to {dest}")

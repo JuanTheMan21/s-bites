@@ -99,7 +99,9 @@ async def test_tier_static_captures_one_timestamp_at_the_end_of_the_composition(
 
 
 @needs_ffmpeg
-async def test_tier_reveal_captures_four_evenly_spaced_timestamps(tmp_path) -> None:
+async def test_tier_reveal_captures_four_timestamps_past_the_entrance_settle(tmp_path) -> None:
+    """Not evenly spaced from t=0 -- the first sample must land after entrance has settled, not
+    at the pre-animation blank frame (the bug a real render surfaced)."""
     segment = _authored_segment(VisualIntent.DIAGRAM_FLOW, Tier.REVEAL)
     render = FakeRenderBackend()
     dest = tmp_path / "clip.mp4"
@@ -113,6 +115,6 @@ async def test_tier_reveal_captures_four_evenly_spaced_timestamps(tmp_path) -> N
     assert len(render.captures) == 1
     at_seconds = render.captures[0].at_seconds
     assert len(at_seconds) == 4
-    assert at_seconds[0] == 0.0
+    assert at_seconds[0] == pytest.approx(1.5)  # SETTLE_S_CAP, since DURATION_MS * 0.12 > 1.5
     assert at_seconds[-1] == pytest.approx(DURATION_MS / 1000)
     assert render.renders == []
