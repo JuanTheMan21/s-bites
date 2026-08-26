@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from interfaces import TTSProvider
+from interfaces.tts_provider import SynthesisResult, WordMark
 from tests.fakes.failure_injection import FailureInjector
 
 # Small on purpose: 8 kHz 8-bit mono is 8 KB per second, so a full 15-segment job's worth of
@@ -41,7 +42,7 @@ class FakeTTSProvider(FailureInjector, TTSProvider):
 
     async def synthesize(
         self, text: str, dest: Path, *, voice: str | None = None
-    ) -> tuple[Path, int]:
+    ) -> SynthesisResult:
         self._maybe_fail("synthesize")
         self.calls.append((text, dest, voice))
 
@@ -60,7 +61,10 @@ class FakeTTSProvider(FailureInjector, TTSProvider):
             audio.setframerate(SAMPLE_RATE_HZ)
             audio.writeframes(SILENCE_BYTE * frames)
 
-        return dest, round(frames / SAMPLE_RATE_HZ * 1000)
+        duration_ms = round(frames / SAMPLE_RATE_HZ * 1000)
+        return SynthesisResult(
+            audio_path=dest, duration_ms=duration_ms, words=even_word_marks(text, duration_ms)
+        )
 
 
 def estimate_ms(text: str) -> int:
@@ -71,3 +75,20 @@ def estimate_ms(text: str) -> int:
     caller is measured off the result.
     """
     return max(1, round(len(text.split()) / WORDS_PER_MINUTE * 60_000))
+
+
+def even_word_marks(text: str, duration_ms: int) -> list[WordMark]:
+    """T18A: synthetic word marks, evenly spaced across ``duration_ms``.
+
+    Offline tests need something in ``SynthesisResult.words`` to exercise the word-timed path
+    (captions, in-composition reveal-on-word) without a real TTS backend. Real Azure Speech word
+    boundaries are never uniform -- this is a fixture, not a claim about real timing.
+    """
+    words = text.split()
+    if not words:
+        return []
+    each_ms = duration_ms // len(words)
+    return [
+        WordMark(text=word, offset_ms=i * each_ms, duration_ms=each_ms)
+        for i, word in enumerate(words)
+    ]

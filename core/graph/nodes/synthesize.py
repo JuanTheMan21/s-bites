@@ -41,8 +41,13 @@ async def synthesize_segment(state: SegmentTask, runtime: Runtime[GraphContext])
     key = SEGMENT_AUDIO_KEY.format(job_id=state["job_id"], index=segment.index)
     local_path = local_narration_path(context.working_dir, state["job_id"], segment.index)
 
-    _, duration_ms = await context.tts.synthesize(segment.narration, local_path)
+    result = await context.tts.synthesize(segment.narration, local_path)
     await context.storage.put_file(key, local_path, content_type="audio/wav")
 
-    updated = segment.model_copy(update={"duration_ms": duration_ms})
+    # word_marks may be empty -- not every TTSProvider reports boundaries (T18A). Every
+    # downstream consumer (rendering/compose.py, mux/subtitles.py) is required to degrade to an
+    # even stagger rather than assume this list is populated.
+    updated = segment.model_copy(
+        update={"duration_ms": result.duration_ms, "word_marks": result.words}
+    )
     return {"segments": {segment.index: updated}}

@@ -26,17 +26,21 @@
   (diagrams, data, code, markers -- things that organize information rather than assert it).
 #}
 
-{% macro tokens_style() %}
+{% macro tokens_style(palette=none) %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #08080a;
-    --fg: #eeeeee;
-    --fg-muted: #8b8b93;
-    --accent-primary: #ffb703;
-    --accent-secondary: #4fa8ff;
+    {# T18A: rendering/palettes.py selects one of several hand-picked, contrast-checked pairs
+       per job_id, deterministically -- so consecutive videos don't all read amber-on-black.
+       `palette` is optional so a template rendered without one (a bare test) keeps this exact
+       original D95 pair as the default. #}
+    --bg: {{ palette.bg if palette else "#08080a" }};
+    --fg: {{ palette.fg if palette else "#eeeeee" }};
+    --fg-muted: {{ palette.fg_muted if palette else "#8b8b93" }};
+    --accent-primary: {{ palette.accent_primary if palette else "#ffb703" }};
+    --accent-secondary: {{ palette.accent_secondary if palette else "#4fa8ff" }};
   }
   html, body { margin: 0; padding: 0; }
   body {

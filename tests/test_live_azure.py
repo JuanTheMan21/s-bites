@@ -126,21 +126,22 @@ async def test_tts_duration_matches_ffprobe(tmp_path: Path) -> None:
     same file rather than one reader agreeing with itself.
     """
     dest = tmp_path / "segments" / "0" / "narration.wav"
-    path, duration_ms = await a_narrator().synthesize(
+    result = await a_narrator().synthesize(
         "Structured query language injection happens when data is treated as code.", dest
     )
 
-    assert path == dest and dest.is_file()
-    assert duration_ms > 0
-    assert abs(duration_ms - ffprobe_ms(dest)) <= TOLERANCE_MS
-    assert duration_ms == wav_duration_ms(dest)
+    assert result.audio_path == dest and dest.is_file()
+    assert result.duration_ms > 0
+    assert abs(result.duration_ms - ffprobe_ms(dest)) <= TOLERANCE_MS
+    assert result.duration_ms == wav_duration_ms(dest)
+    assert result.words, "Azure Speech reports word boundaries -- this should not be empty"
 
 
 async def test_synthesize_creates_the_destination_directory(tmp_path: Path) -> None:
     """A contract term, and the one the artifact layout depends on every single segment."""
     dest = tmp_path / "does" / "not" / "exist" / "narration.wav"
 
-    assert (await a_narrator().synthesize("One short line.", dest))[0].is_file()
+    assert (await a_narrator().synthesize("One short line.", dest)).audio_path.is_file()
 
 
 async def test_an_unknown_voice_is_misconfiguration_not_an_outage(tmp_path: Path) -> None:

@@ -3,199 +3,213 @@
 **Overwritten completely at every `/checkpoint`.** This file describes *now*, never history.
 History lives in `decisionlog.md`.
 
-_Last updated: 2026-08-26 · after T18_
+_Last updated: 2026-08-26 · after T18A_
 
 ---
 
 ## Where we are
 
-**Two real, playable ~6-minute videos exist now**, both "how neural networks learn," produced end
-to end through the pipeline: outline → narration → tiering → scene authoring → render → mux →
-concat. The second exists specifically because a real person watched and listened to the first one
-and found problems no test caught. `core/graph/pipeline.py` now has a third `Send` fan-out
-(`render_scene`, after `author_scene` via a join node `collect_scenes`) → `finalize`, which concats
-every segment's clip and persists the final video (`VideoJob.video_key`).
+**A real viewer watched T18's two videos and called them a slideshow.** That verdict traced to a
+measurable cause: D16's render-throughput figure was wrong by roughly 6-10x (a 3-second sample
+dominated by browser cold start), so `FRAME_BUDGET` funded Tier 2 for only 2 of 15 segments and
+everything else fell back to a 4-screenshot crossfade. T18A re-measured throughput for real
+(`npx hyperframes benchmark`, ~17 frames/sec), corrected `FRAME_BUDGET` (1400 → 9500) and the
+tier ladder, and built everything that correction unlocked: word-timed captions, per-job
+palettes, a real count-up animation, both carried-forward bugs fixed and verified against the
+real toolchain (not just redesigned), and a working local entrypoint.
 
-**Done:** T1-T18 (T10 stays `in-progress`, unclaimed — see below).
-**Next: T18A — bug fixes, a real local entrypoint, and a network-diagram visual intent.** Inserted
-between T18 and T19 as a lettered task, not a renumber — see D98 if you're wondering why the
-sequence isn't T19. **Depends:** T18 (done).
+**All of this happened on a new `dev` branch, cut from `master` at `655b355`.** `master` is
+untouched and still the last known-good state. Nothing from this session is committed yet on
+either branch.
 
-## What T18 produced
+**Done:** T1-T18, T18A (T10 stays `in-progress`, unclaimed — see below).
+**Next: T18B** — `VisualIntent.NETWORK_DIAGRAM`, the originally-planned FastAPI+static-page local
+entrypoint (T18A's terminal-only version covers the DoD for now), the storyboard/motif step, and
+whichever of T18A's other deferred items still look worthwhile. Not yet planned in detail — see
+`tasks.md`'s own T18B entry and decisionlog D99-D103 for the starting context.
+
+## What T18A produced
 
 | File | Holds |
 |---|---|
-| `cli.py` | The CLI entrypoint. **Cannot currently run a full job standalone under either `RUNTIME_ENV` value** — see the Environment section below, this is the single most important thing to know before touching it. |
-| `core/graph/nodes/render_scene.py` | New graph node: compose → lint → render (T17) → mux narration onto it → persist. `SEGMENT_CLIP_KEY`, `local_clip_path()`. |
-| `core/graph/nodes/finalize.py` | Extended: concats every segment's clip (in order), persists the final video, still marks the job `SUCCEEDED`. `FINAL_VIDEO_KEY`. |
-| `core/graph/nodes/synthesize.py` | Gained `local_narration_path()`, factored out so `render_scene` can reuse the exact same local-disk convention rather than round-tripping through `Storage`. |
-| `mux/ffmpeg_run.py` | New — the shared spawn/timeout/kill ffmpeg-subprocess helper, extracted out of `frames_to_clip.py` once `audio_mux.py`/`concat_segments.py` needed the identical behavior. |
-| `mux/audio_mux.py` | New — muxes a segment's narration WAV onto its silent rendered clip. |
-| `mux/concat_segments.py` | New — joins every segment's clip with a real crossfade (`xfade`/`acrossfade`), not a hard cut. **The audio half of this is a known, accepted-for-now defect (D93) — read that before touching this file.** |
-| `rendering/reveal.py` | Fixed: Tier 1's first capture no longer lands at the pre-animation blank instant (D95's sibling fix, technically part of the visual-quality pass but shipped alongside T18). |
-| `rendering/templates/*.html`, `_tokens.html` | Redesigned visual identity — flat amber/blue, no glow/gradient, a breathing hairline frame as the one ambient device, IBM Plex Sans (D95). |
-| `core/models.py` | `Segment.clip_key`, `VideoJob.video_key` — both nullable, fill in at the same stage their producing node runs. |
-| Tests | `tests/test_audio_mux.py`, `test_concat_segments.py`, `test_render_scene.py`, `test_graph_pipeline_live.py` (new); `test_graph_pipeline.py`/`test_graph_resume.py`/`test_render_segment.py`/`graph_pipeline_fixtures.py` updated for the new fan-out and the redesigned templates. |
+| `package.json`, `package-lock.json` | Pins `hyperframes@0.8.15` locally (`node_modules/`, gitignored) — `adapters/local/hyperframes_process.py` prefers the local bin over `npx`, falling back to `npx` if `npm install` hasn't run. |
+| `adapters/local/hyperframes_process.py` | New — shared spawn/timeout/kill-tree plumbing, extracted so `hyperframes_cli.py` (render/lint) and `hyperframes_check.py` (check) don't duplicate it. |
+| `adapters/local/hyperframes_check.py` | New — `npx hyperframes check`, the richer motion/layout/contrast gate. Deliberately **not** on the `RenderBackend` ABC (would force Azure's stub to grow a verb it can't implement, breaking Invariant 4); exposed as an extra method on `PlaywrightHyperFramesRenderBackend.check()` instead. |
+| `adapters/local/hyperframes_cli.py` | `render` now passes `--workers`, `--browser-timeout`, `--player-ready-timeout`, `--protocol-timeout`. |
+| `adapters/local/render_backend.py` | `render_timeout_s(duration_ms)` replaces one flat 60s timeout for renders (captures/lint keep it); `workers` param added. |
+| `config_render.py` | New — render-backend resolution split out of `config.py` (200-line ceiling) once `RENDER_ENV` landed. `render_env()`/`resolve()`. Still the only other module naming `PlaywrightHyperFramesRenderBackend`/`ContainerAppsRenderBackend` — see D100 for why this doesn't violate "config.py is the only module naming concrete adapter classes". |
+| `.env`, `.env.example` | `FRAME_BUDGET=9500`, `RENDER_MAX_CONCURRENCY=2`, `RENDER_WORKERS=auto`, new `RENDER_ENV=local` (D100 — the bridge that finally closes D92). |
+| `core/tier_resolver.py` | `IDEAL_TIER` raised: NORMAL/MINOR now target `Tier.ANIMATED` (only ASIDE settles for REVEAL). Mechanism (`resolve_tiers`, frame costs) unchanged — only its inputs were wrong. |
+| `interfaces/tts_provider.py` | Gained `WordMark`/`SynthesisResult` (contract vocabulary, same precedent as `SkillPack`/`QueuedJob` — D101). `TTSProvider.synthesize` now returns `SynthesisResult`, not `tuple[Path, int]`. |
+| `core/synthesis.py` | New — re-exports `WordMark`/`SynthesisResult` from `interfaces.tts_provider` for `core/models.py`'s convenience. |
+| `core/models.py` | `Segment.word_marks: list[WordMark]` (default empty), `VideoJob.subtitles_key`. |
+| `adapters/azure/tts_provider.py` | Connects the Speech SDK's `synthesis_word_boundary` event; `SynthesisResult.words` is real, measured word timing. |
+| `tests/fakes/tts_provider.py` | Returns synthetic even-spaced word marks (`even_word_marks`) so offline tests exercise the timed path. |
+| `rendering/templates/_captions.html` | New — in-frame word-timed captions, degrades to an even stagger when `word_marks` is empty. Wired into all six intent templates. |
+| `mux/subtitles.py` | New — writes `final.srt`. Offsets are trivial: D93's fix leaves the audio track unshrunk, so segment *i* starts at exactly `sum(durations_ms[:i])`. |
+| `core/graph/nodes/finalize.py` | Writes/persists the SRT sidecar alongside the final video; `VideoJob.subtitles_key` set. |
+| `rendering/palettes.py` | New — six hand-picked, contrast-checked palettes, selected deterministically per `job_id`. |
+| `rendering/compose.py` | Threads `job_id` through for palette selection; passes `word_marks`/`palette` to every template; copies vendored `gsap.min.js` alongside `index.html`. |
+| `rendering/templates/vendor/gsap.min.js` | New — vendored GSAP 3.14.2. Every template now loads `./gsap.min.js`, no CDN. |
+| `core/slot_schemas.py` | `StatCalloutSlots` gained `value_number`/`prefix`/`suffix` — a real count-up when set. |
+| `runtime_skills/scene-authoring/1.1.md` | New version (never edit `1.0.md`) — guidance for when to fill the new count-up fields. |
+| `rendering/templates/stat_callout.html` | Deterministic frame-row count-up (technique ported from the registry's `count-up` component, hand-adapted — see D103), or the original scale-grow when `value_number` is null. |
+| `rendering/templates/diagram_flow.html` | D94 fixed: marker `background` is now `var(--bg)`, opaque, not a stale hardcoded `rgba(...)`. |
+| `mux/concat_segments.py` | D93 fixed for real: `tpad` pads video so `xfade` never consumes real narrated frames; audio is a plain unshrunk `concat`, zero blending. Also cycles 5 transition styles instead of always `fade`. |
+| `rendering/render_segment.py` | Lint gate now only treats `[error]`-severity findings as fatal (D102) — found live when a real render hit a `[warning] composition_file_too_large`. |
+| `cli.py` | `topic` is now optional; prompts on stdin when omitted. Prints `final.srt`'s local path alongside `final.mp4`'s. |
+| Tests | `test_tier_resolver.py`, `test_concat_segments.py`, `test_azure_tts.py`, `test_audio_duration.py`, `test_fake_providers.py`, `test_live_azure.py`, `test_compose_scene.py`, `test_render_segment.py`, `test_config.py`, `test_runtime_skills.py`, `test_graph_pipeline.py`, `test_slot_schemas.py` all updated for the above; new regression tests for D93 (unshrunk duration), D102 (warning non-fatal), the `RENDER_ENV` bridge, and the corrected tier ladder. |
 
-## What building T18 actually found
+## What building T18A actually found
 
-This task is the reason the phrase "verified against the real thing" appears so often in this
-project's own history — it happened four more times here:
-
-1. **`RUNTIME_ENV=azure` cannot drive a render at all** (D92) — `ContainerAppsRenderBackend` is
-   still T35's stub. T18's own DoD ("plays on both stacks") was met by hand-mixing real Azure
-   LLM/TTS with the real local render backend, not by `cli.py` alone. This is exactly what T18A's
-   local entrypoint needs to make real and permanent.
-2. **Crossfading narration audio was a design mistake** (D93) — two segments' speech audibly
-   overlapping reads as the narrator interrupting themselves. The fix is designed (pad video only
-   via `tpad`, keep audio a plain unshrunk concat) but not built; `mux/concat_segments.py` still
-   ships with the mistake in it.
-3. **A rendering bug in `diagram_flow`** (D94) — the rail line visibly cuts through node markers
-   because the marker fill is only 10% opacity. Not fixed; the likely fix (an opaque marker
-   background) is one line, in `rendering/templates/diagram_flow.html`.
-4. **`hyperframes check` is flaky at the currently-resolved CLI version** (D96, 0.8.15) — the same
-   unchanged composition alternated `ok: true`/`ok: false` across repeated runs. Not something this
-   codebase can fix; expect it and re-run before trusting one red result.
-
-Also found, and fixed same-session: no template ever actually linked a Google Fonts stylesheet, so
-"Montserrat" had been silently falling back to system fonts since T17 (D95) — and the breathing
-frame that replaced T17's particle field initially shipped with an opacity range too close to
-`hyperframes check`'s documented 0.2 liveness floor, caught by `project-reviewer`'s checkpoint pass
-and fixed to 0.22-0.32 before this checkpoint closed.
-
-## Next task: T18A — bug fixes, a local entrypoint, a network-diagram intent
-
-Full detail in `tasks.md`'s own T18A entry and in decisionlog D93/D94/D95's open items. Short
-version:
-
-1. **Fix the two known bugs** (D93's audio-overlap design, D94's marker opacity) — both root-caused
-   already, neither fixed yet.
-2. **A small local-only entrypoint** — one FastAPI route reusing `cli.py::_run()`, one static page
-   with a text box and a video player. This is explicitly *not* the planned T19-T28 FastAPI+React
-   product — a minimal dev tool, so a topic can be typed and a video played back without a manual
-   script. Needs to resolve D92's adapter-mixing gap as real, labeled code (not a scratchpad script).
-3. **`VisualIntent.NETWORK_DIAGRAM` via `/newintent`** — layered nodes with real weighted
-   connections, aimed at the class of topic (neural networks, org charts, state machines) the
-   existing six intents currently render as an abstract, topic-blind process.
-4. **If time allows:** a storyboard step ahead of `plan_segments` letting one visual motif carry
-   across several segments. Explicitly **not** in scope: fully bespoke per-topic animation (an LLM
-   composing scenes from primitives instead of picking a template) — discussed and deliberately
-   scoped out as a much larger, research-shaped undertaking.
+1. **D16's throughput figure was wrong, and this project's own evidence already contradicted
+   it** before re-measuring: a flat 60s render timeout, applied to ~600-frame (25s) segments that
+   completed inside it, already implied ≥10 frames/sec against D16's claimed 1.7-2.7. Real
+   measurement (`npx hyperframes benchmark`) landed at ~17 frames/sec. The whole visual budget had
+   been rationed against a number nobody had re-checked since T4.
+2. **A real render found a real lint-severity bug the offline suite couldn't**: `hyperframes
+   lint`'s `[warning] composition_file_too_large` (315 lines, once captions/palette tokens grew
+   every template) blocked every render outright under the old "any finding is fatal" stance.
+   Fixed by distinguishing severity (D102) — this is exactly the class of finding "verify against
+   the real thing" exists to catch, and it did, on the very first real run after the rewrite.
+3. **A sibling file in a composition's directory does not violate `hyperframes lint`'s actual
+   constraint** — tested directly before relying on it (D60's real requirement is the entry
+   file's name/location, not a literally-empty directory), which is what made vendoring GSAP
+   locally safe to do at all.
+4. **A registry component's own `<template>`/clone mechanism assumes a runtime
+   (`window.__hyperframes`) this project's compositions don't load** — `npx hyperframes add` is
+   genuinely useful for *inspecting* a technique (the `count-up` component's deterministic
+   frame-row approach was ported this way), but not for literally dropping registry files into a
+   per-segment composition directory.
+5. **`hyperframes check` caught a real overlapping-GSAP-tween bug** in the count-up template's
+   first version (the entrance scale tween ran past the count's own landing time) — the same
+   `overlapping_gsap_tweens` finding class D89's comparison.html docstring already warned about,
+   now confirmed to actually fire under real conditions.
 
 ## Verify at any time
 
 ```bash
 pytest                                    # offline, no network -- green as of this checkpoint
-pytest -m local_live                      # opt-in, needs the real browser/CLI/ffmpeg installed --
-                                           # expect occasional false failures from hyperframes
-                                           # check's own flakiness (D96), re-run before trusting red
+pytest -m local_live                      # opt-in, needs the real browser/CLI/ffmpeg installed
 ruff check . && ruff format --check .
 grep -rE "azure|openai|huggingface|ollama|playwright" core/ --include=*.py   # must be empty
 grep -rE "langgraph" core/ --include=*.py | grep -v "^core/graph/"           # must be empty
+git branch --show-current                                                    # must be: dev
+
+# The real thing, end to end (uses real Azure LLM/TTS + real local render, costs a small amount):
+PYTHONPATH=. .venv/Scripts/python.exe cli.py "<topic>" --target-duration-ms 90000
 ```
 
-No committed way yet to run a full job through `cli.py` alone (see D92) — for a real end-to-end
-render, resolve adapters by hand the way this session did (`config._llm_provider`/`_tts_provider`
-against an `azure`-flavored env, `config._render_backend` against a `local`-flavored one), or wait
-for T18A's entrypoint.
+`cli.py` with **no** topic argument now prompts on stdin — this is T18A's local entrypoint,
+requiring no manual adapter-mixing (`RENDER_ENV=local` in `.env` bridges `RUNTIME_ENV=azure`'s
+LLM/TTS to the real local render backend, D100).
+
+**Real end-to-end run this session:** topic "how binary search works", 90s target, 3 segments,
+**all three landed on Tier 2** (the corrected budget/ladder funding what D78's original 1400
+could not), real word-timed `final.srt`, 165.9s wall-clock. Verified visually (diagram_flow
+markers solid, no rail bleed-through; captions ink word-by-word; palette applied; transition
+variety visible) and D93's fix separately verified by spectral analysis (a real ~40ms clean audio
+cut at the join, versus the old ~500ms blend).
 
 ## Environment state
 
 | | |
 |---|---|
-| Models | Opus plans, Sonnet builds and reviews |
-| `RUNTIME_ENV` | **`azure`** in both `.env` and `.env.example` (D25) — unchanged this task, and still cannot drive a full render alone (D92) |
-| `FRAME_BUDGET` | **1400** (D78) — unchanged this task |
-| `FPS` | 24, unchanged |
-| `.env` | Exists and is filled in. Gitignored. Never commit it. |
-| Azure sub | `d4a261bd-760c-41bd-9e22-ef58e2329ce0`. **`az login`'s cached auth had expired as of this session** — `az` CLI calls failed with an AADSTS530035 security-defaults error, and the Azure MCP connector returned zero subscriptions. Re-authenticate before relying on either for the real `/costs` figure. |
-| Azure OpenAI | `skill-bites` (eastus) · deployment `gpt-5.4-mini` 2026-03-17, DataZoneStandard (D49) · api-version `2024-10-21` |
-| Azure Speech | `skill-bites-tts` (eastus), S0 (D48) · voice `en-US-AvaMultilingualNeural` |
-| Azure Storage | `sbitesartifacts25817` (eastus) · containers `explainer-artifacts`, `runtime-skills` — both real videos this session are there under their `job_id`s |
-| Python | 3.11.0, venv at `.venv/`. Use `.venv/Scripts/python.exe` explicitly |
-| Node | 24.16.0 · npm 11.13.0 · ffmpeg/ffprobe 8.1.1 on PATH |
-| `langgraph` | `langgraph==1.2.11`, `langgraph-checkpoint-sqlite==3.1.1`, installed in `.venv` |
-| HyperFrames CLI | **Drifted again, now 0.8.15** (was 0.8.12 as of T17's handoff, 0.8.10 before that) — still no `package.json` pin. **This version is measurably flaky under `check`** (D96) — worth investigating a pin if it keeps causing false-red results. |
-| Playwright browsers | Installed — both `chromium-1234` *and* `chromium_headless_shell-1234` at `%LOCALAPPDATA%\ms-playwright` |
-| Ollama, Kokoro | **Still not installed. Deliberately deferred (D59, reaffirmed D64)** |
-| Git | on `master`, HEAD `b3dcf83`, **3 commits ahead of `origin/master`**, all from before this session — nothing from this session is committed yet. `origin` → `github.com/JuanTheMan21/s-bites.git`. **This line is fresh as of this checkpoint** (`git log`/`git status -sb`/`git remote -v` re-run just now), per D90's rule — do not carry it forward uncritically next time either. |
-| Azure spend | Two real end-to-end videos produced this session (real LLM + TTS calls each). Estimated from narration length alone (TTS-only): ~$0.09/video. LLM token cost not itemized by any tooling in this repo. **Could not pull the real total** — see the `az login`/Azure MCP note above. |
+| Models | Opus plans, Sonnet builds and reviews. **This session ran on Opus throughout** — the user asked for Sonnet mid-session but the harness was pinned to Opus at session start and could not be switched from inside the conversation; flagged to the user, not silently ignored. |
+| `RUNTIME_ENV` | `azure` in both `.env`/`.env.example`, unchanged. |
+| `RENDER_ENV` | **New (D100).** `local` in both `.env`/`.env.example` — the bridge that lets `RUNTIME_ENV=azure`'s LLM/TTS pair with the real local render backend. Defaults to `RUNTIME_ENV` when unset, so nothing that predates it changes behavior. Temporary: T35 removes the need for it. |
+| `FRAME_BUDGET` | **9500** (was 1400, D99) — funds Tier 2 on every non-ASIDE segment of a realistic 7-minute video. |
+| `FPS` | 24, unchanged. |
+| `RENDER_MAX_CONCURRENCY` | **2** (was 4, D99) — this machine reports as little as ~2.4GB free RAM alongside 16 cores; memory, not CPU, is the tighter constraint for concurrent Chrome processes. |
+| `RENDER_WORKERS` | **New, `auto`** — passed to `hyperframes render --workers`; left to the CLI's own calibration (accounts for low-memory mode) rather than pinned. |
+| `.env` | Exists, filled in, gitignored. Not touched beyond the render-related keys above. |
+| Node | `node_modules/` now exists (gitignored), `hyperframes@0.8.15` pinned via `package.json`. `npm install` already run this session. |
+| HyperFrames CLI | **Pinned to 0.8.15** for the first time (was drifting: 0.8.10 → 0.8.12 → 0.8.15 across three prior tasks, D96). Local bin preferred over `npx`. |
+| GSAP | **Vendored locally** as of this task (`rendering/templates/vendor/gsap.min.js`, 3.14.2) — every render now needs zero network egress for it. Google Fonts is still a live CDN dependency, unchanged, not in this task's scope. |
+| Azure spend | One real end-to-end run this session: 3 segments, ~90s of narration, real LLM + TTS calls. Not itemized by any tooling in this repo — run `/costs` for a real figure, and re-run `az login` first if it was stale (unclear this session; not re-checked). |
+| Git | on `dev` (new this session, cut from `master` at `655b355`), **nothing committed yet**. `master` unchanged and still the fallback if anything here needs reverting. |
 
 ## Before the next session
 
-**Nothing code-blocking**, but two things worth doing if you want an exact cost figure or want
-`hyperframes check` to stop giving false reds: re-run `az login` (or otherwise reconnect the Azure
-MCP connector) before `/costs`, and consider whether to pin the HyperFrames CLI version.
+**Nothing code-blocking.** If continuing straight into T18B, start by reading this file plus
+decisionlog D99-D103, then plan mode as usual.
+
+**Not yet committed.** This entire task's work is uncommitted on `dev`. Review the diff and commit
+(or ask for a commit) before doing anything that could lose it — no destructive git operations
+were run this session, but nothing is safe until it's in a commit either.
 
 ## Known gaps and open questions
 
-**New this task, not yet fixed (all detailed in decisionlog D92-D97):**
+**New this task:**
 
-- **`RUNTIME_ENV=azure` alone cannot render a video** until T35 lands (D92). T18A's local
-  entrypoint is the first thing that needs to work around this for real.
-- **`mux/concat_segments.py` crossfades narration audio, audibly** (D93) — the fix is designed
-  (video-only padding via `tpad`, audio stays a plain unshrunk concat) but not built.
-- **`diagram_flow`'s rail line renders through its node markers** (D94) — an opacity fix, not built.
-- **`hyperframes check` is non-deterministically flaky at CLI 0.8.15** (D96) — re-run before
-  trusting a single red result; not fixable from this codebase.
-- **Resume durability across `render_scene`/`finalize` is unverified** (D97) — both nodes
-  reconstruct local-disk paths from earlier supersteps with no `Storage` fallback if the file is
-  gone. Unlikely to bite the CLI's own single-machine use, but untested, and a real question once
-  `working_dir` might not survive between processes (T35's eventual cloud render backend).
-- **This video's color palette still reads "blue-dominant"** to a real viewer (D95's closing note)
-  — the redesign is real (no more glow/gradient) but this topic's content mix (8/15 segments were
-  `diagram_flow`) made the blue token dominate regardless. Worth a real side-by-side once T18A's
-  richer diagram intent exists to compare against, not a color-value guess in isolation.
+- **T18B's full scope is not yet planned in detail** — `tasks.md`'s T18B entry lists what's
+  deferred but deliberately doesn't draft a DoD; that's for T18B's own plan-mode session.
+- **`RENDER_MAX_CONCURRENCY=2`/`RENDER_WORKERS=auto` were chosen from a memory-constrained
+  machine's `hyperframes doctor` output, not from a dedicated concurrency benchmark** — D47's
+  disk-I/O-under-concurrency question (D69) is still about `Storage`, not this; this is a new,
+  separate open question about render-worker memory headroom that a future task running many
+  concurrent full jobs should re-measure for real rather than trust this session's single-job
+  observation.
+- **Only one real end-to-end run happened this session** (3 segments, 90s target) — the ~15-minute
+  wall-clock target for a full 7-minute/15-segment video is extrapolated from that plus the
+  `hyperframes benchmark` throughput number, not measured directly at full length. Worth a real
+  full-length run before trusting the 15-minute figure at that scale.
+- **Six palettes exist; only one was exercised in the real end-to-end run** (whichever `job_id`'s
+  hash selected). The other five were verified via `hyperframes check --contrast` against
+  composed-but-not-rendered scenes, not against a full real video.
+- **Captions/subtitle line-grouping (`mux/subtitles.py::MAX_WORDS_PER_CUE = 8`) is a guess, not
+  tuned against a real transcript for readability** — worth a real look once more full videos
+  exist.
+- **`hyperframes check` is still non-deterministically flaky at 0.8.15** (D96, unresolved by
+  pinning — pinning fixes drift across sessions, not the tool's own run-to-run variance within one
+  version). Re-run before trusting a single red result from it.
 
 **Carried forward, unchanged:**
 
 - **The cross-requeue `StructuredOutputError` cap (`QueuedJob.attempt`) is still open** (D24/D67) —
-  T18's CLI does not touch `JobQueue` at all (single one-shot run, never calls
-  `JobQueue.fail(..., requeue=True)`), so it was never the right candidate to close this; still
   belongs to whichever future task builds a real queue-driven runner (T34).
 - **No coverage gate exists (D42).**
 - **`Segment.slots` is an untyped dict** (D29). Revisit at T24.
-- **Scope: 36 tasks across 8 iterations** (35 plus T18A) — local stack priority still unsettled.
-- **T10 stays `in-progress`, unclaimed.** Ollama/Kokoro still don't exist.
-- **D47's disk-I/O-under-concurrency measurement (D69) used small WAV files only** — T18 moved real
-  MP4s through `Storage.put_file` for the first time but did not re-measure concurrency under that
-  load; still open.
+- **Scope: 37 tasks across 8 iterations** (36 plus T18B, following T18A's own precedent for a
+  lettered insertion) — local stack priority still unsettled.
+- **T10 stays `in-progress`, unclaimed.** Ollama/Kokoro still don't exist. T18A's `WordMark`
+  fallback path (empty `words`, even-stagger degrade) is exactly what a future Kokoro adapter
+  will exercise for real, or `npx hyperframes transcribe` as the documented fallback if Kokoro
+  itself never reports boundaries.
+- **D47's disk-I/O-under-concurrency measurement (D69) used small WAV files only** — still open.
 
 ## Gotchas worth remembering
 
 **New this task:**
 
-- **Crossfading video is not the same move as crossfading audio.** A visual dissolve reads as
-  polish; the same treatment on two different speakers' narration reads as interruption. Verify by
-  listening, not just by checking durations — this project's tests only ever checked timing here,
-  and timing was never the problem (D93).
-- **A translucent fill doesn't hide what's behind it — it reveals it, dimly.** An element meant to
-  occlude something (a node marker over a connecting line) needs real opacity, not a decorative
-  low-alpha wash (D94).
-- **`hyperframes check`'s pass/fail is not fully trustworthy at the currently-resolved CLI
-  version** — re-run before treating one result as ground truth (D96).
-- **A missing `<link>` tag fails silently.** A `font-family` naming a webface that was never loaded
-  doesn't error, it just quietly falls back — the same class of bug as an unsized root or a manual
-  `onUpdate` (D89), one more way "looks fine in a quick glance" and "is actually what you asked for"
-  diverge without a real render/inspection to catch it (D95).
-- **Renumbering a task sequence touches more than the task list.** Test assertions can contain
-  literal task-number strings (`tests/test_adapter_stubs.py` matched exception messages against
-  `"T34"`/`"T35"`); several source docstrings/comments do too. A lettered insertion (`T18A`) has
-  zero blast radius; a renumber has to touch every one of those or go stale immediately (D98).
+- **The quality hook strips an import added before its first use, every time, even within the
+  same multi-edit session** — bit this task more than any prior one (at least six separate files:
+  `hyperframes_cli.py`'s local-bin import, `render_backend.py`'s `hyperframes_check` import twice
+  over two different methods, `tests/fakes/tts_provider.py` and `tests/test_azure_tts.py`'s
+  `WordMark`/`SynthesisResult` imports, `finalize.py`'s `write_srt` import, `rendering/compose.py`'s
+  `shutil` import, `config.py`'s `config_render` import). The fix is always the same: add the
+  import in the identical `Edit` call that adds its first real usage, not a call before or after.
+  This is not a new rule (it's in every prior handoff's gotchas), but it is worth restating that
+  it bites even when the usage is added moments later in the same session.
+- **A wrong measurement, once written into a `.env` comment and a constant, propagates and stays
+  unquestioned across sessions until someone re-derives it from first principles** (D16 → D78 →
+  D99). The tell that it was worth re-checking was already sitting in the codebase: a 60-second
+  timeout on renders the "true" throughput figure said should take 6-10x that.
+- **A registry's own component is a reference for the technique, not a drop-in file** — its
+  `<template>`/`window.__hyperframes` runtime assumes a project scaffold this codebase's
+  single-composition-per-segment architecture doesn't have.
+- **`hyperframes lint`'s severity levels are meaningful, not decorative** — treating every finding
+  as equally fatal (reasonable when the only findings anyone had ever seen were real bugs) breaks
+  the first time a stylistic warning shows up, and the fix is to read what `--strict`/
+  `--strict-all` already encode about the distinction, not to invent a new one.
 
 **Carried forward:**
 
-- **A node-level `RetryPolicy` that also matches an error a node isolates locally defeats that
-  isolation, silently** (D73).
-- **Always add an import in the same edit as its first use** — bit again this session, twice, in
-  `mux/frames_to_clip.py` and `core/graph/pipeline.py` (the quality hook strips an import that looks
-  unused between two edits). Seven-plus sessions running now; treat it as a hard rule.
 - **`project-reviewer` is worth running, and the *second* fresh full pass is the one that finds the
-  bug** — held again this session (the opacity-floor finding, on a checkpoint-triggered pass after
-  the task's own build was already believed done).
+  bug** — the user explicitly asked this task not run it repeatedly, so it ran once, at the end.
 - **A confident claim about a library's or CLI's exact behavior is a claim until checked against
-  the real thing.**
-- **Check the *SKU's* quota, not the model's availability** (D49).
+  the real thing** — this task's central finding (D16/D99) is the largest instance of this rule
+  yet in this project's history.
 - **Windows path semantics**: a trailing dot is stripped on existence checks but not on directory
   enumeration (D46).
 - **The hooks fire on `Write|Edit`, not on Bash heredocs.** Use `Write` for `.py` files.

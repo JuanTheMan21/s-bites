@@ -30,12 +30,14 @@ REVEAL_FRAME_COST = 8
 # judgement of what matters; this ladder turns that judgement into a rendering ambition. Two
 # importances aim at Tier 2 rather than one so the budget genuinely binds -- with a single
 # candidate the resolver would have nothing to choose between and demotion would never happen.
+# T18A: NORMAL/MINOR moved up to Tier.ANIMATED -- the old ladder was tuned against D16's since-
+# corrected throughput figure. Animation is now the default; only ASIDE settles for Tier.REVEAL.
 IDEAL_TIER: dict[Importance, Tier] = {
     Importance.CRITICAL: Tier.ANIMATED,
     Importance.MAJOR: Tier.ANIMATED,
-    Importance.NORMAL: Tier.REVEAL,
-    Importance.MINOR: Tier.REVEAL,
-    Importance.ASIDE: Tier.STATIC,
+    Importance.NORMAL: Tier.ANIMATED,
+    Importance.MINOR: Tier.ANIMATED,
+    Importance.ASIDE: Tier.REVEAL,
 }
 
 ALL_TIERS = frozenset(Tier)

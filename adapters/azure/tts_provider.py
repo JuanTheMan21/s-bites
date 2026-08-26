@@ -40,6 +40,12 @@ from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exp
 from adapters.audio_duration import wav_duration_ms
 from adapters.azure.speech_errors import translate_cancellation, translate_setup_failure
 from interfaces import ProviderUnavailable, RateLimited, TTSProvider
+from interfaces.tts_provider import SynthesisResult, WordMark
+
+# T18A: 100ns per SDK tick (Azure Speech's own unit for both audio_offset and duration), so
+# dividing by this converts to milliseconds -- the same conversion the SDK's own `.duration`
+# property applies internally (see speechsdk.SpeechSynthesisWordBoundaryEventArgs).
+_TICKS_PER_MS = 10_000
 
 # RIFF because both readers understand it; 24 kHz 16-bit mono because it is the format Azure's
 # neural voices are produced at, so anything else is a resample we would be paying for twice.
@@ -88,7 +94,7 @@ class AzureSpeechTTS(TTSProvider):
 
     async def synthesize(
         self, text: str, dest: Path, *, voice: str | None = None
-    ) -> tuple[Path, int]:
+    ) -> SynthesisResult:
         dest.parent.mkdir(parents=True, exist_ok=True)
         retryer = AsyncRetrying(
             stop=stop_after_attempt(self.max_attempts),
@@ -99,29 +105,34 @@ class AzureSpeechTTS(TTSProvider):
             reraise=True,
         )
         async with self._semaphore:
-            await retryer(self._synthesize_once, text, dest, voice or self.voice)
+            words = await retryer(self._synthesize_once, text, dest, voice or self.voice)
 
-        # Measured after the retries, from whichever attempt succeeded. A failed attempt can
-        # leave a partial file behind, and the SDK truncates on the next one, so the file this
-        # measures is always the one the successful attempt wrote.
-        return dest, wav_duration_ms(dest)
+        # Duration measured after the retries, from whichever attempt succeeded. A failed
+        # attempt can leave a partial file behind, and the SDK truncates on the next one, so the
+        # file this measures is always the one the successful attempt wrote. Word marks come
+        # straight from that same successful attempt's own callbacks (T18A) -- never estimated,
+        # the same "measured, not guessed" rule duration_ms already follows.
+        return SynthesisResult(audio_path=dest, duration_ms=wav_duration_ms(dest), words=words)
 
-    async def _synthesize_once(self, text: str, dest: Path, voice: str) -> None:
-        """One attempt, off the event loop.
+    async def _synthesize_once(self, text: str, dest: Path, voice: str) -> list[WordMark]:
+        """One attempt, off the event loop. Returns the word marks that attempt reported.
 
         ``to_thread`` rather than an executor of our own: the SDK blocks on a socket for the
         length of the utterance, which is seconds, and blocking the loop there would stall every
         other segment in the same job.
         """
-        await asyncio.to_thread(self._speak, text, dest, voice)
+        return await asyncio.to_thread(self._speak, text, dest, voice)
 
-    def _speak(self, text: str, dest: Path, voice: str) -> None:
+    def _speak(self, text: str, dest: Path, voice: str) -> list[WordMark]:
         """One blocking synthesis. Raises an ``AdapterError``; never returns on a failure."""
         synthesizer = self._synthesizer(dest, voice)
+        words: list[WordMark] = []
+        synthesizer.synthesis_word_boundary.connect(lambda event: _collect_word(event, words))
         result = synthesizer.speak_text_async(text).get()
 
         if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
             raise translate_cancellation(result, voice)
+        return words
 
     def _synthesizer(self, dest: Path, voice: str) -> speechsdk.SpeechSynthesizer:
         """Build a synthesiser, or say clearly which setting is wrong.
@@ -147,6 +158,25 @@ class AzureSpeechTTS(TTSProvider):
             # three settings being wrong -- and it is exactly as wrong on the next attempt, which
             # is why ProviderMisconfigured (never retried) is the honest answer.
             raise translate_setup_failure(exc, self.region, voice) from exc
+
+
+def _collect_word(
+    event: speechsdk.SpeechSynthesisWordBoundaryEventArgs, words: list[WordMark]
+) -> None:
+    """The ``synthesis_word_boundary`` callback: append one ``WordMark`` per real word.
+
+    Filtered to ``Word`` boundaries -- the SDK also fires ``Punctuation``/``Sentence`` boundary
+    events by default, and those carry no ``.text`` worth turning into a caption word.
+    """
+    if event.boundary_type != speechsdk.SpeechSynthesisBoundaryType.Word:
+        return
+    words.append(
+        WordMark(
+            text=event.text,
+            offset_ms=event.audio_offset // _TICKS_PER_MS,
+            duration_ms=round(event.duration.total_seconds() * 1000),
+        )
+    )
 
 
 def _is_retryable(state: RetryCallState) -> bool:

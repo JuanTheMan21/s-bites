@@ -14,10 +14,14 @@ from core.graph.nodes.render_scene import local_clip_path
 from core.graph.state import GraphState
 from core.models import JobStatus
 from mux.concat_segments import concat_segments
+from mux.subtitles import write_srt
 
 # {job_id}/final.mp4 -- sibling to synthesize.py's SEGMENT_AUDIO_KEY and render_scene.py's
 # SEGMENT_CLIP_KEY; this is the node that produces the final video, so it owns this key.
 FINAL_VIDEO_KEY = "{job_id}/final.mp4"
+# T18A: the SRT sidecar. Same offsets as the video/audio it accompanies since concat_segments'
+# audio track is a plain unshrunk concat (D93) -- no crossfade arithmetic for subtitles to redo.
+FINAL_SUBTITLES_KEY = "{job_id}/final.srt"
 
 
 async def finalize(state: GraphState, runtime: Runtime[GraphContext]) -> dict:
@@ -38,7 +42,17 @@ async def finalize(state: GraphState, runtime: Runtime[GraphContext]) -> dict:
     key = FINAL_VIDEO_KEY.format(job_id=job.job_id)
     await context.storage.put_file(key, dest, content_type="video/mp4")
 
+    srt_dest = context.working_dir / job.job_id / "final.srt"
+    write_srt(ordered, srt_dest)
+    subtitles_key = FINAL_SUBTITLES_KEY.format(job_id=job.job_id)
+    await context.storage.put_file(subtitles_key, srt_dest, content_type="text/plain")
+
     updated_job = job.model_copy(
-        update={"segments": ordered, "status": JobStatus.SUCCEEDED, "video_key": key}
+        update={
+            "segments": ordered,
+            "status": JobStatus.SUCCEEDED,
+            "video_key": key,
+            "subtitles_key": subtitles_key,
+        }
     )
     return {"job": updated_job}

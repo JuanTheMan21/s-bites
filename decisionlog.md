@@ -1454,3 +1454,159 @@ once the direction changed. `T18A` sits between T18 and the untouched original T
 "task numbers are identity, not order" note in `tasks.md` (the same device already used for
 T34/T35's Iteration 5.5 insertion) -- zero blast radius on anything already numbered, at the cost of
 one non-sequential label.
+
+### D99 — T18A: D16's frame budget was wrong by at least 6x, measured and corrected
+**The trigger.** A real viewer's verdict on T18's two videos ("looks like a slideshow") traced to a
+measurable cause: `FRAME_BUDGET=1400` (D78) bought Tier 2 for only 2 of 15 segments, because D16's
+underlying throughput figure -- 1.7-2.7 frames/sec -- was itself wrong. That figure came from a
+90-frame (3-second) sample, dominated by browser cold start and (at the time) unpinned `npx`
+resolution overhead, not by steady-state rendering.
+
+**Contradicted by this project's own evidence before it was re-measured.**
+`adapters/local/render_backend.py` applied a flat 60s timeout to full Tier-2 renders, and
+~600-frame (25s) segments completed inside it -- 600 frames in under 60s is already >=10
+frames/sec, more than 3x D16's ceiling.
+
+**Measured for real:** `npx hyperframes benchmark` (the CLI's own tool, not a hand-rolled timer) on
+one realistic 25-second composed segment, `--workers 4`, `standard` quality:
+30fps/750 frames -> 44.7s avg (~16.8 fps); 60fps/1500 frames -> 86.4s avg (~17.4 fps). Both land
+around **~17 frames/sec**, roughly **6-10x** D16's figure. `scripts/measure_render_throughput.py`
+reproduces this.
+
+**Consequence, in two parts:**
+1. `core/tier_resolver.py::IDEAL_TIER` raised NORMAL and MINOR from `Tier.REVEAL` to
+   `Tier.ANIMATED` -- only `ASIDE` still settles for a reveal. The old ladder was tuned around a
+   budget too small to ever fund more than a couple of segments; correcting the budget without
+   raising the ladder would have left most segments still capped below their real ceiling.
+2. `.env`/`.env.example`'s `FRAME_BUDGET` raised from 1400 to **9500** -- enough for the corrected
+   ladder to fund Tier 2 on every non-ASIDE segment of a 7-minute/15-segment video (~9000 frames
+   for full coverage, confirmed against `tests/segment_examples.py::seven_minute_segments`), while
+   staying inside a ~9-minute render at the measured rate -- comfortably under the ~15-minute
+   wall-clock target even allowing for contention.
+
+**Also changed:** `RENDER_MAX_CONCURRENCY` dropped 4 -> 2, and a new `RENDER_WORKERS=auto` was
+added. Reasoning is memory, not CPU: `hyperframes doctor` reports 16 cores but as little as ~2.4GB
+free RAM on the build machine, and each render worker is its own Chrome process (~256MB). Running
+several segments concurrently *and* several workers per segment risked OOM thrash long before CPU
+became the bottleneck -- `--workers auto` already accounts for low-memory mode, so it was left to
+calibrate rather than pinned to a number chosen without a memory-constrained measurement.
+
+**Not touched:** `STATIC_FRAME_COST`, `REVEAL_FRAME_COST`, `frame_cost`, and the two-pass greedy
+promotion in `resolve_tiers` -- the mechanism was never the problem, only its inputs were.
+`tests/test_tier_resolver.py`'s two budget-shape tests were re-pinned to the new ladder's actual
+numbers rather than adjusted to preserve the old assertions; a third test
+(`test_a_generous_budget_animates_nearly_every_segment`) was added as a regression guard against
+`FRAME_BUDGET` quietly shrinking back toward D16's original, wrong figure.
+
+### D100 — `config.py`'s render-backend resolution moved to `config_render.py`, and `RENDER_ENV` closes D92 for real
+**The trigger.** T18A needed `RenderBackend` resolution to grow: a `RENDER_ENV` bridge (below),
+explicit `--workers` wiring, and an integer-or-`"auto"` `RENDER_WORKERS` parse. Adding that in
+place pushed `config.py` over the 200-line ceiling.
+
+**The split.** `config_render.py` (new, top level, sibling to `config.py`) now holds
+`render_env()` and `resolve()`, and is the only other module importing
+`PlaywrightHyperFramesRenderBackend`/`ContainerAppsRenderBackend`. CLAUDE.md's "config.py is the
+only module naming concrete adapter classes" is about there being **one resolution seam**, not
+literally one file on disk -- `config.py` still owns calling this, still owns every other
+interface's resolution, and `config_render.py` has no other caller and no reason to exist outside
+this seam. Precedent: `core/frame_budget.py` was already split out of `core/tier_resolver.py` on
+the same "split by responsibility, not by compressing" principle CLAUDE.md states directly.
+
+**`RENDER_ENV`, the actual fix D92 asked for.** D92 recorded that `RUNTIME_ENV=azure` cannot drive
+a render end to end (`ContainerAppsRenderBackend` is still T35's stub), and that T18's DoD was met
+only by hand-mixing real Azure LLM/TTS with the real local render backend outside of any committed
+code path. `config_render.render_env(env)` reads a new `RENDER_ENV` variable, falling back to
+`RUNTIME_ENV` when unset -- so nothing changes for any caller that has never heard of it -- and
+`resolve()` checks that instead of `RUNTIME_ENV` directly. Setting `RENDER_ENV=local` alongside
+`RUNTIME_ENV=azure` (now the default in `.env`/`.env.example`) is the hand-mixing from T18's
+session, made real, labeled, and tested (`tests/test_config.py::
+test_render_env_bridges_azure_llm_to_the_real_local_render_backend`).
+
+**Explicitly temporary.** `RENDER_ENV` exists only until T35 makes `ContainerAppsRenderBackend`
+real -- at that point `RUNTIME_ENV=azure` alone will resolve a working render backend and
+`RENDER_ENV` becomes unnecessary. It is not meant to grow a third value or become a permanent
+second stack switch; both `.env.example`'s comment and `config_render.py`'s docstring say so.
+
+### D101 — Word-level TTS timing lives in `interfaces/tts_provider.py`, not `core/models.py`
+**The trigger.** T18A needed a `WordMark`/`SynthesisResult` pair to carry Azure Speech's
+word-boundary events through the pipeline. The plan drafted them as `core/models.py` domain
+models; building them there would have made `core/` import nothing new, which looked right until
+checking precedent.
+
+**Rejected:** `core/models.py`. `core/__init__.py`'s own docstring already draws this line:
+*"The contracts' own vocabulary -- `SkillPack`, `QueuedJob` -- stays in `interfaces/` and is not
+duplicated here; `Segment`, `VisualIntent`, `Tier` and `VideoJob` are domain concepts and appear
+in no interface signature."* `WordMark`/`SynthesisResult` are exactly the first kind: they exist
+because `TTSProvider.synthesize`'s return shape needs a name, the same reason `SkillPack` exists
+because `SkillRegistry.load`'s return shape needs one.
+
+**Landed:** both classes defined in `interfaces/tts_provider.py`, re-exported from
+`core/synthesis.py` (`from interfaces.tts_provider import SynthesisResult, WordMark`) purely so
+`core/models.py::Segment.word_marks` and anything importing `core` can reach `WordMark` without
+naming `interfaces` directly at every call site -- the same convenience `core/__init__.py`
+already provides for pieces of `core/frame_budget.py`, `core/tier_resolver.py`, etc. D22's
+boundary (`core` imports `interfaces`, never the reverse) is unaffected either way.
+
+### D102 — `render_segment.py`'s lint gate now distinguishes `[error]` from `[warning]`/`[info]`
+**Found live, not by a test.** The first real end-to-end run since T18A's template changes
+(captions macro, palette tokens) failed at `render_segment`: `hyperframes lint` returned exactly
+one finding, `[warning] composition_file_too_large: This HTML composition file has 315 lines`,
+and D2's original "any finding is fatal" stance (unmodified since T17) blocked the render
+outright.
+
+**Rejected:** shrinking the templates to duck under whatever line count triggers the warning.
+That treats a stylistic nag as a hard ceiling on how much a composition is allowed to do, which
+is exactly backwards from this task's goal of putting more into each scene, not less.
+
+**Landed:** `render_segment.py` now raises `CompositionInvalid` only on findings that are not
+`[warning]`/`[info]` severity. This mirrors a distinction `hyperframes check` itself already
+draws (`--strict` fails on errors only, the default; `--strict-all` also fails on warnings) --
+D2's "catch it at write time" stance is preserved for what it was actually protecting against
+(a composition the renderer cannot correctly play), not for a code-style opinion about file
+length. Verified against a real render immediately after: the same job that failed on the
+warning proceeded to a real 3-segment video, all Tier 2, once the fix landed.
+
+### D103 — Palettes, captions, count-up, GSAP vendoring, and the two carried-forward bugs, verified against the real toolchain, not asserted
+**What shipped, briefly** (fuller detail lives in the T18A build's own commit and in D99-D102
+above; this entry is the roundup for anyone scanning history):
+- `rendering/palettes.py` -- six hand-picked, contrast-checked palettes, selected deterministically
+  per `job_id`. Verified with real numbers: WCAG contrast ratios computed for all six (4.5:1 AA
+  floor; every value landed well above 5.8:1) and, separately, `hyperframes check --contrast` run
+  against real composed scenes under six different `job_id`s all reported `passed == checked`.
+- `rendering/templates/_captions.html` -- word-timed in-frame captions, degrading to an even
+  stagger when `word_marks` is empty; `mux/subtitles.py` -- the SRT sidecar, offsets trivial by
+  construction because D93's audio fix (below) leaves the audio track unshrunk.
+- `core/slot_schemas.py::StatCalloutSlots.value_number/prefix/suffix` -- a real count-up for
+  `stat_callout`, ported from the registry's own `count-up` component's deterministic frame-row
+  technique (`npx hyperframes add count-up --json`, inspected, then hand-adapted into this
+  project's Jinja/GSAP conventions rather than cloned wholesale, since the registry's `<template>`
+  clone mechanism assumes a `window.__hyperframes` runtime this project's compositions don't load).
+  `hyperframes check` caught a genuine overlapping-tween bug in the first version (the entrance
+  scale tween ran past the count's own landing time); fixed by making the value's scale timeline
+  strictly sequential. Snapshot-verified: 0 -> 123,784 -> 187,200 -> 199,916 -> 200,000 across five
+  timestamps in a single second.
+- **D93 (narration crossfade) fixed for real**, not just redesigned: `mux/concat_segments.py`
+  pads each non-last clip's video tail via `tpad` so `xfade` consumes only that padding, and
+  audio is now a plain unshrunk `concat` with zero blending. Verified two ways: a duration-based
+  regression test (`tests/test_concat_segments.py`, both tracks now land at exactly
+  `sum(durations_ms)`, not the old shrunk figure), and a real spectral check -- two clips with
+  distinct sine tones (440Hz/880Hz) concatenated, then FFT-analyzed in a sliding 20ms window
+  across the join: energy at the "wrong" frequency drops to near-zero within about 40ms of the
+  cut, versus the ~500ms blend the old `acrossfade` produced. Also varies the video transition
+  style across a 5-way cycle instead of always `fade`.
+- **D94 (diagram_flow marker opacity) fixed**: the node marker's `background` was a hardcoded
+  `rgba(79, 168, 255, 0.1)` -- both under-opaque (D94's original finding) and stale (predates
+  per-job palettes). Now `var(--bg)`, fully opaque and palette-correct. Confirmed visually in the
+  same real end-to-end render: markers render as solid discs, no rail line visible through them.
+- GSAP vendored locally (`rendering/templates/vendor/gsap.min.js`, copied alongside every
+  composition's `index.html` by `rendering/compose.py`) instead of loaded from jsDelivr on every
+  render. Confirmed a sibling file does not violate D60's lint constraint by testing directly
+  against `hyperframes check` before relying on it -- D60's actual requirement is the entry
+  file's name and location, not the directory being literally empty otherwise.
+
+**All of the above verified together** in one real end-to-end run: `RUNTIME_ENV=azure` +
+`RENDER_ENV=local` (D100), topic "how binary search works", 90-second target. Three segments, all
+three landed on `Tier.ANIMATED` (the corrected budget/ladder from D99 funding what D78's original
+1400 could not), real `final.srt` produced from real Azure word-boundary events, 165.9s
+wall-clock -- comfortably inside the ~15-minute target with two full segments' worth of margin
+to spare on a video less than a third that length.

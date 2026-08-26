@@ -100,12 +100,31 @@ class StatCalloutSlots(StrictSchema):
 
     value: str = Field(
         description="The number as it should appear, e.g. '94%' or '3.2 billion'. A string, "
-        "not a number, because the formatting is part of the message."
+        "not a number, because the formatting is part of the message. Still required even when "
+        "value_number is set -- it is what a Tier 0/1 still shows, and what value_number's own "
+        "count-up lands on."
     )
     unit: str | None = Field(description="A unit or qualifier shown beside the value, or null.")
     context: str = Field(
         description="One sentence saying what the number is and why it matters. Without this "
         "the figure is trivia."
+    )
+    value_number: float | None = Field(
+        description="T18A: the number `value` renders as, e.g. 200000 for '200,000' -- or null "
+        "if `value` is not a clean number a count-up animation would read correctly (a range, "
+        "'about half', an approximation like '3.2 billion' with rounding already baked in). "
+        "When set, the animated tier counts up to it live instead of only scaling in; when "
+        "null, it uses the scale-in it always has. Never invent a number here that value's own "
+        "text doesn't already say."
+    )
+    prefix: str | None = Field(
+        description="Text shown immediately before the counted number, e.g. '$' -- or null. "
+        "Only meaningful alongside value_number; ignored otherwise."
+    )
+    suffix: str | None = Field(
+        description="Text shown immediately after the counted number, e.g. 'ms' or '%' -- or "
+        "null. Prefer `unit` for a qualifier set apart from the number; use this only for a "
+        "symbol that reads as part of the number itself, like '%' or 'x'."
     )
 
 

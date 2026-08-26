@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from mux.concat_segments import DEFAULT_TRANSITION_S, concat_segments
+from mux.concat_segments import concat_segments
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
 
@@ -47,28 +47,33 @@ def _a_clip(path: Path, *, color: str, duration_ms: int) -> Path:
     return path
 
 
-def _ffprobe_duration_ms(path: Path) -> int:
-    out = subprocess.run(
-        [
+def _ffprobe_duration_ms(path: Path, *, stream: str | None = None) -> int:
+    """Container duration by default; pass ``stream="a"`` (or ``"v"``) for one track's own."""
+    if stream is None:
+        args = ["ffprobe", "-v", "error", "-show_entries", "format=duration"]
+    else:
+        args = [
             "ffprobe",
             "-v",
             "error",
+            "-select_streams",
+            stream,
             "-show_entries",
-            "format=duration",
-            "-of",
-            "default=nw=1:nk=1",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    return round(float(out) * 1000)
+            "stream=duration",
+        ]
+    args += ["-of", "default=nw=1:nk=1", str(path)]
+    out = subprocess.run(args, capture_output=True, text=True, check=True).stdout.strip()
+    return round(float(out.splitlines()[0]) * 1000)
 
 
-async def test_concat_crossfades_clips_shrinking_the_total_by_the_transition_overlap(
+async def test_concat_crossfades_video_but_leaves_both_tracks_at_the_full_unshrunk_length(
     tmp_path: Path,
 ) -> None:
+    """D93, pinned as a regression test: the old version shrank *audio* by the crossfade overlap
+    (``acrossfade``), which is what let two segments' narration audibly overlap. The fix (T18A)
+    pads video so its crossfade shrinkage is offset, and drops audio blending entirely -- both
+    tracks should now land at exactly ``sum(durations_ms)``, not the old shrunk figure.
+    """
     durations_ms = [2000, 3000, 2500]
     clips = [
         _a_clip(tmp_path / f"clip-{i}.mp4", color=color, duration_ms=duration_ms)
@@ -82,10 +87,9 @@ async def test_concat_crossfades_clips_shrinking_the_total_by_the_transition_ove
 
     assert result == dest
     assert dest.stat().st_size > 0
-    # Two transitions (three clips), each eating DEFAULT_TRANSITION_S off the naive sum -- by
-    # design (the module docstring's own accepted tradeoff), not drift to tolerate away.
-    expected_ms = sum(durations_ms) - 2 * DEFAULT_TRANSITION_S * 1000
+    expected_ms = sum(durations_ms)
     assert _ffprobe_duration_ms(dest) == pytest.approx(expected_ms, abs=200)
+    assert _ffprobe_duration_ms(dest, stream="a") == pytest.approx(expected_ms, abs=200)
 
 
 async def test_concat_with_one_clip_copies_it_through_unchanged(tmp_path: Path) -> None:

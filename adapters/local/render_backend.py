@@ -18,11 +18,24 @@ from pathlib import Path
 
 from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential_jitter
 
-from adapters.local import hyperframes_cli
+from adapters.local import hyperframes_check, hyperframes_cli
 from adapters.local.playwright_capture import PlaywrightCapture
 from interfaces import RenderBackend, RenderFailed
 
 MAX_BACKOFF_S = 10.0
+
+# T18A: a flat 60s timeout, previously shared by captures and full renders, was measured against a
+# 3-second/90-frame sample (D16) and is contradicted by this project's own successful longer
+# renders -- ~600-frame (25s) segments completed inside it, implying throughput D16 understated by
+# at least 4x. Renders now scale with content instead of guessing a constant; captures (single
+# frames, always cheap) keep the flat `timeout_s`.
+RENDER_TIMEOUT_FLOOR_S = 180.0
+RENDER_TIMEOUT_FACTOR = 12.0
+
+
+def render_timeout_s(duration_ms: int) -> float:
+    """The render timeout for a segment of ``duration_ms``: generous, and never below the floor."""
+    return max(RENDER_TIMEOUT_FLOOR_S, duration_ms / 1000 * RENDER_TIMEOUT_FACTOR)
 
 
 class PlaywrightHyperFramesRenderBackend(RenderBackend):
@@ -41,6 +54,7 @@ class PlaywrightHyperFramesRenderBackend(RenderBackend):
         max_attempts: int = 2,
         quality: str = "standard",
         timeout_s: float = 60.0,
+        workers: int | str = "auto",
     ) -> None:
         if max_concurrency < 1:
             raise ValueError(f"max_concurrency must be at least 1, got {max_concurrency}")
@@ -50,6 +64,7 @@ class PlaywrightHyperFramesRenderBackend(RenderBackend):
         self.quality = quality
         self.timeout_s = timeout_s
         self.max_attempts = max_attempts
+        self.workers = workers
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._capture_engine = PlaywrightCapture(browser_timeout_s=timeout_s)
 
@@ -66,7 +81,8 @@ class PlaywrightHyperFramesRenderBackend(RenderBackend):
         # duration_ms is not passed to the CLI: the composition's own data-duration attribute
         # governs render length (it was written from the same measured duration by whoever
         # authored the composition, per Invariant 1), and passing it again here would be exactly
-        # the second source of truth D20 already rejected for width/height.
+        # the second source of truth D20 already rejected for width/height. It is used here only
+        # to scale this call's own timeout (T18A) -- a longer segment legitimately needs longer.
         retryer = self._retryer()
         async with self._semaphore:
             return await retryer(
@@ -75,13 +91,22 @@ class PlaywrightHyperFramesRenderBackend(RenderBackend):
                 dest,
                 fps=fps,
                 quality=self.quality,
-                timeout_s=self.timeout_s,
+                timeout_s=render_timeout_s(duration_ms),
+                workers=self.workers,
             )
 
     async def lint(self, composition: Path) -> list[str]:
         # No retry, no semaphore: lint never raises by contract, and it is the fast static check
         # meant to run before the expensive path, not compete with it for concurrency slots.
         return await hyperframes_cli.lint(composition, timeout_s=self.timeout_s)
+
+    async def check(self, project_dir: Path, *, caption_zone: str | None = None) -> dict:
+        """T18A's second, richer gate (motion, layout, WCAG contrast) -- not on the
+        ``RenderBackend`` ABC (see ``hyperframes_check.py``'s docstring for why). No retry: like
+        ``lint``, it is diagnostic and its own non-determinism (D96) must not be masked by a retry
+        that just happens to land on the passing run.
+        """
+        return await hyperframes_check.check(project_dir, caption_zone=caption_zone)
 
     def _retryer(self) -> AsyncRetrying:
         return AsyncRetrying(

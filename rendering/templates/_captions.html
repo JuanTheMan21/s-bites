@@ -1,0 +1,82 @@
+{#
+  T18A: an in-frame caption band that inks each word on when it is actually spoken, using the
+  same word-by-word-scalar mechanic the `mk-callout-highlight` registry block names for exactly
+  this purpose ("tween it to sync the highlight with a voiceover"). Imported by every intent
+  template the same way `_tokens.html`'s background macros already are.
+
+  captions_markup(prefix, word_marks, duration_sec) -- the caption band's inner HTML: one <span>
+    per word, dim by default so a real GSAP tween (never a manual onUpdate, D89) inks each one.
+  captions_script(prefix, word_marks, duration_sec)  -- the timeline lines, appended to the
+    caller's own `tl` at each word's real `offset_ms` -- or, when `word_marks` is empty (a
+    TTSProvider that reports no boundaries), an even stagger across the full duration so the
+    band still reads instead of sitting inert.
+
+  Sits inside `hyperframes check --caption-zone`'s default guard band (bottom ~18% of the frame,
+  x0=0;y0=.82;x1=1;y1=1) by construction -- the markup below is pinned to the bottom of #root
+  with a fixed inset, not computed from content, so it cannot drift into that zone's warning.
+#}
+
+{% macro captions_markup(prefix, word_marks, duration_sec) %}
+<div id="{{ prefix }}-captions" class="clip {{ prefix }}-captions-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="2">
+  <div class="{{ prefix }}-captions-row voice-data">
+    {% for word in word_marks %}
+    <span id="{{ prefix }}-cap-{{ loop.index0 }}" class="{{ prefix }}-cap-word">{{ word.text }}</span>
+    {% endfor %}
+  </div>
+</div>
+<style>
+  .{{ prefix }}-captions-layer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 64px;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+    padding: 0 160px;
+  }
+  .{{ prefix }}-captions-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0 0.5em;
+    max-width: 1400px;
+    font-size: 30px;
+    font-weight: 600;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .{{ prefix }}-cap-word {
+    color: var(--fg-muted);
+    opacity: 0;
+    will-change: opacity, color;
+  }
+</style>
+{% endmacro %}
+
+{% macro captions_script(prefix, word_marks, duration_sec) %}
+  (function () {
+    var words = document.querySelectorAll("#{{ prefix }}-captions .{{ prefix }}-cap-word");
+    if (!words.length) return;
+    var n = words.length;
+    {% if word_marks %}
+    // Real measured offsets (T18A): each word inks on at the millisecond Azure Speech reported
+    // it was actually spoken, not a guess.
+    var offsetsMs = [{% for word in word_marks %}{{ word.offset_ms }}{{ "," if not loop.last }}{% endfor %}];
+    {% else %}
+    // No word_marks reported (some TTSProvider that doesn't emit boundaries) -- degrade to an
+    // even stagger across the full duration rather than leaving the band inert.
+    var totalMs = {{ duration_sec }} * 1000;
+    var offsetsMs = [];
+    for (var i = 0; i < n; i++) { offsetsMs.push(Math.round((i / n) * totalMs)); }
+    {% endif %}
+    words.forEach(function (el, i) {
+      var t = offsetsMs[i] / 1000;
+      // Ink from dim to full color-plus-opacity in one short beat, then hold -- the band never
+      // fades a word back out, so a viewer scrubbing backward still sees every word said so far.
+      tl.fromTo(el, { opacity: 0 }, { opacity: 1, duration: 0.18, ease: "power1.out" }, t);
+      tl.fromTo(el, { color: "var(--fg-muted)" }, { color: "var(--fg)", duration: 0.18, ease: "power1.out" }, t);
+    });
+  })();
+{% endmacro %}

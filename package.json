@@ -1,0 +1,9 @@
+{
+  "name": "s-bites-render",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pins the HyperFrames CLI the render adapter shells out to. Not an application package -- the Python pipeline is the application. Pinned because an unpinned `npx hyperframes` re-resolved the CLI on every call (0.8.10 -> 0.8.12 -> 0.8.15 across three tasks) and version drift produced non-deterministic `check` results (D96).",
+  "dependencies": {
+    "hyperframes": "0.8.15"
+  }
+}

@@ -1,4 +1,5 @@
 {% import "_tokens.html" as tokens %}
+{% import "_captions.html" as captions %}
 <!doctype html>
 <!--
   VisualIntent.STAT_CALLOUT -- a single number, given room to land.
@@ -14,8 +15,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=1920, height=1080" />
     <title>stat_callout</title>
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
-    {{ tokens.tokens_style() }}
+    <script src="./gsap.min.js"></script>
+    {{ tokens.tokens_style(palette) }}
     <style>
       #stage {
         width: 100%;
@@ -83,6 +84,7 @@
       data-height="1080"
     >
       {{ tokens.background_markup('sc', duration_sec) }}
+      {{ captions.captions_markup('sc', word_marks, duration_sec) }}
       <div id="content" class="clip df-content-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="1">
         <div id="stage">
           <span id="sc-bracket-top"></span>
@@ -103,15 +105,58 @@
       const tl = gsap.timeline({ paused: true });
 
       {{ tokens.background_script('sc', duration_sec) }}
+      {{ captions.captions_script('sc', word_marks, duration_sec) }}
 
       // Brackets draw in from center outward, framing the value's arrival.
       tl.fromTo("#sc-bracket-top", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.out" }, 0.15);
       tl.fromTo("#sc-bracket-bottom", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.out" }, 0.25);
 
-      // Value: escalating-weight scale grow (counting-dynamic-scale's mechanic, adapted for a
-      // free-form string rather than a literal digit count-up).
       tl.fromTo("#sc-value-row", { opacity: 0 }, { opacity: 1, duration: 0.1 }, 0.35);
+
+      {% if slots.value_number is not none %}
+      // T18A: a real count-up, from 0 to slots.value_number, landing exactly on slots.value's
+      // own text. Deterministic frame-row technique borrowed from the registry's count-up
+      // component (`hyperframes catalog`) -- each row is set with tl.set at a fixed timeline
+      // position, so a seek to any point (this project always seeks, never plays, D15) shows
+      // the exact value that position implies, forwards or backwards, with no update callback.
+      (function () {
+        var start = 0;
+        var end = {{ slots.value_number }};
+        var prefix = {{ (slots.prefix or "") | tojson }};
+        var suffix = {{ (slots.suffix or "") | tojson }};
+        var STEPS = 40;
+        var COUNT_DUR = 0.9;
+        var COUNT_START = 0.35;
+        var ease = gsap.parseEase("power2.out");
+        var valueEl = document.getElementById("sc-value");
+
+        function fmt(n) {
+          return prefix + Math.round(n).toLocaleString("en-US") + suffix;
+        }
+
+        tl.set(valueEl, { textContent: fmt(start) }, COUNT_START);
+        for (var i = 1; i <= STEPS; i++) {
+          var t = COUNT_START + COUNT_DUR * (i / STEPS);
+          var value = start + (end - start) * ease(i / STEPS);
+          tl.set(valueEl, { textContent: fmt(value) }, t);
+        }
+        // Land exactly on the authored string, not the rounded number -- "200,000" not
+        // "200000", so formatting stays the LLM's call per StatCalloutSlots.value's own field.
+        tl.set(valueEl, { textContent: {{ slots.value | tojson }} }, COUNT_START + COUNT_DUR);
+        // One scale timeline, strictly sequential -- entrance ends exactly when the count lands
+        // (COUNT_START + COUNT_DUR), then the pulse takes over. Two independent scale tweens
+        // overlapping in time on the same property/element is the silent-kill trap
+        // comparison.html's own docstring already warns about; `hyperframes check` caught this
+        // exact shape live when the entrance ran past the count's landing time.
+        tl.fromTo("#sc-value", { scale: 0.85 }, { scale: 1, duration: COUNT_DUR, ease: "power3.out" }, COUNT_START);
+        tl.to("#sc-value", { scale: 1.06, duration: 0.12, ease: "power2.out" }, COUNT_START + COUNT_DUR);
+        tl.to("#sc-value", { scale: 1, duration: 0.18, ease: "power2.out" }, COUNT_START + COUNT_DUR + 0.12);
+      })();
+      {% else %}
+      // Value: escalating-weight scale grow (counting-dynamic-scale's mechanic, adapted for a
+      // free-form string that is not a clean number a count-up would read correctly).
       tl.fromTo("#sc-value", { scale: 0.55 }, { scale: 1, duration: 1.1, ease: "power3.out" }, 0.35);
+      {% endif %}
 
       {% if slots.unit %}
       // Unit slides in only after the value has landed -- its own beat, like a counter's suffix.

@@ -1,4 +1,5 @@
 {% import "_tokens.html" as tokens %}
+{% import "_captions.html" as captions %}
 {% set n = slots.nodes | length %}
 <!doctype html>
 <!--
@@ -14,8 +15,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=1920, height=1080" />
     <title>diagram_flow</title>
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
-    {{ tokens.tokens_style() }}
+    <script src="./gsap.min.js"></script>
+    {{ tokens.tokens_style(palette) }}
     <style>
       #stage {
         width: 100%;
@@ -62,7 +63,12 @@
         height: 72px;
         border-radius: 50%;
         border: 3px solid var(--accent-secondary);
-        background: rgba(79, 168, 255, 0.1);
+        {# D94 fix: this was a hardcoded rgba(...) at 10% alpha -- a translucent fill doesn't
+           hide what's behind it, it reveals it dimly, so the rail line rendered straight through
+           the marker. An element meant to occlude something needs real opacity, and needs to use
+           the palette token rather than a color baked in before T18A's per-job palettes existed;
+           --bg is opaque and matches the page, so the disc reads as a clean gap in the rail. #}
+        background: var(--bg);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -95,6 +101,7 @@
       data-height="1080"
     >
       {{ tokens.background_markup('df', duration_sec) }}
+      {{ captions.captions_markup('df', word_marks, duration_sec) }}
       <div id="content" class="clip df-content-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="1">
         <div id="stage">
           <h1 id="headline">{{ slots.headline }}</h1>
@@ -128,6 +135,7 @@
       const tl = gsap.timeline({ paused: true });
 
       {{ tokens.background_script('df', duration_sec) }}
+      {{ captions.captions_script('df', word_marks, duration_sec) }}
 
       tl.fromTo("#headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 0.1);
 

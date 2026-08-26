@@ -46,9 +46,9 @@ def ffprobe_ms(path: Path) -> int:
 @pytest.mark.parametrize("wanted_ms", DURATIONS_MS)
 async def test_it_measures_what_the_synthesiser_produced(tmp_path: Path, wanted_ms: int) -> None:
     dest = tmp_path / "narration.wav"
-    _, reported_ms = await FakeTTSProvider([wanted_ms]).synthesize("narration", dest)
+    result = await FakeTTSProvider([wanted_ms]).synthesize("narration", dest)
 
-    assert wav_duration_ms(dest) == reported_ms
+    assert wav_duration_ms(dest) == result.duration_ms
 
 
 @pytest.mark.parametrize("wanted_ms", DURATIONS_MS)

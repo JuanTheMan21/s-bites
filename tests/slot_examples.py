@@ -57,5 +57,24 @@ EXAMPLES: dict[VisualIntent, dict[str, Any]] = {
         "value": "1 in 5",
         "unit": None,
         "context": "of breaches begin with an injection flaw.",
+        # "1 in 5" is a ratio phrasing, not a clean number a count-up should animate -- the
+        # schema's own guidance for when value_number stays null. See
+        # tests/test_slot_schemas.py::EXAMPLE_WITH_COUNT_UP for the populated case.
+        "value_number": None,
+        "prefix": None,
+        "suffix": None,
     },
+}
+
+# A second stat_callout payload, exercising the T18A count-up path EXAMPLES's own entry
+# deliberately leaves null. Not part of EXAMPLES because that dict is one fixture per intent,
+# shared by every template/schema test that iterates VisualIntent -- this is additive coverage
+# for the one intent with two meaningfully different rendering paths.
+STAT_CALLOUT_WITH_COUNT_UP: dict = {
+    "value": "200,000",
+    "unit": None,
+    "context": "tokens spent across the intro sequence alone.",
+    "value_number": 200_000,
+    "prefix": None,
+    "suffix": None,
 }

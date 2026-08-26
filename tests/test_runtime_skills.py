@@ -45,6 +45,17 @@ def shipped() -> SkillRegistry:
     return DiskSkillRegistry(SKILLS_ROOT)
 
 
+# T18A: scene-authoring picked up a 1.1 (count-up guidance for stat_callout.value_number); every
+# other pack is still at its original 1.0. Keyed per-pack rather than one constant so a future
+# version bump anywhere only has to update this map, not the reasoning around it.
+LATEST_VERSION = {
+    "house-style": "1.0",
+    "outline": "1.0",
+    "scene-authoring": "1.1",
+    "scripting": "1.0",
+}
+
+
 async def test_the_four_packs_load_through_the_interface(shipped: SkillRegistry) -> None:
     """The DoD, stated once. Through ``SkillRegistry``, never by reading the directory."""
     assert await shipped.list_packs() == EXPECTED_PACKS
@@ -52,7 +63,7 @@ async def test_the_four_packs_load_through_the_interface(shipped: SkillRegistry)
     for name in EXPECTED_PACKS:
         pack = await shipped.load(name)
         assert pack.name == name
-        assert pack.version == "1.0"
+        assert pack.version == LATEST_VERSION[name]
         assert len(pack.content.split()) > 100, f"{name} is too thin to be worth loading"
 
 
@@ -60,7 +71,9 @@ async def test_the_four_packs_load_through_the_interface(shipped: SkillRegistry)
 async def test_every_pack_is_at_a_version_the_registry_can_find(
     shipped: SkillRegistry, name: str
 ) -> None:
-    assert await shipped.versions(name) == ["1.0"]
+    versions = await shipped.versions(name)
+    assert versions[0] == LATEST_VERSION[name], "versions() promises newest first"
+    assert "1.0" in versions
 
 
 @pytest.mark.parametrize("name", EXPECTED_PACKS)

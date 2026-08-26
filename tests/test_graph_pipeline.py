@@ -46,8 +46,9 @@ async def test_a_full_run_narrates_every_segment_and_succeeds(tmp_path: Path) ->
     assert result_job.status.value == "succeeded"
     assert len(result_job.segments) == job.segment_count
     assert all(segment.duration_ms is not None for segment in result_job.segments)
-    # One narration WAV and one clip per segment, plus the one final video.
-    assert len(fake_storage.objects) == 2 * job.segment_count + 1
+    # One narration WAV and one clip per segment, plus the one final video and its SRT sidecar
+    # (T18A).
+    assert len(fake_storage.objects) == 2 * job.segment_count + 2
 
     # The whole T16 stretch, end to end: measured, then tiered, then authored against that measure.
     for segment in result_job.segments:

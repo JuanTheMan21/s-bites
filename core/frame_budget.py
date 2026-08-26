@@ -22,10 +22,12 @@ def scale_frame_budget(
     proportionally more, up to ``max_multiple`` of the base. Shorter requests scale down the
     same way, so a two-minute video does not get a seven-minute video's render time.
 
-    The cap is the whole point. A frame budget is really a *render-time* budget -- D16 measured
-    1.7-2.7 frames per second -- so scaling linearly with no ceiling turns a twenty-minute video
-    into a twenty-minute render. Not scaling at all spreads the same frames across three times
-    the segments until everything lands on Tier 0 and the tier system stops meaning anything.
+    The cap is the whole point. A frame budget is really a *render-time* budget -- measured at
+    ~17 frames/sec with ``--workers 4`` (T18A; corrects D16's 1.7-2.7 fps, which was sampled on
+    a 3-second render dominated by cold-start overhead) -- so scaling linearly with no ceiling
+    still turns a long enough video into a long render. Not scaling at all spreads the same
+    frames across three times the segments until everything lands on Tier 0 and the tier system
+    stops meaning anything.
     """
     if base_frames < 0:
         raise ValueError(f"base_frames cannot be negative, got {base_frames}")

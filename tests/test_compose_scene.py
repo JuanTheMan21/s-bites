@@ -17,9 +17,16 @@ DURATION_MS = 21_000
 
 
 @pytest.mark.parametrize("intent", list(VisualIntent))
-def test_it_writes_the_sole_index_html_in_the_given_directory(
+def test_it_writes_index_html_and_the_vendored_gsap_it_references(
     tmp_path: Path, intent: VisualIntent
 ) -> None:
+    """T18A: the composition directory is no longer literally one file -- ``compose_scene`` also
+    copies the vendored ``gsap.min.js`` every template now loads via a relative ``./gsap.min.js``
+    (no more jsDelivr CDN, so a render needs no network egress). Verified directly against
+    ``hyperframes check`` that a sibling file does not violate D60's actual constraint, which is
+    the entry file's name (``index.html``) and location, not the directory being literally empty
+    otherwise.
+    """
     segment = a_segment(0, intent=intent, duration_ms=DURATION_MS).model_copy(
         update={"slots": EXAMPLES[intent]}
     )
@@ -28,7 +35,9 @@ def test_it_writes_the_sole_index_html_in_the_given_directory(
     dest = compose_scene(segment, dest_dir)
 
     assert dest == dest_dir / "index.html"
-    assert list(dest_dir.iterdir()) == [dest]
+    assert set(dest_dir.iterdir()) == {dest, dest_dir / "gsap.min.js"}
+    assert (dest_dir / "gsap.min.js").stat().st_size > 0
+    assert "cdn.jsdelivr" not in dest.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("intent", list(VisualIntent))

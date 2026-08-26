@@ -1,4 +1,5 @@
 {% import "_tokens.html" as tokens %}
+{% import "_captions.html" as captions %}
 <!doctype html>
 <!--
   VisualIntent.TITLE_CARD -- opening card / section boundary. Centered headline on flat black,
@@ -12,8 +13,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=1920, height=1080" />
     <title>title_card</title>
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
-    {{ tokens.tokens_style() }}
+    <script src="./gsap.min.js"></script>
+    {{ tokens.tokens_style(palette) }}
     <style>
       #stage {
         width: 100%;
@@ -63,6 +64,7 @@
       data-height="1080"
     >
       {{ tokens.background_markup('tc', duration_sec) }}
+      {{ captions.captions_markup('tc', word_marks, duration_sec) }}
       <div id="content" class="clip df-content-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="1">
         <div id="stage">
           <h1 id="headline">{{ slots.headline }}</h1>
@@ -79,6 +81,7 @@
       const tl = gsap.timeline({ paused: true });
 
       {{ tokens.background_script('tc', duration_sec) }}
+      {{ captions.captions_script('tc', word_marks, duration_sec) }}
 
       // Headline: smooth spring-pop entrance, no bounce.
       tl.fromTo("#headline", { scale: 0.7, opacity: 0, y: 24 }, { scale: 1, opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.2);

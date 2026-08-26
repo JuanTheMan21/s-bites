@@ -287,25 +287,52 @@ reading as the narrator interrupting themselves) are carried forward into T18A, 
 Task numbers are identity, not order: **T18A runs here**, right after T18 and before iteration 4,
 so nothing already numbered T19 onward has to shift.
 
-### T18A — Fix the render/audio bugs, ship a local entrypoint, add a real network-diagram intent · `todo`
-Two bugs the second real video surfaced get fixed first: `diagram_flow`'s connecting rail rendering
-through its own node markers (an under-opaque marker fill), and `mux/concat_segments.py`
-crossfading *narration audio* along with picture, which reads as the narrator interrupting
-themselves rather than a clean transition. Then a small local-only entry point — one FastAPI route
-reusing `cli.py`'s own pipeline call, one static page with a text box and a video player — so a
-topic can be typed and a video played back without a manual script. Then
-`VisualIntent.NETWORK_DIAGRAM` via `/newintent`: layered nodes with real weighted connections, a
-materially richer generic shape than `diagram_flow`'s straight rail, for content (neural networks,
-org charts, state machines) the existing six intents currently render as an abstract, topic-blind
-process. If time allows within scope, a storyboard step ahead of `plan_segments` that lets one
-visual motif carry across several segments instead of every scene starting cold.
-**DoD:** both bugs verified fixed by a real render and a real listen, not only by tests; a topic
-typed into the local page produces a playable video with no manual script involved; the new intent
-renders validly at all three tiers.
+### T18A — Kill the slideshow: corrected render throughput, full-duration motion, word-timed captions, the two carried-forward bugs, a real local entrypoint · `done`
+**Rescoped during planning, by user decision (see decisionlog D99-D103).** A real viewer's verdict
+on T18's two videos ("looks like a slideshow") traced to a measurable cause, not a template
+quality problem: D16's frame-throughput figure was wrong by roughly 6-10x (a 3-second sample
+dominated by cold-start overhead), so `FRAME_BUDGET` funded Tier 2 for only 2 of 15 segments. Real
+throughput measured with `npx hyperframes benchmark` (~17 frames/sec), `FRAME_BUDGET` raised
+1400 → 9500, and `core/tier_resolver.py::IDEAL_TIER` raised so every non-ASIDE segment targets
+`Tier.ANIMATED`. This is the task's actual center of mass; everything below builds on it.
+
+Also shipped: word-level TTS timing (`WordMark`/`SynthesisResult`, `interfaces/tts_provider.py`,
+D101) driving in-frame captions (`rendering/templates/_captions.html`) and an SRT sidecar
+(`mux/subtitles.py`); per-job color palettes (`rendering/palettes.py`, six contrast-checked
+options); a real count-up for `stat_callout` (`value_number`/`prefix`/`suffix`, ported from the
+registry's `count-up` component's technique); GSAP vendored locally instead of CDN-loaded; both
+carried-forward bugs fixed for real and verified against the real toolchain, not just redesigned
+(D93's narration crossfade — confirmed via spectral analysis, not only duration assertions; D94's
+`diagram_flow` marker opacity); and a `RENDER_ENV` bridge (`config_render.py`, D100) that finally
+closes D92 — `cli.py` with no arguments now runs a full job standalone, real Azure LLM/TTS paired
+with the real local render backend, with no hand-mixing outside committed code.
+
+**Explicitly NOT this task, deferred to T18B:** `VisualIntent.NETWORK_DIAGRAM`, the storyboard/
+motif step, the FastAPI+React local page (replaced this session by a bare stdin prompt in `cli.py`
+instead — sufficient for the DoD's "no manual script" bar, and the user's own call in planning),
+LLM-composed-from-primitives scene authoring (still out of scope — see the original T18A entry's
+reasoning, preserved via decisionlog rather than repeated here), background music/SFX, and the
+`hyperframes render --variables`/`--batch` composition refactor.
+
+**DoD:** both bugs verified fixed by a real render and a real listen — met (D103). A topic given
+to `cli.py` (typed as an argument, or at the prompt when omitted) produces a playable video with
+no manual script involved — met, verified end to end with a real Azure-backed run. The new intent
+— deferred to T18B, not met here.
 **Depends:** T18 — met.
-**Explicitly not this task:** fully bespoke per-topic animation (composing scenes from primitives
-an LLM directs freely, rather than picking from a fixed template set) — discussed and deliberately
-scoped out as a much larger, research-shaped undertaking; see decisionlog.
+
+### T18B — `VisualIntent.NETWORK_DIAGRAM`, the local web entrypoint, and the deferred T18A items · `todo`
+Everything T18A's plan explicitly deferred (see that entry and decisionlog D99-D103): a real
+`VisualIntent.NETWORK_DIAGRAM` via `/newintent` — layered nodes with real weighted connections, a
+materially richer generic shape than `diagram_flow`'s straight rail, for content (neural networks,
+org charts, state machines) the existing intents render as an abstract, topic-blind process; the
+originally-planned small FastAPI route + static page local entrypoint (T18A's terminal-only
+version covers the DoD for now); a storyboard step ahead of `plan_segments` letting one visual
+motif carry across several segments; and, if it still looks worthwhile after T18A's throughput
+correction, the `--variables`/`--batch` composition refactor (one Chrome start per intent instead
+of per segment).
+**DoD:** not yet drafted in detail — negotiate in this task's own plan mode per the project's
+usual practice, using T18A's decisionlog entries as the starting context.
+**Depends:** T18A — met.
 
 ---
 

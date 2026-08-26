@@ -14,6 +14,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.synthesis import WordMark
+
 # Narration pace. The one number that turns a requested video length into a segment count, so
 # 7 minutes yields ~15 segments and 10 minutes yields ~21 without either figure being written
 # down anywhere as a constant.
@@ -113,6 +115,12 @@ class Segment(BaseModel):
         description="Measured length of the narration audio, in milliseconds. Set only by a "
         "TTSProvider from the file it wrote -- never estimated, never from a word count.",
     )
+    word_marks: list[WordMark] = Field(
+        default_factory=list,
+        description="T18A: per-word timing within this segment's narration audio, filled at "
+        "the same stage as duration_ms. May be empty -- not every TTSProvider reports word "
+        "boundaries; consumers must degrade to an even stagger rather than assume this is set.",
+    )
     tier: Tier | None = Field(
         default=None,
         description="Assigned by core/tier_resolver.py, once duration_ms is known.",
@@ -151,6 +159,12 @@ class VideoJob(BaseModel):
         default=None,
         description="Storage key of the finished, concatenated video. Set only by "
         "core/graph/nodes/finalize.py, once every segment's clip has been rendered and muxed.",
+    )
+    subtitles_key: str | None = Field(
+        default=None,
+        description="T18A: storage key of the SRT sidecar (mux/subtitles.py). Set alongside "
+        "video_key by core/graph/nodes/finalize.py. May stay null on the same terms as an "
+        "individual segment's word_marks -- nothing downstream requires it.",
     )
 
     @property

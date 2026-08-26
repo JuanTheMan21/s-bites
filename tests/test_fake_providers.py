@@ -95,21 +95,21 @@ async def test_the_narration_duration_is_measured_from_the_file_it_wrote(
     """
     dest = tmp_path / "segments" / "0" / "narration.wav"
 
-    path, duration_ms = await fake_tts.synthesize("A sentence of narration goes here.", dest)
+    result = await fake_tts.synthesize("A sentence of narration goes here.", dest)
 
-    assert path == dest
-    assert path.exists(), "a fake that reports a duration must have written the audio"
-    assert wav_duration_ms(path) == duration_ms
+    assert result.audio_path == dest
+    assert result.audio_path.exists(), "a fake that reports a duration must have written the audio"
+    assert wav_duration_ms(result.audio_path) == result.duration_ms
 
 
 async def test_longer_narration_produces_longer_audio(
     fake_tts: FakeTTSProvider, tmp_path: Path
 ) -> None:
     """The duration varies with the text, so a test can build a realistic spread of segments."""
-    _, short = await fake_tts.synthesize("Two words.", tmp_path / "a.wav")
-    _, long = await fake_tts.synthesize(" ".join(["word"] * 200), tmp_path / "b.wav")
+    short = await fake_tts.synthesize("Two words.", tmp_path / "a.wav")
+    long = await fake_tts.synthesize(" ".join(["word"] * 200), tmp_path / "b.wav")
 
-    assert 0 < short < long
+    assert 0 < short.duration_ms < long.duration_ms
 
 
 async def test_an_exact_duration_can_be_requested_and_the_audio_matches_it(
@@ -118,10 +118,10 @@ async def test_an_exact_duration_can_be_requested_and_the_audio_matches_it(
     """Tier resolution turns on specific millisecond counts, so tests need to pin them."""
     tts = FakeTTSProvider(durations=[9_000, 28_000])
 
-    _, first = await tts.synthesize("Title.", tmp_path / "a.wav")
-    _, second = await tts.synthesize("Body.", tmp_path / "b.wav")
+    first = await tts.synthesize("Title.", tmp_path / "a.wav")
+    second = await tts.synthesize("Body.", tmp_path / "b.wav")
 
-    assert (first, second) == (9_000, 28_000)
+    assert (first.duration_ms, second.duration_ms) == (9_000, 28_000)
     assert wav_duration_ms(tmp_path / "a.wav") == 9_000
 
 
@@ -140,9 +140,9 @@ async def test_synthesising_over_an_existing_file_replaces_it(
     dest = tmp_path / "narration.wav"
     dest.write_bytes(b"stale content that is not a wav file at all")
 
-    _, duration_ms = await fake_tts.synthesize("Fresh narration.", dest)
+    result = await fake_tts.synthesize("Fresh narration.", dest)
 
-    assert wav_duration_ms(dest) == duration_ms
+    assert wav_duration_ms(dest) == result.duration_ms
 
 
 async def test_the_tts_can_be_made_unavailable(fake_tts: FakeTTSProvider, tmp_path: Path) -> None:

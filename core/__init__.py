@@ -28,6 +28,7 @@ from core.models import (
 from core.outline_schema import Outline, SegmentPlan
 from core.slot_schemas import SLOT_SCHEMAS, slot_schema_for
 from core.strict_schema import StrictSchema
+from core.synthesis import SynthesisResult, WordMark
 from core.tier_resolver import TierAssignment, TierPlan, resolve_tiers
 
 __all__ = [
@@ -41,11 +42,13 @@ __all__ = [
     "Segment",
     "SegmentPlan",
     "StrictSchema",
+    "SynthesisResult",
     "Tier",
     "TierAssignment",
     "TierPlan",
     "VideoJob",
     "VisualIntent",
+    "WordMark",
     "resolve_tiers",
     "scale_frame_budget",
     "slot_schema_for",

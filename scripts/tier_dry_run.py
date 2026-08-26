@@ -110,9 +110,9 @@ async def _measure(
     for index, segment in sorted(segments.items()):
         dest = RUN_ROOT / job_id / f"{index}.wav"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        _, duration_ms = await adapters.tts.synthesize(segment.narration, dest)
-        print(f"  segment {index}: {duration_ms / 1000:>5.1f}s  {segment.title[:48]}")
-        measured[index] = segment.model_copy(update={"duration_ms": duration_ms})
+        result = await adapters.tts.synthesize(segment.narration, dest)
+        print(f"  segment {index}: {result.duration_ms / 1000:>5.1f}s  {segment.title[:48]}")
+        measured[index] = segment.model_copy(update={"duration_ms": result.duration_ms})
     return measured
 
 

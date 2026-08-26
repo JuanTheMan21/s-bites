@@ -1,4 +1,5 @@
 {% import "_tokens.html" as tokens %}
+{% import "_captions.html" as captions %}
 <!doctype html>
 <!--
   VisualIntent.CODE_WALKTHROUGH -- source with specific lines called out. A terminal-style
@@ -12,8 +13,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=1920, height=1080" />
     <title>code_walkthrough</title>
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
-    {{ tokens.tokens_style() }}
+    <script src="./gsap.min.js"></script>
+    {{ tokens.tokens_style(palette) }}
     <style>
       #stage {
         width: 100%;
@@ -109,6 +110,7 @@
       data-height="1080"
     >
       {{ tokens.background_markup('cw', duration_sec) }}
+      {{ captions.captions_markup('cw', word_marks, duration_sec) }}
       <div id="content" class="clip df-content-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="1">
         <div id="stage">
           <h1 id="headline">{{ slots.headline }}</h1>
@@ -141,6 +143,7 @@
       const tl = gsap.timeline({ paused: true });
 
       {{ tokens.background_script('cw', duration_sec) }}
+      {{ captions.captions_script('cw', word_marks, duration_sec) }}
 
       tl.fromTo("#headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 0.1);
       tl.fromTo("#panel", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, 0.4);

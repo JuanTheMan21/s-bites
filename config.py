@@ -30,14 +30,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+import config_render
 from adapters.azure.job_queue import ServiceBusJobQueue
 from adapters.azure.llm_provider import AzureOpenAILLMProvider
-from adapters.azure.render_backend import ContainerAppsRenderBackend
 from adapters.azure.skill_registry import BlobSkillRegistry
 from adapters.azure.storage import BlobStorage
 from adapters.azure.tts_provider import AzureSpeechTTS
 from adapters.local.job_queue import LocalJobQueue
-from adapters.local.render_backend import PlaywrightHyperFramesRenderBackend
 from adapters.local.skill_registry import DiskSkillRegistry
 from adapters.local.storage import DiskStorage
 from interfaces import JobQueue, LLMProvider, RenderBackend, SkillRegistry, Storage, TTSProvider
@@ -103,17 +102,9 @@ def _job_queue(env: Mapping[str, str]) -> JobQueue:
     )
 
 
-def _render_backend(env: Mapping[str, str]) -> RenderBackend:
-    if env.get("RUNTIME_ENV") == "local":
-        return PlaywrightHyperFramesRenderBackend(
-            max_concurrency=_env_int("RENDER_MAX_CONCURRENCY", env, default="4"),
-            quality=_env("RENDER_QUALITY", env, default="standard"),
-        )
-    # Stub until T35 (D25) -- neither value is dialed before then.
-    return ContainerAppsRenderBackend(
-        _env("AZURE_RESOURCE_GROUP", env),
-        _env("AZURE_CONTAINER_APPS_ENVIRONMENT", env),
-    )
+# Render backend resolution lives in config_render.py (T18A) -- see that module's docstring for
+# why splitting it out still honors "config.py is the only module naming concrete adapter
+# classes" rather than quietly violating it.
 
 
 def _llm_provider(env: Mapping[str, str]) -> LLMProvider:
@@ -167,7 +158,7 @@ def build_adapters(env: Mapping[str, str] | None = None) -> Adapters:
         storage=_storage(env),
         skills=_skill_registry(env),
         queue=_job_queue(env),
-        render=_render_backend(env),
+        render=config_render.resolve(env),
     )
 
 

@@ -8,6 +8,7 @@ friends does not touch the network until a call is made.
 
 import pytest
 
+import config_render
 from adapters.azure.job_queue import ServiceBusJobQueue
 from adapters.azure.llm_provider import AzureOpenAILLMProvider
 from adapters.azure.render_backend import ContainerAppsRenderBackend
@@ -21,7 +22,6 @@ from adapters.local.storage import DiskStorage
 from config import (
     Adapters,
     _job_queue,
-    _render_backend,
     _skill_registry,
     _storage,
     build_adapters,
@@ -76,6 +76,20 @@ async def test_runtime_env_azure_builds_all_six_real_adapters() -> None:
     await close_adapters(adapters)  # must not raise, even though nothing was ever used
 
 
+async def test_render_env_bridges_azure_llm_to_the_real_local_render_backend() -> None:
+    """T18A closes D92 for real: RUNTIME_ENV=azure alone still resolves the render stub
+    (ContainerAppsRenderBackend, still T35's), but RENDER_ENV=local lets a caller mix in the
+    real local render backend without hand-editing config.py per session. This is the exact
+    combination cli.py now runs standalone with."""
+    bridged = {**AZURE_ENV, "RENDER_ENV": "local"}
+    adapters = build_adapters(bridged)
+
+    assert isinstance(adapters.llm, AzureOpenAILLMProvider)  # RUNTIME_ENV=azure, unaffected
+    assert isinstance(adapters.render, PlaywrightHyperFramesRenderBackend)  # RENDER_ENV=local
+
+    await close_adapters(adapters)
+
+
 def test_runtime_env_local_raises_naming_the_missing_pieces() -> None:
     """Loud, not silent -- the user's explicit choice over a new stub adapter or a silent gap."""
     with pytest.raises(RuntimeError) as exc_info:
@@ -92,7 +106,7 @@ def test_each_local_builder_returns_the_local_adapter() -> None:
     assert isinstance(_storage(LOCAL_ENV), DiskStorage)
     assert isinstance(_skill_registry(LOCAL_ENV), DiskSkillRegistry)
     assert isinstance(_job_queue(LOCAL_ENV), LocalJobQueue)
-    assert isinstance(_render_backend(LOCAL_ENV), PlaywrightHyperFramesRenderBackend)
+    assert isinstance(config_render.resolve(LOCAL_ENV), PlaywrightHyperFramesRenderBackend)
 
 
 def test_a_missing_required_azure_variable_fails_fast() -> None:

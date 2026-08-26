@@ -87,7 +87,10 @@ async def _run(topic: str, *, target_duration_ms: int, job_id: str) -> VideoJob:
         finished: VideoJob = result["job"]
 
         local_final = working_dir / finished.job_id / "final.mp4"
+        local_srt = working_dir / finished.job_id / "final.srt"
         print(f"\nlocal copy:  {local_final}")
+        if local_srt.exists():
+            print(f"subtitles:   {local_srt}")
         if finished.video_key is not None:
             print(f"storage url: {await adapters.storage.url(finished.video_key)}")
         return finished
@@ -97,7 +100,12 @@ async def _run(topic: str, *, target_duration_ms: int, job_id: str) -> VideoJob:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("topic", help="the prompt as a user would type it")
+    parser.add_argument(
+        "topic",
+        nargs="?",
+        default=None,
+        help="the prompt as a user would type it -- omit it to be prompted on stdin",
+    )
     parser.add_argument(
         "--target-duration-ms",
         type=int,
@@ -109,9 +117,18 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
+    # T18A: a topic-less invocation is the local entrypoint D92/T18A asked for -- ugly is fine,
+    # this is not the FastAPI+React product (T19-T28), it is the fastest way to get a real video
+    # out of this machine without hand-mixing adapters in a scratch script.
+    topic = args.topic
+    if topic is None:
+        topic = input("topic: ").strip()
+        if not topic:
+            raise SystemExit("no topic given")
+
     job_id = args.job_id or str(uuid.uuid4())
     started = time.perf_counter()
-    finished = await _run(args.topic, target_duration_ms=args.target_duration_ms, job_id=job_id)
+    finished = await _run(topic, target_duration_ms=args.target_duration_ms, job_id=job_id)
     _print_summary(finished, elapsed_s=time.perf_counter() - started)
 
 

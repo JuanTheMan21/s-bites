@@ -18,33 +18,61 @@ from core.tier_resolver import REVEAL_FRAME_COST, TIER_SUPPORT, frame_cost, idea
 from tests.segment_examples import SEVEN_MINUTE_OUTLINE, a_segment, seven_minute_segments
 
 
-def test_a_realistic_outline_produces_all_three_tiers_within_budget() -> None:
-    """D9's actual requirement: a budget that promotes everything, or nothing, is decorative."""
+def test_a_tight_budget_still_binds_under_the_t18a_ladder() -> None:
+    """D9's actual requirement, re-verified after T18A raised IDEAL_TIER for NORMAL/MINOR.
+
+    The new ladder makes Tier.REVEAL, not Tier.STATIC, the floor every non-ASIDE segment is
+    eligible for -- REVEAL_FRAME_COST is flat, so a tight budget still produces genuine
+    demotions from the ANIMATED ideal, it just rarely produces a nonzero Tier.STATIC count
+    (that only happens if the budget cannot even afford REVEAL's flat per-segment step for
+    everyone, which 600 -- generously -- can). The interesting claim now is: some segments are
+    demoted, and the plan never overspends.
+    """
     plan = resolve_tiers(seven_minute_segments(), frame_budget=600, fps=24)
 
-    assert all(count > 0 for count in plan.spread.values()), plan.spread
+    assert plan.spread[Tier.STATIC] == 0, "600 easily affords a flat REVEAL step for everyone"
+    assert plan.spread[Tier.REVEAL] > 0
     assert plan.frames_used <= plan.frame_budget
     assert plan.demoted, "nothing was demoted, so the budget is not binding"
+    assert all(a.ideal is Tier.ANIMATED for a in plan.demoted)
 
 
 def test_the_budget_buys_shortness_not_importance() -> None:
-    """The finding from T5 planning, pinned so it is not later mistaken for a bug.
+    """The finding from T5/T16 planning (D32, D78), re-pinned after T18A's ladder correction.
 
-    At 600 frames and 24fps the budget buys 25 seconds of animation, while the average segment
-    narrates for 28. So Tier 2 goes to the *short* segments, and the two CRITICAL ones -- which
-    are also two of the longest -- are demoted to a reveal. That is a frame budget behaving
-    correctly. If it is the wrong outcome for the product, the number to change is FRAME_BUDGET
-    in the environment, not the ladder in this module.
+    600 frames at 24fps still buys only ~25 seconds of animation -- one segment's worth -- so
+    only the single *shortest* segment (the 9-second title card) reaches Tier 2, regardless of
+    importance; every CRITICAL segment is demoted to a reveal because all of them run 30+
+    seconds. This is the same shape of finding D78 already made about FRAME_BUDGET=600 being
+    too small for real narration -- it is why T18A corrects the environment's FRAME_BUDGET
+    rather than the ladder in this module (see the decisionlog's correction to D16).
     """
     plan = resolve_tiers(seven_minute_segments(), frame_budget=600, fps=24)
     animated = [a.index for a in plan.assignments if a.assigned is Tier.ANIMATED]
 
-    assert animated == [0, 6]  # the 9-second title card and the 12-second stat callout
+    assert animated == [0]  # the 9-second title card, the only segment cheap enough
     critical = [
         i for i, (_, imp, _) in enumerate(SEVEN_MINUTE_OUTLINE) if imp == Importance.CRITICAL
     ]
     assert all(plan.tier_for(i) is Tier.REVEAL for i in critical)
     assert all(a.ideal is Tier.ANIMATED for a in plan.demoted)
+
+
+def test_a_generous_budget_animates_nearly_every_segment() -> None:
+    """T18A's actual product goal, pinned as a regression guard: the corrected budget must not
+    quietly shrink back toward D16's original, wrong figure and reintroduce the slideshow.
+
+    ASIDE-importance segments cap at Tier.REVEAL by design (IDEAL_TIER), never Tier.ANIMATED --
+    that ceiling, not a budget shortfall, is why 2 of 15 never animate even with budget to
+    spare. Every other segment, spanning every other importance level, does.
+    """
+    plan = resolve_tiers(seven_minute_segments(), frame_budget=10_500, fps=24)
+
+    aside_count = sum(1 for _, imp, _ in SEVEN_MINUTE_OUTLINE if imp == Importance.ASIDE)
+    assert plan.spread[Tier.STATIC] == 0
+    assert plan.spread[Tier.REVEAL] == aside_count
+    assert plan.spread[Tier.ANIMATED] == len(SEVEN_MINUTE_OUTLINE) - aside_count
+    assert not plan.demoted, "budget to spare should leave nothing short of its ideal"
 
 
 def test_an_unmeasured_segment_is_refused_rather_than_treated_as_free() -> None:

@@ -66,6 +66,24 @@ async def test_a_lint_finding_raises_composition_invalid_before_any_capture_or_r
     assert render.renders == []
 
 
+async def test_a_lint_warning_does_not_block_the_render(tmp_path) -> None:
+    """T18A: found live -- a real render tripped hyperframes' own [warning]
+    composition_file_too_large once captions pushed a template past its line-count nag, and
+    treating every finding as fatal (D2's original stance) blocked every real render permanently.
+    Only [error] severity is fatal now; a [warning] finding must not stop the render.
+    """
+    segment = _authored_segment(VisualIntent.STAT_CALLOUT, Tier.ANIMATED)
+    render = FakeRenderBackend(findings=["[warning] composition_file_too_large: 315 lines"])
+    dest = tmp_path / "clip.mp4"
+
+    result = await render_segment(
+        segment, render, composition_dir=tmp_path / "comp", dest=dest, fps=24
+    )
+
+    assert result == dest
+    assert len(render.renders) == 1
+
+
 async def test_tier_animated_dispatches_to_render_backend_render(tmp_path) -> None:
     segment = _authored_segment(VisualIntent.STAT_CALLOUT, Tier.ANIMATED)
     render = FakeRenderBackend()

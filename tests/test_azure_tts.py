@@ -22,6 +22,7 @@ import pytest
 
 from adapters.azure.tts_provider import AzureSpeechTTS
 from interfaces import ProviderMisconfigured, ProviderUnavailable, RateLimited
+from interfaces.tts_provider import WordMark
 
 SAMPLE_RATE_HZ = 8_000
 EXPECTED_MS = 2000
@@ -48,7 +49,7 @@ class StubSynthesis:
     failures: list[Exception]
     calls: int = field(default=0)
 
-    async def __call__(self, text: str, dest: Path, voice: str) -> None:
+    async def __call__(self, text: str, dest: Path, voice: str) -> list[WordMark]:
         self.calls += 1
         if self.failures:
             # A failed attempt can leave a partial file behind. Written deliberately so the
@@ -62,6 +63,7 @@ class StubSynthesis:
             audio.setsampwidth(1)
             audio.setframerate(SAMPLE_RATE_HZ)
             audio.writeframes(b"\x80" * frames)
+        return [WordMark(text="narration", offset_ms=0, duration_ms=EXPECTED_MS)]
 
 
 @pytest.fixture
@@ -78,10 +80,10 @@ async def test_a_transient_throttle_is_survived(tmp_path: Path, no_waiting: None
     stub = StubSynthesis(failures=[RateLimited("slow down")])
     narrator._synthesize_once = stub  # type: ignore[method-assign]
 
-    _, duration_ms = await narrator.synthesize("narration", tmp_path / "narration.wav")
+    result = await narrator.synthesize("narration", tmp_path / "narration.wav")
 
     assert stub.calls == 2
-    assert duration_ms == EXPECTED_MS
+    assert result.duration_ms == EXPECTED_MS
 
 
 async def test_the_duration_is_measured_after_the_retries(tmp_path: Path, no_waiting: None) -> None:
@@ -96,9 +98,9 @@ async def test_the_duration_is_measured_after_the_retries(tmp_path: Path, no_wai
     )
     dest = tmp_path / "narration.wav"
 
-    _, duration_ms = await narrator.synthesize("narration", dest)
+    result = await narrator.synthesize("narration", dest)
 
-    assert duration_ms == EXPECTED_MS
+    assert result.duration_ms == EXPECTED_MS
     assert dest.read_bytes()[:4] == b"RIFF", "the partial file was replaced, not appended to"
 
 
