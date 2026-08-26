@@ -320,18 +320,57 @@ no manual script involved — met, verified end to end with a real Azure-backed 
 — deferred to T18B, not met here.
 **Depends:** T18 — met.
 
-### T18B — `VisualIntent.NETWORK_DIAGRAM`, the local web entrypoint, and the deferred T18A items · `todo`
-Everything T18A's plan explicitly deferred (see that entry and decisionlog D99-D103): a real
-`VisualIntent.NETWORK_DIAGRAM` via `/newintent` — layered nodes with real weighted connections, a
-materially richer generic shape than `diagram_flow`'s straight rail, for content (neural networks,
-org charts, state machines) the existing intents render as an abstract, topic-blind process; the
-originally-planned small FastAPI route + static page local entrypoint (T18A's terminal-only
-version covers the DoD for now); a storyboard step ahead of `plan_segments` letting one visual
-motif carry across several segments; and, if it still looks worthwhile after T18A's throughput
-correction, the `--variables`/`--batch` composition refactor (one Chrome start per intent instead
-of per segment).
-**DoD:** not yet drafted in detail — negotiate in this task's own plan mode per the project's
-usual practice, using T18A's decisionlog entries as the starting context.
+### T18B — Richer templates, real per-segment motion, cue-based captions, a per-video motif system · `todo`
+**Rescoped in planning, after a real viewer reviewed T18A's actual output** (decisionlog D104) —
+supersedes the version of this entry T18A originally wrote. Four real problems drove the rescope,
+each traced to specific code rather than assumed: every template's real choreography ends at
+~1.5s and everything after is a generic idle-bob liveness hack, not genuine full-duration motion;
+`rendering/templates/_captions.html` never clears a word once shown, so captions accumulate into
+a growing wall of text instead of movie-style 1-2 line cues (`mux/subtitles.py`'s own cue grouping,
+`MAX_WORDS_PER_CUE`, was never reused for the in-frame version); all 6 palettes keep `--bg`
+near-black and lean `--accent-secondary` blue, so "6 palettes" doesn't read as varied, especially
+stacked on `diagram_flow` using that token for everything; and nothing structurally guarantees a
+`title_card` opens a video — `runtime_skills/outline/1.0.md` only suggests one, and the real T18A
+test run had none.
+
+**Scope, agreed with the user (not yet drafted as a formal DoD — negotiate specifics in this
+task's own plan mode):**
+- **Cue-based captions.** Extract the grouping already in `mux/subtitles.py` into something both
+  it and `_captions.html` share; the in-frame band shows and holds one cue, then replaces it —
+  never accumulates.
+- **A per-video motif system.** One motif chosen per video, right after outline, threading through
+  palette family *and* which template variant renders each `VisualIntent` — so repeats within one
+  video and across different videos both look different. Three starting directions: **Blueprint**
+  (light paper background, schematic right-angle connectors — the real fix for "navy blue"),
+  **Terminal** (warm dark charcoal, zero blue, stepped ASCII-style connectors), **Broadcast**
+  (light neutral, one bold accent, lower-third-style labels). Built as a shared token/component
+  layer (same pattern as `_tokens.html`/`_captions.html`), not fully bespoke templates per
+  motif × intent — keeps this buildable in one pass rather than a combinatorial rebuild.
+- **Two new intents**, driven directly by a reference video the user shared: an **array/list
+  visualization** (a row of boxes, narration-synced highlight/cross-out/collapse — what
+  `diagram_flow`'s steps-in-sequence shape cannot express) and a **composite code+diagram split**
+  (two panels sharing one frame, e.g. code on the left, an array or flow diagram on the right).
+  Absorbs most of what `VisualIntent.NETWORK_DIAGRAM` would have been (a `diagram_flow`
+  hub/orbit alternate covers the rest) rather than staying a separate intent.
+- **Shared annotation components** — a pointing-hand/cursor indicator, a success-check — usable
+  by any template rather than exclusive to one, ported from the registry the same way T18A's
+  count-up was (`npx hyperframes add`, inspect, hand-adapt; the registry's own `<template>`/
+  `window.__hyperframes` clone mechanism doesn't fit this project's single-composition-per-segment
+  layout, per D103).
+- **Full-duration per-template motion**, ideally keyed to `word_marks` (real timing now exists)
+  rather than a decorative sine bob.
+- **Force segment 0 to `title_card`** — structural, not advisory.
+- **Iteration budget: one solid pass.** Build, verify with `hyperframes check` per composition,
+  one real end-to-end render at full 7-minute length (not measured directly yet — see T18A's
+  handoff), user review. Not a multi-cycle render/watch/adjust loop.
+
+**Explicitly not this task** (decisionlog D104): Mermaid-rendered diagrams (rejected — the
+reference video's actual asks aren't Mermaid's diagram types, and HyperFrames' seekable-timeline
+model would need the same stroke-draw animation on top regardless); fully compositional
+LLM-authored scenes (still the larger, research-shaped undertaking T18A's plan already deferred —
+reopen as its own later task if the richer fixed-template set still isn't enough after a real
+7-minute video); the originally-planned FastAPI route + static page (T18A's terminal-only `cli.py`
+entrypoint covers the DoD); the `--variables`/`--batch` composition refactor.
 **Depends:** T18A — met.
 
 ---

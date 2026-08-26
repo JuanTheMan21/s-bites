@@ -1610,3 +1610,50 @@ three landed on `Tier.ANIMATED` (the corrected budget/ladder from D99 funding wh
 1400 could not), real `final.srt` produced from real Azure word-boundary events, 165.9s
 wall-clock -- comfortably inside the ~15-minute target with two full segments' worth of margin
 to spare on a video less than a third that length.
+
+### D104 — T18B scoped to a richer fixed template set, not fully compositional LLM-authored scenes; Mermaid rejected for the diagrams it was proposed for
+**The trigger.** Reviewing T18A's real output, the user pushed back hard on three things: motion
+that's really just an idle bob after a 1.5s entrance, captions that accumulate into a wall of text
+instead of clearing, and `diagram_flow` looking identical to the pre-T18A reference screenshot no
+matter the topic. They also shared a reference video (a 2:20 binary-search explainer) showing
+patterns this project has no template for -- an array/list visualization (boxes crossed out as the
+search space halves) and a composite code+diagram split panel -- and asked directly whether the
+project needs to stop using predefined templates at all, "each video topic will have a different
+requirement."
+
+**Rejected: Mermaid for the diagrams in the reference video.** The reference video's specific
+asks (array-slicing, a code+diagram split) are not graph/flowchart content Mermaid renders --
+they're a data-structure visualization and a layout composition, neither of which Mermaid's own
+diagram types cover. Even where Mermaid could apply (arbitrary graph topology), it only produces
+a static SVG; HyperFrames' whole rendering model is a paused, seekable GSAP timeline (D15), so
+Mermaid output would need the identical stroke-draw animation technique `diagram_flow` already
+uses, bought at the cost of a new Node-side render step and a determinism question (must lay out
+identically for the same input every time, since frame-accurate seeking depends on it). Not ruled
+out forever -- flagged as a real option for a future task if genuinely arbitrary graph topology
+becomes a concrete need, just not for what T18B's reference video actually shows.
+
+**Rejected (for T18B specifically, not permanently): fully compositional LLM-authored scenes** --
+the LLM assembling a segment's visual from primitives per topic instead of picking from a fixed
+template set. This is exactly what T18A's own plan (and the original T18A task description before
+it) already named and deliberately scoped out as "a much larger, research-shaped undertaking."
+Reopening it now would mean shipping it alongside everything else already on T18B's list under the
+"one solid pass, ship it" iteration budget the user picked -- LLM-authored layouts need real
+validation cycles (more `hyperframes check` failures, more render-watch-adjust loops) that budget
+doesn't have room for. The user's own stated concern ("each video topic will have a different
+requirement") is real, but is addressed for now by growing the *set* of fixed templates to match
+the concrete patterns their reference video showed, not by removing the fixed-template model.
+
+**Landed: T18B's scope is a richer, better-curated fixed template set.** New intents (array/list
+visualization; a composite code+diagram split); shared, reusable annotation components (a
+pointing-hand/cursor indicator, a success-check) usable by any template rather than baked into
+one; a guaranteed title card (the outline pack currently only *suggests* one segment be
+`title_card` -- nothing enforces it, which is why the real T18A test run had none); cue-based
+captions replacing the accumulate-forever bug; full-duration per-template motion instead of an
+idle-bob liveness hack; and a per-video "motif" system (three starting directions: Blueprint,
+Terminal, Broadcast) that varies palette *and* which template variant renders each intent, so
+repeats within one video and across different videos both look genuinely different. Full detail
+in the planning conversation preceding this checkpoint; `tasks.md`'s T18B entry carries the
+scoped list forward.
+
+**If this still isn't enough after a real 7-minute video under T18B**, the fully-compositional
+approach becomes its own later task with its own scoping conversation -- not folded into T18B.
