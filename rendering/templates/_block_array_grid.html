@@ -1,0 +1,135 @@
+{#
+  BlockType.ARRAY_GRID -- T18B's one genuinely new block, with no pre-T18B equivalent and no
+  turnkey HyperFrames registry component (confirmed by this session's research): a row of cells
+  that can visually narrow over the course of the narration -- a binary search's halving, a
+  sliding window closing in, a stack's items falling away from one end. Composed from
+  grid-card-assemble's stagger-in technique and strikethrough-replace's strike-then-fade
+  technique, both hand-adapted rather than cloned (the registry's own runtime doesn't fit this
+  project's single-composition-per-segment layout, D103).
+
+  Each ArrayEliminationStep narrows the active window to [remaining_start, remaining_end) --
+  cells that fall OUTSIDE the new window but were still inside the previous one get struck
+  through and faded at that step's own narration-anchored beat (step_starts, resolved in
+  rendering/compose.py from each step's own anchor_phrase).
+#}
+
+{% macro markup(prefix, payload, compact=false) %}
+{% set n = payload.cells | length %}
+<div id="{{ prefix }}-wrap" class="blk-array-wrap">
+  <h1 id="{{ prefix }}-headline" class="blk-array-headline">{{ payload.headline }}</h1>
+  <div id="{{ prefix }}-row" class="blk-array-row">
+    {% for cell in payload.cells %}
+    <div class="blk-array-cell" id="{{ prefix }}-cell-{{ loop.index0 }}">
+      {#- data-layout-allow-occlusion: the strike is DESIGNED to cross the value once eliminated
+         -- hyperframes check's text_occluded finding is correct that the strike overlaps the
+         text, and wrong that it is a legibility bug; a strikethrough crossing its own text is
+         the whole point of the mark, not an accident. #}
+      <span class="blk-array-cell-value" data-layout-allow-occlusion>{{ cell }}</span>
+      <span class="blk-array-cell-strike" id="{{ prefix }}-strike-{{ loop.index0 }}"></span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+<style>
+  .blk-array-wrap { width: 100%; display: flex; flex-direction: column; }
+  .blk-array-headline {
+    font-weight: 700;
+    font-size: {{ "42px" if compact else "68px" }};
+    max-width: 100%;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-array-row {
+    display: flex;
+    gap: {{ "6px" if compact else "10px" }};
+    margin-top: {{ "50px" if compact else "90px" }};
+    width: 100%;
+  }
+  .blk-array-cell {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    height: {{ "80px" if compact else "120px" }};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--accent-secondary);
+    border-radius: 4px;
+    opacity: 0;
+    transform-origin: center;
+    will-change: opacity, transform;
+  }
+  .blk-array-cell-value {
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-weight: 600;
+    font-size: {{ "20px" if compact else "30px" }};
+    padding: 0 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .blk-array-cell-strike {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 100%;
+    height: 3px;
+    background: var(--accent-primary);
+    transform-origin: center;
+    will-change: transform;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
+
+  // Cells assemble together (grid-card-assemble's technique), staggered slightly left to right.
+  const {{ prefix }}_cellCount = {{ payload.cells | length }};
+  const {{ prefix }}_cellStagger = Math.min(0.04, 0.5 / Math.max(1, {{ prefix }}_cellCount));
+  for (let i = 0; i < {{ prefix }}_cellCount; i++) {
+    const t = {{ entrance_start + 0.4 }} + i * {{ prefix }}_cellStagger;
+    tl.fromTo(
+      "#{{ prefix }}-cell-" + i,
+      { scale: 0.8, opacity: 0, y: 12 },
+      { scale: 1, opacity: 1, y: 0, duration: 0.3, ease: "power3.out" },
+      t,
+    );
+    // Every strike line's collapsed state is set here, in JS, at t=0 -- never in static CSS
+    // (hyperframes-core's rule, same one _tokens.html's background frame follows: a CSS initial
+    // transform paired with a GSAP tween on the same property is a lint failure, and for a cell
+    // whose range is never eliminated, no other tween would ever touch it, leaving it at CSS's
+    // un-transformed (fully visible, occluding) default instead of collapsed).
+    tl.set("#{{ prefix }}-strike-" + i, { scaleX: 0 }, 0);
+  }
+
+  // Elimination steps: cells outside this step's remaining window, but still inside the
+  // previous one, strike through and fade -- one moment at a time, each on its own
+  // narration-anchored beat (step_starts).
+  (function () {
+    var prevStart = 0;
+    var prevEnd = {{ prefix }}_cellCount;
+    var stepStarts = [{% for s in step_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+    var steps = [
+      {% for step in payload.steps %}
+      { start: {{ step.remaining_start }}, end: {{ step.remaining_end }} }{{ "," if not loop.last }}
+      {% endfor %}
+    ];
+    steps.forEach(function (step, i) {
+      var t = stepStarts[i];
+      for (var idx = prevStart; idx < prevEnd; idx++) {
+        if (idx < step.start || idx >= step.end) {
+          tl.to("#{{ prefix }}-cell-" + idx, { opacity: 0.28, duration: 0.35, ease: "power2.out" }, t);
+          tl.fromTo(
+            "#{{ prefix }}-strike-" + idx,
+            { scaleX: 0 },
+            { scaleX: 1, duration: 0.3, ease: "power2.out" },
+            t,
+          );
+        }
+      }
+      prevStart = step.start;
+      prevEnd = step.end;
+    });
+  })();
+{% endmacro %}

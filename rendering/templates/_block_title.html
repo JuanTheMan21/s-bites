@@ -1,0 +1,73 @@
+{#
+  BlockType.TITLE -- a direct lift of the pre-T18B title_card.html: centered headline, a flat
+  underline as the one accent mark, optional subtitle below. Always SINGLE, always alone
+  (segment 0's forced title card, or a genuine mid-video pivot plan_visuals chose).
+  Rule composed: spring-pop-entrance (headline).
+#}
+
+{% macro markup(prefix, payload, compact=false) %}
+<div id="{{ prefix }}-wrap" class="blk-title-wrap">
+  <h1 id="{{ prefix }}-headline" class="blk-title-headline">{{ payload.headline }}</h1>
+  <span id="{{ prefix }}-underline" class="blk-title-underline"></span>
+  {% if payload.subtitle %}
+  <p id="{{ prefix }}-subtitle" class="blk-title-subtitle">{{ payload.subtitle }}</p>
+  {% endif %}
+</div>
+<style>
+  .blk-title-wrap {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .blk-title-headline {
+    font-weight: 700;
+    font-size: 104px;
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    max-width: 100%;
+    will-change: opacity, transform;
+  }
+  .blk-title-underline {
+    width: 260px;
+    height: 4px;
+    margin-top: 44px;
+    background: var(--accent-primary);
+    transform-origin: center;
+    display: block;
+    will-change: transform;
+  }
+  .blk-title-subtitle {
+    margin-top: 40px;
+    font-weight: 400;
+    font-size: 36px;
+    color: var(--fg-muted);
+    max-width: 80%;
+    will-change: opacity, transform;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  tl.fromTo(
+    "#{{ prefix }}-headline",
+    { scale: 0.7, opacity: 0, y: 24 },
+    { scale: 1, opacity: 1, y: 0, duration: 0.7, ease: "power3.out" },
+    {{ entrance_start }},
+  );
+  tl.fromTo(
+    "#{{ prefix }}-underline",
+    { scaleX: 0 },
+    { scaleX: 1, duration: 0.5, ease: "power2.out" },
+    {{ entrance_start + 0.55 }},
+  );
+  {% if payload.subtitle %}
+  tl.fromTo(
+    "#{{ prefix }}-subtitle",
+    { opacity: 0, y: 18 },
+    { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" },
+    {{ entrance_start + 0.75 }},
+  );
+  {% endif %}
+{% endmacro %}

@@ -76,7 +76,7 @@ def test_a_fresh_segment_is_unnarrated_unmeasured_and_untiered() -> None:
     assert segment.narration is None
     assert segment.duration_ms is None
     assert segment.tier is None
-    assert segment.slots is None
+    assert segment.scene is None
 
 
 def test_segment_plan_carries_no_timing_field_for_the_llm_to_fill() -> None:
@@ -107,7 +107,26 @@ def test_job_and_segments_survive_a_serialisation_round_trip() -> None:
                 narration="Roughly a fifth of breaches start here.",
                 duration_ms=4200,
                 tier=Tier.ANIMATED,
-                slots={"value": "1 in 5", "unit": None, "context": "of breaches"},
+                scene={
+                    "motif": "terminal",
+                    "layout": "single",
+                    "blocks": [
+                        {
+                            "block_type": "stat_callout",
+                            "role": "role",
+                            "anchor_phrase": None,
+                            "payload": {
+                                "value": "1 in 5",
+                                "unit": None,
+                                "context": "of breaches",
+                                "value_number": None,
+                                "prefix": None,
+                                "suffix": None,
+                            },
+                        }
+                    ],
+                    "continues_previous": False,
+                },
             ),
         ],
     )

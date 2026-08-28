@@ -1,16 +1,19 @@
 """Believable ``Segment`` inputs, shared by every test that needs a plausible outline.
 
-Not a test module. The same role ``tests/slot_examples.py`` plays for slot payloads: one
-realistic fixture, defined once, used by whichever test needs it. T6 uses it for the tier
-resolver; T16 will use it for the narrate-measure-tier stretch, which cares about exactly the
-same shape of input.
+Not a test module. The same role ``tests/block_examples.py`` plays for block content payloads:
+one realistic fixture, defined once, used by whichever test needs it. T6 uses it for the tier
+resolver; T16 uses it for the narrate-measure-tier stretch, which cares about exactly the same
+shape of input.
 
 Realistic rather than minimal, on purpose. A resolver fed three identical 28-second segments
 answers a question nobody asked -- the interesting behaviour only appears when durations and
 importances actually vary.
 """
 
-from core import Importance, Segment, VisualIntent
+from core import Importance, Segment, Tier, VisualIntent
+from core.block_types import BlockType
+from core.scene_schemas import ComposedBlock, ComposedScene
+from tests.block_examples import EXAMPLES
 
 # A plausible 7-minute explainer: ~412 seconds over 15 segments, importance spread across all
 # five levels, and -- crucially -- a couple of genuinely short segments. A title card and a stat
@@ -59,3 +62,28 @@ def seven_minute_segments() -> list[Segment]:
         a_segment(i, importance, seconds * 1000, intent)
         for i, (intent, importance, seconds) in enumerate(SEVEN_MINUTE_OUTLINE)
     ]
+
+
+def an_authored_segment(
+    index: int, block_type: BlockType, tier: Tier, *, duration_ms: int = 21_000
+) -> Segment:
+    """T18B: a segment carrying a fully-authored scene -- one SINGLE-layout block of
+    ``block_type``, filled with ``tests/block_examples.py``'s believable payload -- for tests
+    that exercise rendering/muxing and do not care how the scene got authored, only that it has.
+    """
+    scene = ComposedScene(
+        motif="terminal",
+        layout="single",
+        blocks=[
+            ComposedBlock(
+                block_type=block_type,
+                role="role",
+                anchor_phrase=None,
+                payload=EXAMPLES[block_type],
+            )
+        ],
+        continues_previous=False,
+    )
+    return a_segment(index, duration_ms=duration_ms).model_copy(
+        update={"tier": tier, "scene": scene.model_dump()}
+    )

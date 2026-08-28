@@ -54,7 +54,6 @@ async def render_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
         composition_dir=segment_dir / "composition",
         dest=silent,
         fps=context.fps,
-        job_id=job_id,
     )
 
     narration = local_narration_path(context.working_dir, job_id, segment.index)

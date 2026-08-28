@@ -17,7 +17,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from core.graph import build_graph
 from core.models import VideoJob
-from core.slot_schemas import slot_schema_for
+from core.scene_schemas import ComposedScene
 from tests.fakes import FakeStorage, FakeTTSProvider
 from tests.graph_pipeline_fixtures import a_context, a_job, needs_ffmpeg, seeded_llm
 
@@ -53,10 +53,10 @@ async def test_a_full_run_narrates_every_segment_and_succeeds(tmp_path: Path) ->
     # The whole T16 stretch, end to end: measured, then tiered, then authored against that measure.
     for segment in result_job.segments:
         assert segment.tier is not None
-        assert segment.slots is not None
-        # Stored as an untyped dict (D29), so the check that it is the *right* payload for this
-        # segment's intent has to be made explicitly rather than by the type system.
-        assert slot_schema_for(segment.visual_intent).model_validate(segment.slots)
+        assert segment.scene is not None
+        # Stored as an untyped dict (D29), so the check that it is a well-formed scene has to be
+        # made explicitly rather than by the type system.
+        assert ComposedScene.model_validate(segment.scene)
         assert segment.clip_key is not None
         assert segment.clip_key in fake_storage.objects
 

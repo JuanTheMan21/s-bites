@@ -1,9 +1,13 @@
-"""Every real template, at every tier, through the real backend and the real CLI's ``check``.
+"""Every real block, at every tier, through the real backend and the real CLI's ``check``.
 
 ``local_live``, following ``test_render_backend_parity.py``'s shape: real
 ``PlaywrightHyperFramesRenderBackend``, ``aclose()`` in ``finally``. This is the "render every
-template at all three tiers explicitly" sweep ``handoff.md`` asks for -- a real job leaves Tier 0
+block at all three tiers explicitly" sweep ``handoff.md`` asks for -- a real job leaves Tier 0
 unexercised entirely (D79), so nothing else in this suite renders it against a real browser.
+
+T18B: parametrized by ``BlockType`` (each rendered alone, ``SINGLE`` layout) rather than
+``VisualIntent`` -- the dispatch this sweep exercises moved from intent-to-template to
+layout-plus-blocks.
 
 ``check`` (not just the interface's own ``lint``) additionally runs here as a second, stricter
 gate: WCAG contrast, the frozen-sweep guard, and the rest of the layout audit all found real bugs
@@ -21,35 +25,22 @@ import subprocess
 
 import pytest
 
-from core.models import Segment, Tier, VisualIntent
+from core.block_types import BlockType
+from core.models import Tier
 from rendering.render_segment import render_segment
-from tests.slot_examples import EXAMPLES
+from tests.segment_examples import an_authored_segment
 
 pytestmark = pytest.mark.local_live
 
 _NPX = shutil.which("npx")
 
-# Short, deliberately -- this sweep is 6 intents x 3 Tiers, and Tier 2's render time scales with
-# duration (D16). A realistic ~21s segment would make the matrix take tens of minutes for no
-# added coverage: contrast/layout/lint findings are structural properties of the template, not a
+# Short, deliberately -- this sweep is 6 block types x 3 Tiers, and Tier 2's render time scales
+# with duration (D16). A realistic ~21s segment would make the matrix take tens of minutes for
+# no added coverage: contrast/layout/lint findings are structural properties of the block, not a
 # function of how long the clip runs, and the duration-match assertion is exactly as meaningful
 # at 4s as at 21s.
 DURATION_MS = 4_000
 FPS = 24
-
-
-def _authored_segment(intent: VisualIntent, tier: Tier) -> Segment:
-    return Segment(
-        index=0,
-        title="segment",
-        summary="one idea, explained",
-        visual_intent=intent,
-        importance=1,  # ASIDE -- irrelevant here, tier is assigned directly
-        narration="narration",
-        duration_ms=DURATION_MS,
-        tier=tier,
-        slots=EXAMPLES[intent],
-    )
 
 
 def _run_check(composition_dir) -> dict:
@@ -77,12 +68,12 @@ async def backend():
         await real.aclose()
 
 
-@pytest.mark.parametrize("intent", list(VisualIntent))
+@pytest.mark.parametrize("block_type", list(BlockType))
 @pytest.mark.parametrize("tier", list(Tier))
-async def test_every_template_renders_a_valid_clip_at_every_tier(
-    backend, tmp_path, intent: VisualIntent, tier: Tier
+async def test_every_block_renders_a_valid_clip_at_every_tier(
+    backend, tmp_path, block_type: BlockType, tier: Tier
 ) -> None:
-    segment = _authored_segment(intent, tier)
+    segment = an_authored_segment(0, block_type, tier, duration_ms=DURATION_MS)
     composition_dir = tmp_path / "comp"
     dest = tmp_path / "clip.mp4"
 

@@ -17,11 +17,13 @@ from pathlib import Path
 
 import pytest
 
+from core.block_schemas import TitleSlots
+from core.block_types import BlockType, MotifName, SceneLayout
 from core.graph import GraphContext, build_graph
 from core.models import Importance, Tier, VideoJob, VisualIntent
 from core.outline_schema import Outline, SegmentPlan
+from core.scene_plan_schema import PlannedBlock, SegmentScenePlan, VideoScenePlan
 from core.scripting_schema import Narration
-from core.slot_schemas import TitleCardSlots
 from interfaces import SkillPack
 from mux.concat_segments import DEFAULT_TRANSITION_S
 from tests.fakes import FakeLLMProvider, FakeSkillRegistry, FakeStorage, FakeTTSProvider
@@ -60,18 +62,30 @@ def _seeded_llm() -> FakeLLMProvider:
         ]
     )
     narrations = [Narration(text="Narration one."), Narration(text="Narration two.")]
+    plan = VideoScenePlan(
+        motif=MotifName.TERMINAL,
+        segments=[
+            SegmentScenePlan(
+                segment_index=i,
+                layout=SceneLayout.SINGLE,
+                blocks=[PlannedBlock(block_type=BlockType.TITLE, role="Title", anchor_phrase=None)],
+                continues_previous=False,
+            )
+            for i in range(2)
+        ],
+    )
     slots = [
-        TitleCardSlots(headline="Headline 0", subtitle=None),
-        TitleCardSlots(headline="Headline 1", subtitle=None),
+        TitleSlots(headline="Headline 0", subtitle=None),
+        TitleSlots(headline="Headline 1", subtitle=None),
     ]
-    return FakeLLMProvider([outline, *narrations, *slots])
+    return FakeLLMProvider([outline, *narrations, plan, *slots])
 
 
 def _seeded_skills() -> FakeSkillRegistry:
     return FakeSkillRegistry(
         [
             SkillPack(name=name, version="1.0", content=f"{name} pack")
-            for name in ("outline", "scripting", "house-style", "scene-authoring")
+            for name in ("outline", "scripting", "visual-plan", "house-style", "scene-authoring")
         ]
     )
 

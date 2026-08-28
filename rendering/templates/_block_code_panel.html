@@ -1,0 +1,138 @@
+{#
+  BlockType.CODE_PANEL -- a direct lift of the pre-T18B code_walkthrough.html: a terminal-style
+  panel, JetBrains Mono throughout. Highlighted lines get a full-line background reveal,
+  deliberately NOT a left-edge accent stripe (house-style.md names that as a lazy default).
+  Rules composed: waterfall-entry (lines whip in) + a scaleX full-line highlight reveal.
+#}
+
+{% macro markup(prefix, payload, compact=false) %}
+<div id="{{ prefix }}-wrap" class="blk-code-wrap">
+  <h1 id="{{ prefix }}-headline" class="blk-code-headline">{{ payload.headline }}</h1>
+  <div id="{{ prefix }}-panel" class="blk-code-panel">
+    <div class="blk-code-bar">
+      <span class="blk-code-dot"></span><span class="blk-code-dot"></span><span class="blk-code-dot"></span>
+      <span class="blk-code-lang">{{ payload.language }}</span>
+    </div>
+    <div class="blk-code-area">
+      {% for idx in payload.highlight_lines %}
+      <div class="blk-code-highlight-bg" id="{{ prefix }}-hl-{{ idx }}" style="top: {{ (idx - 1) * (36 if compact else 48) }}px;"></div>
+      {% endfor %}
+      {% for line in payload.lines %}
+      <div class="blk-code-line" id="{{ prefix }}-line-{{ loop.index0 }}">
+        <span class="blk-code-line-no">{{ loop.index }}</span>
+        <span class="blk-code-line-text">{{ line }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% if payload.caption %}
+  <p id="{{ prefix }}-caption" class="blk-code-caption">{{ payload.caption }}</p>
+  {% endif %}
+</div>
+<style>
+  .blk-code-wrap { width: 100%; display: flex; flex-direction: column; }
+  .blk-code-headline {
+    font-weight: 700;
+    font-size: {{ "40px" if compact else "62px" }};
+    max-width: 100%;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-code-panel {
+    margin-top: {{ "28px" if compact else "52px" }};
+    border-radius: 6px;
+    border: 1.5px solid color-mix(in srgb, var(--fg) 14%, transparent);
+    background: color-mix(in srgb, var(--bg) 85%, black 15%);
+    overflow: hidden;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-code-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: {{ "12px 18px" if compact else "20px 28px" }};
+    background: color-mix(in srgb, var(--fg) 4%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  }
+  .blk-code-dot { width: 12px; height: 12px; border-radius: 50%; background: color-mix(in srgb, var(--fg) 20%, transparent); }
+  .blk-code-lang {
+    margin-left: 14px;
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: 18px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent-secondary);
+  }
+  .blk-code-area { position: relative; padding: {{ "18px 0" if compact else "30px 0" }}; }
+  .blk-code-highlight-bg {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: {{ "36px" if compact else "48px" }};
+    background: color-mix(in srgb, var(--accent-secondary) 16%, transparent);
+    transform-origin: left center;
+    will-change: transform;
+  }
+  .blk-code-line {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: {{ "36px" if compact else "48px" }};
+    padding: 0 {{ "24px" if compact else "40px" }};
+    gap: {{ "18px" if compact else "28px" }};
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-code-line-no {
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: {{ "18px" if compact else "24px" }};
+    color: color-mix(in srgb, var(--fg) 50%, transparent);
+    min-width: 34px;
+    text-align: right;
+  }
+  .blk-code-line-text {
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: {{ "19px" if compact else "26px" }};
+    white-space: pre;
+  }
+  .blk-code-caption {
+    margin-top: 30px;
+    font-weight: 400;
+    font-size: {{ "20px" if compact else "28px" }};
+    color: var(--fg-muted);
+    max-width: 100%;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
+  tl.fromTo("#{{ prefix }}-panel", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, {{ entrance_start + 0.3 }});
+
+  // Lines whip in, waterfall-entry's binary-opacity convention.
+  const {{ prefix }}_lineCount = {{ payload.lines | length }};
+  const {{ prefix }}_lineStagger = Math.min(0.09, 0.55 / Math.max(1, {{ prefix }}_lineCount));
+  let {{ prefix }}_lineStart = {{ entrance_start + 0.65 }};
+  for (let i = 0; i < {{ prefix }}_lineCount; i++) {
+    const el = document.getElementById("{{ prefix }}-line-" + i);
+    tl.set(el, { opacity: 1, y: 26 }, {{ prefix }}_lineStart);
+    tl.to(el, { y: 0, duration: 0.24, ease: "power4.out" }, {{ prefix }}_lineStart);
+    {{ prefix }}_lineStart += {{ prefix }}_lineStagger;
+  }
+
+  {% for idx in payload.highlight_lines %}
+  tl.fromTo(
+    "#{{ prefix }}-hl-{{ idx }}",
+    { scaleX: 0 },
+    { scaleX: 1, duration: 0.4, ease: "power2.out" },
+    {{ entrance_start + 0.65 + 0.09 * (idx - 1) + 0.2 }},
+  );
+  {% endfor %}
+
+  {% if payload.caption %}
+  tl.fromTo("#{{ prefix }}-caption", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, {{ prefix }}_lineStart + 0.3);
+  {% endif %}
+{% endmacro %}

@@ -16,29 +16,23 @@ import pytest
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from core.block_types import BlockType
 from core.graph import GraphContext, GraphState
 from core.graph.nodes.render_scene import SEGMENT_CLIP_KEY, local_clip_path, render_scene
 from core.graph.nodes.synthesize import local_narration_path
 from core.graph.retry_policy import build_transient_retry_policy
 from core.graph.state import SegmentTask
-from core.models import Segment, Tier, VideoJob, VisualIntent
+from core.models import Segment, Tier, VideoJob
 from interfaces import CompositionInvalid
 from tests.fakes import FakeLLMProvider, FakeRenderBackend, FakeSkillRegistry, FakeStorage
 from tests.fakes.tts_provider import FakeTTSProvider
-from tests.segment_examples import a_segment
-from tests.slot_examples import EXAMPLES
+from tests.segment_examples import an_authored_segment
 
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
 
 JOB_ID = "job-1"
 DURATION_MS = 4_000
 SAMPLE_RATE_HZ = 8_000
-
-
-def _authored_segment(intent: VisualIntent, tier: Tier) -> Segment:
-    return a_segment(0, intent=intent, duration_ms=DURATION_MS).model_copy(
-        update={"tier": tier, "slots": EXAMPLES[intent]}
-    )
 
 
 def _write_narration(working_dir: Path) -> None:
@@ -95,7 +89,7 @@ async def run_render_scene(segment: Segment, context: GraphContext) -> dict[int,
 
 @needs_ffmpeg
 async def test_tier_static_renders_muxes_and_persists_a_playable_clip(tmp_path: Path) -> None:
-    segment = _authored_segment(VisualIntent.TITLE_CARD, Tier.STATIC)
+    segment = an_authored_segment(0, BlockType.TITLE, Tier.STATIC, duration_ms=DURATION_MS)
     storage = FakeStorage()
     context = a_context(tmp_path, storage=storage, render=FakeRenderBackend())
     _write_narration(context.working_dir)
@@ -114,7 +108,7 @@ async def test_tier_static_renders_muxes_and_persists_a_playable_clip(tmp_path: 
 
 @needs_ffmpeg
 async def test_tier_reveal_renders_muxes_and_persists_a_playable_clip(tmp_path: Path) -> None:
-    segment = _authored_segment(VisualIntent.DIAGRAM_FLOW, Tier.REVEAL)
+    segment = an_authored_segment(0, BlockType.DIAGRAM_CHAIN, Tier.REVEAL, duration_ms=DURATION_MS)
     storage = FakeStorage()
     context = a_context(tmp_path, storage=storage, render=FakeRenderBackend())
     _write_narration(context.working_dir)
@@ -125,7 +119,7 @@ async def test_tier_reveal_renders_muxes_and_persists_a_playable_clip(tmp_path: 
 
 
 async def test_a_lint_finding_raises_before_any_mux_or_storage_write(tmp_path: Path) -> None:
-    segment = _authored_segment(VisualIntent.BULLET_LIST, Tier.STATIC)
+    segment = an_authored_segment(0, BlockType.TEXT_PANEL, Tier.STATIC, duration_ms=DURATION_MS)
     storage = FakeStorage()
     render = FakeRenderBackend(findings=["[error] fake_finding: something is wrong"])
     context = a_context(tmp_path, storage=storage, render=render)

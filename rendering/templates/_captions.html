@@ -1,28 +1,36 @@
 {#
-  T18A: an in-frame caption band that inks each word on when it is actually spoken, using the
-  same word-by-word-scalar mechanic the `mk-callout-highlight` registry block names for exactly
-  this purpose ("tween it to sync the highlight with a voiceover"). Imported by every intent
-  template the same way `_tokens.html`'s background macros already are.
+  T18B: movie-style captions -- one cue on screen at a time, showing at its own start and
+  clearing the instant the next cue begins, using ``mux/caption_cues.py``'s grouping (shared
+  with the ``.srt`` sidecar so the two can never disagree about where a cue starts or ends).
+  Before this, every word ever shown stayed on screen for the rest of the scene, so captions
+  grew into an unreadable wall of text -- the exact bug this replaces.
 
-  captions_markup(prefix, word_marks, duration_sec) -- the caption band's inner HTML: one <span>
-    per word, dim by default so a real GSAP tween (never a manual onUpdate, D89) inks each one.
-  captions_script(prefix, word_marks, duration_sec)  -- the timeline lines, appended to the
-    caller's own `tl` at each word's real `offset_ms` -- or, when `word_marks` is empty (a
-    TTSProvider that reports no boundaries), an even stagger across the full duration so the
-    band still reads instead of sitting inert.
+  Within a cue, the same word-by-word-scalar ink mechanic as before (each word lights up at its
+  own real `offset_ms`) is kept -- only the across-cue accumulation is gone.
 
-  Sits inside `hyperframes check --caption-zone`'s default guard band (bottom ~18% of the frame,
-  x0=0;y0=.82;x1=1;y1=1) by construction -- the markup below is pinned to the bottom of #root
-  with a fixed inset, not computed from content, so it cannot drift into that zone's warning.
+  captions_markup(prefix, cues, duration_sec) -- one hidden div per cue, each holding its own
+    word spans, ids namespaced "{prefix}-cap-{cue index}-{word index}" so two cues' words never
+    collide.
+  captions_script(prefix, cues, duration_sec) -- shows each cue's div at its own start, hides it
+    the instant the next cue's starts (or at its own end, for the last cue); inks each word
+    within its cue at its real offset.
+
+  Sits inside `hyperframes check --caption-zone`'s default guard band (bottom ~18% of the frame)
+  by construction, same as before -- pinned to the bottom of #root with a fixed inset.
 #}
 
-{% macro captions_markup(prefix, word_marks, duration_sec) %}
+{% macro captions_markup(prefix, cues, duration_sec) %}
 <div id="{{ prefix }}-captions" class="clip {{ prefix }}-captions-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="2">
-  <div class="{{ prefix }}-captions-row voice-data">
-    {% for word in word_marks %}
-    <span id="{{ prefix }}-cap-{{ loop.index0 }}" class="{{ prefix }}-cap-word">{{ word.text }}</span>
-    {% endfor %}
+  {% for cue in cues %}
+  {% set cue_idx = loop.index0 %}
+  <div class="{{ prefix }}-cue" id="{{ prefix }}-cue-{{ cue_idx }}">
+    <div class="{{ prefix }}-captions-row voice-data">
+      {% for word in cue.words %}
+      <span id="{{ prefix }}-cap-{{ cue_idx }}-{{ loop.index0 }}" class="{{ prefix }}-cap-word">{{ word.text }}</span>
+      {% endfor %}
+    </div>
   </div>
+  {% endfor %}
 </div>
 <style>
   .{{ prefix }}-captions-layer {
@@ -30,10 +38,17 @@
     left: 0;
     right: 0;
     bottom: 64px;
-    display: flex;
-    justify-content: center;
+    height: 90px;
     pointer-events: none;
     padding: 0 160px;
+  }
+  .{{ prefix }}-cue {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    opacity: 0;
+    will-change: opacity;
   }
   .{{ prefix }}-captions-row {
     display: flex;
@@ -55,28 +70,36 @@
 </style>
 {% endmacro %}
 
-{% macro captions_script(prefix, word_marks, duration_sec) %}
+{% macro captions_script(prefix, cues, duration_sec) %}
   (function () {
-    var words = document.querySelectorAll("#{{ prefix }}-captions .{{ prefix }}-cap-word");
-    if (!words.length) return;
-    var n = words.length;
-    {% if word_marks %}
-    // Real measured offsets (T18A): each word inks on at the millisecond Azure Speech reported
-    // it was actually spoken, not a guess.
-    var offsetsMs = [{% for word in word_marks %}{{ word.offset_ms }}{{ "," if not loop.last }}{% endfor %}];
-    {% else %}
-    // No word_marks reported (some TTSProvider that doesn't emit boundaries) -- degrade to an
-    // even stagger across the full duration rather than leaving the band inert.
-    var totalMs = {{ duration_sec }} * 1000;
-    var offsetsMs = [];
-    for (var i = 0; i < n; i++) { offsetsMs.push(Math.round((i / n) * totalMs)); }
-    {% endif %}
-    words.forEach(function (el, i) {
-      var t = offsetsMs[i] / 1000;
-      // Ink from dim to full color-plus-opacity in one short beat, then hold -- the band never
-      // fades a word back out, so a viewer scrubbing backward still sees every word said so far.
-      tl.fromTo(el, { opacity: 0 }, { opacity: 1, duration: 0.18, ease: "power1.out" }, t);
-      tl.fromTo(el, { color: "var(--fg-muted)" }, { color: "var(--fg)", duration: 0.18, ease: "power1.out" }, t);
+    var cueEls = document.querySelectorAll("#{{ prefix }}-captions .{{ prefix }}-cue");
+    var cueStarts = [{% for cue in cues %}{{ cue.start_ms / 1000 }}{{ "," if not loop.last }}{% endfor %}];
+    var cueEnds = [{% for cue in cues %}{{ cue.end_ms / 1000 }}{{ "," if not loop.last }}{% endfor %}];
+    // Clear-and-replace: cue c shows at its own start and holds until the NEXT cue's start (or,
+    // for the last cue, its own end) -- never two cues visible at once. The old version simply
+    // never hid a word once shown; this is the fix.
+    cueEls.forEach(function (el, i) {
+      var hideAt = i + 1 < cueEls.length ? cueStarts[i + 1] : cueEnds[i];
+      tl.set(el, { opacity: 1 }, cueStarts[i]);
+      tl.set(el, { opacity: 0 }, hideAt);
     });
   })();
+
+  {% for cue in cues %}
+  {% set cue_idx = loop.index0 %}
+  {% for word in cue.words %}
+  tl.fromTo(
+    "#{{ prefix }}-cap-{{ cue_idx }}-{{ loop.index0 }}",
+    { opacity: 0 },
+    { opacity: 1, duration: 0.15, ease: "power1.out" },
+    {{ word.offset_ms / 1000 }},
+  );
+  tl.fromTo(
+    "#{{ prefix }}-cap-{{ cue_idx }}-{{ loop.index0 }}",
+    { color: "var(--fg-muted)" },
+    { color: "var(--fg)", duration: 0.15, ease: "power1.out" },
+    {{ word.offset_ms / 1000 }},
+  );
+  {% endfor %}
+  {% endfor %}
 {% endmacro %}

@@ -1,4 +1,4 @@
-"""T7's definition of done: four packs load through the interface, and pack content is data.
+"""T7's definition of done: five packs load through the interface, and pack content is data.
 
 The first half is an integration test against the real ``runtime_skills/`` directory -- not a
 fixture, because a fixture would prove the registry works and say nothing about whether the packs
@@ -21,9 +21,10 @@ from interfaces import SkillRegistry
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = REPO_ROOT / "runtime_skills"
 
-# The four LLM-facing steps of the pipeline: one pack each for outline (T15), scripting (T15) and
-# scene authoring (T16), plus the shared voice pack the other three are interpolated alongside.
-EXPECTED_PACKS = ["house-style", "outline", "scene-authoring", "scripting"]
+# The five LLM-facing steps of the pipeline: one pack each for outline (T15), scripting (T15),
+# whole-video visual planning (T18B), and scene authoring (T16), plus the shared voice pack the
+# other four are interpolated alongside.
+EXPECTED_PACKS = ["house-style", "outline", "scene-authoring", "scripting", "visual-plan"]
 
 # The modules that stand between a pack file and a prompt. Nothing in this path may evaluate.
 LOADING_MODULES = [
@@ -45,14 +46,16 @@ def shipped() -> SkillRegistry:
     return DiskSkillRegistry(SKILLS_ROOT)
 
 
-# T18A: scene-authoring picked up a 1.1 (count-up guidance for stat_callout.value_number); every
-# other pack is still at its original 1.0. Keyed per-pack rather than one constant so a future
-# version bump anywhere only has to update this map, not the reasoning around it.
+# scene-authoring is at 1.2 (T18B: per-block-type guidance, including array_grid, replacing the
+# 1.1/1.0 per-intent sections). visual-plan is new at T18B, so it starts at 1.0. Every other pack
+# is still at its original 1.0. Keyed per-pack rather than one constant so a future version bump
+# anywhere only has to update this map, not the reasoning around it.
 LATEST_VERSION = {
     "house-style": "1.0",
     "outline": "1.0",
-    "scene-authoring": "1.1",
+    "scene-authoring": "1.2",
     "scripting": "1.0",
+    "visual-plan": "1.0",
 }
 
 

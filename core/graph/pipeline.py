@@ -1,14 +1,16 @@
 """Wires the nodes into a graph: ``plan`` -> fan out one ``Send`` per segment -> ``synthesize`` ->
-``assign_tiers`` -> fan out again -> ``author_scene`` -> ``collect_scenes`` -> fan out a third time
--> ``render_scene`` -> ``finalize``. The only file in the repo permitted to build a
-``StateGraph`` -- everything else under ``core/graph/`` supplies state, context, nodes, or policy
-for this to assemble.
+``assign_tiers`` -> ``plan_visuals`` -> fan out again -> ``author_scene`` -> ``collect_scenes`` ->
+fan out a third time -> ``render_scene`` -> ``finalize``. The only file in the repo permitted to
+build a ``StateGraph`` -- everything else under ``core/graph/`` supplies state, context, nodes, or
+policy for this to assemble.
 
 Each fan-out is separated from the next by a join, and the joins are what enforce Invariant 1's
 ordering structurally: ``assign_tiers`` needs *every* segment's measured duration, so it cannot run
-until the TTS fan-out converges; ``author_scene`` therefore cannot run until tiers exist; and
-``render_scene`` (which composes and renders a segment's *authored* scene) cannot run until slots
-exist either.
+until the TTS fan-out converges; ``plan_visuals`` (T18B) needs every segment's narration and tier
+to plan the whole video's visuals in one call, so it sits right after ``assign_tiers`` and before
+the scene-authoring fan-out -- ``author_scene`` therefore cannot run until every segment has a
+scene *plan*; and ``render_scene`` (which composes and renders a segment's *authored* scene)
+cannot run until that scene's blocks are filled either.
 """
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -22,6 +24,7 @@ from core.graph.nodes import (
     author_scene,
     finalize,
     plan_segments,
+    plan_visuals,
     render_scene,
     synthesize_segment,
 )
@@ -40,8 +43,8 @@ def _fan_out_to_segments(state: GraphState) -> list[Send]:
 
 
 def _fan_out_to_scene_authoring(state: GraphState) -> list[Send]:
-    """The same shape again, after ``assign_tiers``: one ``author_scene`` task per segment, each
-    carrying the measured *and* tiered segment the join node just wrote back."""
+    """The same shape again, after ``plan_visuals``: one ``author_scene`` task per segment, each
+    carrying the measured, tiered, *and scene-planned* segment the join nodes just wrote back."""
     return [
         Send("author_scene", SegmentTask(job_id=state["job"].job_id, segment=segment))
         for segment in state["segments"].values()
@@ -88,8 +91,11 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> CompiledStat
     # No retry policy: assign_tiers reaches nothing outside the process, so there is no transient
     # failure for one to absorb. Its only error is an unmeasured segment, which a retry cannot fix.
     builder.add_node("assign_tiers", assign_tiers)
-    # Transient-only, for the same reason plan_segments is -- author_scene's LLM call carries its
-    # own StructuredOutputError budget (D73).
+    # Transient-only, for the same reason plan_segments is -- plan_visuals's one LLM call carries
+    # its own StructuredOutputError budget (D73), via generate_with_bounded_retries.
+    builder.add_node("plan_visuals", plan_visuals, retry_policy=build_transient_retry_policy())
+    # Transient-only, for the same reason plan_segments is -- author_scene's LLM calls each carry
+    # their own StructuredOutputError budget (D73).
     builder.add_node(
         "author_scene",
         author_scene,
@@ -114,7 +120,8 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> CompiledStat
     builder.add_edge(START, "plan_segments")
     builder.add_conditional_edges("plan_segments", _fan_out_to_segments, ["synthesize_segment"])
     builder.add_edge("synthesize_segment", "assign_tiers")
-    builder.add_conditional_edges("assign_tiers", _fan_out_to_scene_authoring, ["author_scene"])
+    builder.add_edge("assign_tiers", "plan_visuals")
+    builder.add_conditional_edges("plan_visuals", _fan_out_to_scene_authoring, ["author_scene"])
     builder.add_edge("author_scene", "collect_scenes")
     builder.add_conditional_edges("collect_scenes", _fan_out_to_rendering, ["render_scene"])
     builder.add_edge("render_scene", "finalize")

@@ -1,0 +1,115 @@
+{#
+  BlockType.STAT_CALLOUT -- a direct lift of the pre-T18B stat_callout.html: a single number,
+  given room to land, bracketed by two rules. `value` is a free-form STRING, not guaranteed
+  numeric, so the count-up path only fires when value_number is set.
+#}
+
+{% macro markup(prefix, payload, compact=false) %}
+<div id="{{ prefix }}-wrap" class="blk-stat-wrap">
+  <span id="{{ prefix }}-bracket-top" class="blk-stat-bracket"></span>
+  <div id="{{ prefix }}-value-row" class="blk-stat-value-row">
+    <span id="{{ prefix }}-value" class="blk-stat-value">{{ payload.value }}</span>
+    {% if payload.unit %}
+    <span id="{{ prefix }}-unit" class="blk-stat-unit">{{ payload.unit }}</span>
+    {% endif %}
+  </div>
+  <span id="{{ prefix }}-bracket-bottom" class="blk-stat-bracket"></span>
+  <p id="{{ prefix }}-context" class="blk-stat-context">{{ payload.context }}</p>
+</div>
+<style>
+  .blk-stat-wrap {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .blk-stat-bracket {
+    width: {{ "300px" if compact else "420px" }};
+    height: 3px;
+    background: var(--accent-primary);
+    transform-origin: center;
+    display: block;
+    will-change: transform;
+  }
+  #{{ prefix }}-bracket-top { margin-bottom: 44px; }
+  #{{ prefix }}-bracket-bottom { margin-top: 44px; }
+  .blk-stat-value-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 20px;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-stat-value {
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    font-size: {{ "104px" if compact else "176px" }};
+    line-height: 1;
+    transform-origin: center;
+  }
+  .blk-stat-unit {
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-weight: 400;
+    font-size: {{ "34px" if compact else "56px" }};
+    color: var(--accent-secondary);
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-stat-context {
+    font-weight: 400;
+    font-size: {{ "26px" if compact else "38px" }};
+    max-width: 90%;
+    color: var(--fg);
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  tl.fromTo("#{{ prefix }}-bracket-top", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.out" }, {{ entrance_start }});
+  tl.fromTo("#{{ prefix }}-bracket-bottom", { scaleX: 0 }, { scaleX: 1, duration: 0.5, ease: "power2.out" }, {{ entrance_start + 0.1 }});
+  tl.fromTo("#{{ prefix }}-value-row", { opacity: 0 }, { opacity: 1, duration: 0.1 }, {{ entrance_start + 0.2 }});
+
+  {% if payload.value_number is not none %}
+  // T18A/T18B: a real count-up, from 0 to payload.value_number, landing exactly on payload.value's
+  // own text -- deterministic frame-row technique, safe under seek(id, t, true) (D15).
+  (function () {
+    var start = 0;
+    var end = {{ payload.value_number }};
+    var prefixText = {{ (payload.prefix or "") | tojson }};
+    var suffixText = {{ (payload.suffix or "") | tojson }};
+    var STEPS = 40;
+    var COUNT_DUR = 0.9;
+    var COUNT_START = {{ entrance_start + 0.2 }};
+    var ease = gsap.parseEase("power2.out");
+    var valueEl = document.getElementById("{{ prefix }}-value");
+
+    function fmt(n) {
+      return prefixText + Math.round(n).toLocaleString("en-US") + suffixText;
+    }
+
+    tl.set(valueEl, { textContent: fmt(start) }, COUNT_START);
+    for (var i = 1; i <= STEPS; i++) {
+      var t = COUNT_START + COUNT_DUR * (i / STEPS);
+      var value = start + (end - start) * ease(i / STEPS);
+      tl.set(valueEl, { textContent: fmt(value) }, t);
+    }
+    tl.set(valueEl, { textContent: {{ payload.value | tojson }} }, COUNT_START + COUNT_DUR);
+    tl.fromTo("#{{ prefix }}-value", { scale: 0.85 }, { scale: 1, duration: COUNT_DUR, ease: "power3.out" }, COUNT_START);
+    tl.to("#{{ prefix }}-value", { scale: 1.06, duration: 0.12, ease: "power2.out" }, COUNT_START + COUNT_DUR);
+    tl.to("#{{ prefix }}-value", { scale: 1, duration: 0.18, ease: "power2.out" }, COUNT_START + COUNT_DUR + 0.12);
+  })();
+  {% else %}
+  tl.fromTo("#{{ prefix }}-value", { scale: 0.55 }, { scale: 1, duration: 1.1, ease: "power3.out" }, {{ entrance_start + 0.2 }});
+  {% endif %}
+
+  {% if payload.unit %}
+  tl.fromTo("#{{ prefix }}-unit", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, {{ entrance_start + 1.3 }});
+  {% endif %}
+
+  tl.fromTo("#{{ prefix }}-context", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, {{ entrance_start + 1.5 }});
+{% endmacro %}

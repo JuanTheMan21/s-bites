@@ -1657,3 +1657,222 @@ scoped list forward.
 
 **If this still isn't enough after a real 7-minute video under T18B**, the fully-compositional
 approach becomes its own later task with its own scoping conversation -- not folded into T18B.
+
+## 2026-08-29 · T18B — Compositional scenes, whole-video visual planning, narration-anchored motion
+
+The user reopened D104 explicitly, after reviewing T18A's real output a second time: forget the
+frame-budget/architecture assumptions that shaped prior scoping, keep only the ~15-20 minute
+render ceiling, and build toward genuinely bespoke, per-topic segments. This entry records what
+actually shipped, what it cost to get there, and what stays open.
+
+### D105 — D104 reopened; D30 deliberately left alone; the fan-out isolation, not template
+variety, was the real cause of repetition
+
+**Reopened:** D104 ("richer fixed template set, not fully compositional"), on the user's explicit
+instruction. **Deliberately NOT reopened:** D30 (six `VisualIntent` members) -- the enum survives
+unchanged as a coarse outline-time hint, not a rendering key. `VisualIntent` was never the
+problem; `rendering/compose.py:66`'s one-intent-one-template *dispatch* was.
+
+**The diagnosis that changed the plan mid-session:** reading `core/graph/pipeline.py` directly
+(not assumed) showed `author_scene` running inside a `Send` fan-out -- every segment's visual was
+authored in total isolation from every other. That is the actual, structural cause of D95's "8 of
+15 segments were `diagram_flow`," not a template-quality problem no amount of new templates would
+have fixed. The fix is a new join node, `plan_visuals`, inserted between `assign_tiers` and the
+`author_scene` fan-out, that sees every segment at once and plans the whole video's visuals in one
+call -- the first thing in this pipeline positioned to notice and prevent repetition, rather than
+only ever seeing it after the fact.
+
+**Architecture, in one pass:**
+- `core/block_types.py` (new) -- `BlockType` (6 members), `SceneLayout` (2: `SINGLE`,
+  `SPLIT_HORIZONTAL` -- a third, stacked, is real cheap future work, not built speculatively),
+  `MotifName` (3), `ALLOWED_BLOCKS` (a `VisualIntent -> BlockType` hint table, TIER_SUPPORT's own
+  "spelled out, no-op registration point" convention, never enforced on the LLM's response --
+  strict mode cannot make an enum choice conditional on another field).
+- **Routes around D29 (Azure strict mode cannot express a discriminated union) with two calls
+  instead of one union schema:** `plan_visuals` asks for a `VideoScenePlan` (motif + per-segment
+  layout + an ordered list of `PlannedBlock{block_type, role, anchor_phrase}` -- flat enums only,
+  never content); `author_scene`'s `fill_block` then asks one further call per planned block, each
+  constrained to that block's own concrete schema (`core/block_schemas.py`, renamed from
+  `core/slot_schemas.py`). Never a union in one schema, always N calls each with one concrete
+  shape -- the direct generalisation of `fill_slots`'s old one-call-per-segment pattern to
+  one-call-per-block.
+- `Segment.slots` renamed to `Segment.scene` (`core/models.py`), holding a
+  `core.scene_schemas.ComposedScene` (motif, layout, blocks, each block's `payload` nullable until
+  `author_scene` fills it) -- the same D29 "untyped at rest, validated at point of use" pattern
+  `slots` used, one level down, and genuinely progressive: `plan_visuals` writes it with every
+  payload `None`, `author_scene` fills them one call at a time.
+- Segment 0 is forced to a single `TITLE` block **unconditionally in code**
+  (`visual_plan.py::_forced_title_scene`), not an advisory prompt line -- confirmed live: the
+  first segment of the real render below is a title card with no LLM call for its plan at all.
+- **`rendering/compose.py` dispatches by `SceneLayout`, not `VisualIntent`** --
+  `_layout_{single,split_horizontal}.html` import per-block-type Jinja partials
+  (`rendering/templates/_block_*.html`) dynamically (`{% import "_block_" ~ block.block_type ~
+  ".html" as blk %}`), each block's markup+script namespaced by an `id_prefix` (`b0`, `b1`, ...)
+  unique within the composition. Five of six blocks (`title`, `text_panel`, `stat_callout`,
+  `code_panel`, `diagram_chain`) are direct lifts of five working pre-T18B templates' proven
+  choreography, parameterised by prefix and a `compact` flag for the split layout.
+  **`array_grid` is the one genuinely new block**, with no pre-T18B equivalent and no turnkey
+  HyperFrames registry component (confirmed by this session's own capability research): a row of
+  cells that narrows over the narration via `ArrayEliminationStep`s, each with its own
+  `remaining_start`/`remaining_end`/`anchor_phrase`.
+- **Narration-anchored choreography** (`rendering/anchors.py`, pure and tested): a block's own
+  `anchor_phrase` and, for `text_panel`/`diagram_chain`, each item's own text, are matched against
+  `segment.word_marks` in `rendering/compose.py` before any template sees them -- real timing when
+  a match is found, the old fixed cascade otherwise. `array_grid`'s steps use the same
+  `resolve_anchor` machinery against their own already-authored `anchor_phrase` field rather than
+  a derived one.
+- **Scene-level camera drift**: every layout wraps its content in a `#camera` element carrying a
+  single slow, continuous GSAP scale+translate across the segment's full duration, independent of
+  which blocks fill it -- attacks "reads like a slideshow" at the architecture level rather than
+  per-template.
+- **Cue-based captions**: `mux/caption_cues.py` (new) extracts the cue-grouping
+  (`MAX_WORDS_PER_CUE=8`) `mux/subtitles.py` already had, now shared with
+  `rendering/templates/_captions.html`, which shows one cue at a time and clears it the instant
+  the next begins -- the accumulate-forever bug this was scoped to fix.
+- **Motif-keyed palettes**: `rendering/palettes.py` replaced six job-id-hashed palettes with three
+  motif families (Blueprint: light paper, schematic connectors -- the actual fix for D95's "still
+  reads navy blue," which no *count* of dark palettes could ever have answered; Terminal: warm
+  dark, zero blue; Broadcast: light neutral, one bold accent), selected by `plan_visuals`' own
+  `motif` choice rather than a hash.
+
+**Confirmed NOT reopened, by reading the live files this session:** D2 (LLM never writes HTML --
+if anything tightened, since the LLM's vocabulary per call is now smaller: enums plus one block's
+small payload), D3, D9/D99, D19-D24, D73 (followed: `plan_visuals` and `author_scene` both
+register with `build_transient_retry_policy()` alone, each individual LLM call isolated via
+`generate_with_bounded_retries`), Invariant 1 (`duration_ms` required, structurally, in both
+`fill_block` and `compose_scene`), D93, D101.
+
+### D106 — Four real bugs found only by running the real toolchain, not by reading the templates
+
+Every one of these passed `pytest`/`ruff` clean and was caught only by an actual `hyperframes
+check` or `project-reviewer` render -- the same lesson D89 already drew about this project's
+templates, recurring in the new mechanism.
+
+1. **Captions rendered with no visible text, and cross-cue ids collided** (found by
+   `project-reviewer`, confirmed by direct render). `_captions.html`'s `captions_markup` dropped
+   `{{ word.text }}` from the span entirely, and used the *inner* loop's `loop.index0` for both
+   halves of the cue-scoped id (`{prefix}-cap-{cue}-{word}`), so every cue's first word collided
+   with every other cue's first word. Fixed: the text is written back in, and the cue index is
+   captured via `{% set cue_idx = loop.index0 %}` before the inner loop, matching the pattern
+   `captions_script` already had right. New regression test:
+   `test_captions_render_every_words_text_with_unique_ids_across_cues` (nine words forces two
+   cues, which is what exercises the cross-cue id path at all).
+2. **`_block_text_panel.html`'s `compact` split-layout choreography never ran** (found by
+   `project-reviewer`). Its `script` macro never declared a `compact` parameter, so the layout's
+   `compact=true` call site silently bound nothing and `{% if compact %}` always took the `else`
+   branch -- every split-panel headline played the full-width entrance instead of the compact one,
+   and tried to tween an underline element `markup()` correctly never renders in compact mode.
+   Fixed by adding `compact=false` to every block's `script` macro signature (matching `markup`'s
+   existing parameter) and passing it explicitly from both layout templates. **Zero test coverage
+   previously exercised `SPLIT_HORIZONTAL` end to end** -- new parametrized test
+   (`test_a_split_horizontal_scene_has_no_id_collision`, all six block types) closes that gap.
+3. **`code_panel`'s own internal wrapper id collided with the split layout's own wrapper id**
+   (found by this session's own Phase 0 benchmark, via a real `hyperframes check` warning --
+   `overlapping_gsap_tweens` on `#b0-panel` -- not by reading the templates, and not caught by (2)
+   above, which only ever paired `text_panel` with itself). `_layout_split_horizontal.html`'s
+   region wrapper and `_block_code_panel.html`'s own internal panel div both used the identical id
+   `{{ prefix }}-panel`. Renamed the layout's wrapper to `{{ prefix }}-region`.
+4. **`array_grid`'s strike-through line's collapsed state lived in static CSS, not GSAP** -- a
+   direct instance of the exact anti-pattern `_tokens.html`'s own docstring already warns every
+   template author about ("no element carries its animated end-state in static CSS... every
+   from-state is set in JS via fromTo, never in CSS"), reintroduced once by the one genuinely new
+   template this task wrote. `hyperframes check` failed with `text_occluded` errors on
+   `.blk-array-cell-value` for cells that were *never eliminated* -- a cell with no elimination
+   tween targeting it had no JS ever set its strike's transform, so it sat at CSS's default
+   (full-width, fully opaque) instead of collapsed. Fixed with an unconditional
+   `tl.set(..., {scaleX: 0}, 0)` for every cell's strike at timeline start, not only the ones a
+   step later targets. **A second, distinct finding surfaced once real cells were actually
+   eliminated**: `text_occluded` fired again, correctly identifying that the strike visually
+   overlaps the value it crosses out -- which is the whole point of a strikethrough, not a
+   legibility bug. Marked intentional with `data-layout-allow-occlusion`, the exact escape hatch
+   `hyperframes check`'s own fix-hint names for this case.
+
+None of these four are visible to `pytest` or `ruff` -- three surfaced only via `hyperframes
+check` against a real composition, one via a real render's rendered frame. Recorded here rather
+than only in the diff because a future template author hits the same traps this session's own new
+block did.
+
+### D107 — Two pre-existing gaps found during this task's own verification, neither caused by it
+
+Discovered while trying to satisfy T18B's own DoD, not part of the compositional-scene work
+itself:
+
+- **The Blob skill registry (`RUNTIME_ENV=azure`) had silently drifted from local disk since
+  T18A**: `scene-authoring/1.1.md` was never uploaded when T18A shipped it, so a real
+  `RUNTIME_ENV=azure` run has been loading `1.0` (missing the count-up guidance) for an entire
+  task without anyone noticing, because no `local_live`/live verification in T18A or since
+  actually exercised the Blob-backed registry against a real graph run. Fixed as a one-off sync
+  (all five current packs, including this task's new `visual-plan` and `scene-authoring/1.2`) --
+  **no automated sync exists**; this is manual, per D4's own design, and will drift again the same
+  way unless a future task builds one.
+- **`tests/test_graph_pipeline_live.py`'s mixed-tier test is unsatisfiable under the current
+  ladder**, discovered by actually running it (not by reading it): its `FRAME_BUDGET=55` arithmetic
+  assumes `Importance.ASIDE`'s ideal tier is `STATIC`, which was true before D99 but has been
+  `REVEAL` since T18A's ladder correction. Worked out by hand: under `resolve_tiers()`'s two-pass
+  algorithm (all `REVEAL` promotions before any `ANIMATED` ones, `REVEAL`'s frame cost a
+  duration-independent constant), a two-segment CRITICAL+ASIDE pair **cannot** produce an exact
+  `{STATIC, ANIMATED}` split at any budget -- the same budget window that keeps ASIDE off `REVEAL`
+  (`9 <= budget <= 15`, fixed regardless of duration) is always far below what CRITICAL needs to
+  reach `ANIMATED` (`>= 49` at the durations this test needs for a safe crossfade, per D93's own
+  "comfortably above 2x `DEFAULT_TRANSITION_S`" constraint). **Not fixed here** -- `core/
+  tier_resolver.py` has zero diff this task and this is a pre-existing D99-era gap in one
+  `local_live` test file, not a T18B regression; genuinely fixing it needs either a third segment
+  or a different tier pairing, not a constant tweak, and is scoped work for whichever future
+  session next touches this file. T18B's own "real render, watched" DoD was satisfied instead by
+  the 18-combo `test_render_segment_live.py` sweep (every block type, every tier, real
+  `hyperframes check`, all green) plus the real `cli.py` run below.
+
+### D108 — Phase 0: composite scenes measure ~13% slower than the old single-block baseline, still
+comfortably inside budget; no `tier_resolver` change made
+
+Per the plan's own Phase 0 gate: `scripts/measure_render_throughput.py` (rewritten to compose a
+realistic `SPLIT_HORIZONTAL` scene, `CODE_PANEL` + `DIAGRAM_CHAIN`, with the new scene-level
+camera drift) fed to `npx hyperframes benchmark`. **First attempt timed out at 900s** -- not a
+hang (no orphaned processes; `hyperframes check` on the same composition completed in under two
+minutes with no errors), but `benchmark`'s default sweep covers *both* 30fps and 60fps
+configurations, doubling the real work a single `--runs N` implies. A single-run probe at each
+config measured **30fps: 51.0s for 750 frames (~14.7 fps); 60fps: 101.6s for 1500 frames
+(~14.8 fps)** -- consistent with each other, and about **13% slower** than T18A's ~17 fps
+single-block baseline. Under the plan's own ~15-20% threshold for "fold into a constant, don't
+touch the algorithm": `core/tier_resolver.py` is untouched (still zero diff), and `FRAME_BUDGET`
+stays at `9500` -- at the new measured rate a 7-minute/15-segment video's ~9000 frames costs
+~10.7 minutes of rendering (up from ~9 minutes), still comfortably inside the ~15-20 minute
+target even with contention. `.env.example` and `core/frame_budget.py`'s docstring both now carry
+the real composite-scene figure alongside the old single-block one, rather than leaving the more
+representative number unrecorded -- the same discipline D99 was written to enforce after D16's
+wrong figure went unquestioned for weeks.
+
+### D109 — Real end-to-end verification: `cli.py "how binary search works"`, 90s target, watched
+
+`RUNTIME_ENV=azure` + `RENDER_ENV=local` (D100), the same bridge T18A used, same topic for
+continuity. 3 segments, all three `Tier.ANIMATED`, 140.8s wall-clock. Verified by extracting real
+frames at multiple timestamps and looking at them, not only by asserting durations (D93's own
+lesson: timing assertions never catch content or perception bugs) --
+
+- **Segment 0** (forced title, structural): "Binary Search" / "Find the right shelf," Blueprint
+  motif (light paper, orange accent) -- genuinely distinct from every prior video's near-black
+  amber/blue, the concrete fix for D95's "still reads navy blue."
+- **Segment 1**: `diagram_chain`, a 4-node rail ("Check middle" -> "Discard half" -> "Repeat
+  narrowing" -> "Stop or find") -- the direct-lift block rendering correctly end to end.
+- **Segment 2**: `SPLIT_HORIZONTAL`, two `text_panel` blocks side by side with the 3D tilt entrance
+  -- confirmed both panels' own headlines and items render (a second frame a few seconds later
+  than the first checked one showed both labels present; the first check briefly caught panel 2's
+  own headline before its entrance tween, a timing artifact, not a bug).
+- **Captions**: confirmed clearing and replacing correctly across multiple cues in the same
+  render, at 1920x1080, real audio+video streams, ffprobe-verified.
+
+**Not exercised in this specific run**: `array_grid` and `stat_callout` (the outline/plan-visuals
+call did not choose either for this particular 3-segment, 90-second topic) and a second motif
+(one job, one motif, by design) -- both already verified independently via the 18-combo live sweep
+and `hyperframes check`, respectively, so this is a gap in *this run's* content mix, not in
+verification coverage.
+
+**One real content-quality observation, not a bug**: the LLM authored one `SPLIT_HORIZONTAL`
+panel's `headline` as "Sorted case vs unsorted case" -- an overall comparison title rather than a
+short per-side label ("Sorted"/"Unsorted") the way `runtime_skills/scene-authoring/1.2.md`'s
+guidance intends. The mechanism worked exactly as designed; this is a prompt-calibration nuance
+for whichever future session next tunes the pack against more real output, not a code defect.
+
+**Also discovered and fixed in passing**: the real run's first attempt failed outright with
+`SkillPackNotFound: 'visual-plan'` -- see D107, the Blob-registry drift that made this necessary
+before any real `RUNTIME_ENV=azure` render of T18B's work was possible at all.

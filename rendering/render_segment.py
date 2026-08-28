@@ -29,17 +29,17 @@ async def render_segment(
     composition_dir: Path,
     dest: Path,
     fps: int,
-    job_id: str | None = None,
 ) -> Path:
     """Compose, lint, and render ``segment``'s scene at its assigned tier. Returns ``dest``.
 
-    Requires ``segment.duration_ms``, ``segment.tier``, and ``segment.slots`` all set -- the same
+    Requires ``segment.duration_ms``, ``segment.tier``, and ``segment.scene`` all set -- the same
     structural enforcement ``core/graph/nodes/scene_author.py::author_scene`` uses, so a caller
     who has skipped a pipeline stage fails here with a clear message rather than composing a scene
     against an invented duration or an absent tier.
 
-    ``job_id`` (T18A) is forwarded to ``compose_scene`` for palette selection -- ``None`` keeps
-    the original default palette, same as omitting it always did.
+    T18B: no longer takes ``job_id`` -- palette selection now comes from the scene's own motif
+    (``ComposedScene.motif``, chosen once per video by ``plan_visuals``), not a hash of the job
+    id, so ``compose_scene`` needs nothing from this caller beyond the segment itself.
 
     Raises:
         ValueError: one of the three required fields above is unset.
@@ -55,7 +55,7 @@ async def render_segment(
         for name, value in (
             ("duration_ms", segment.duration_ms),
             ("tier", segment.tier),
-            ("slots", segment.slots),
+            ("scene", segment.scene),
         )
         if value is None
     ]
@@ -65,7 +65,7 @@ async def render_segment(
             "measured, tiered, and scene-authored segment."
         )
 
-    composition = compose_scene(segment, composition_dir, job_id=job_id)
+    composition = compose_scene(segment, composition_dir)
 
     findings = await render.lint(composition)
     # T18A: was "any finding is fatal" -- found wrong the first time a real render hit a genuine

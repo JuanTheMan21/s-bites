@@ -6,16 +6,15 @@ Offsets are simple because of a choice already made in ``mux/concat_segments.py`
 plain, unshrunk ``concat`` (D93, T18A), so segment *i*'s narration starts at exactly
 ``sum(durations_ms[:i])`` in the final video's timeline -- no crossfade-overlap arithmetic to
 account for, unlike the video track.
+
+T18B: cue grouping now lives in ``mux/caption_cues.py``, shared with ``_captions.html``'s
+in-frame band, so the two can never disagree about where one cue ends and the next begins.
 """
 
 from pathlib import Path
 
 from core.models import Segment
-
-# Words are grouped into cues of at most this many, so a cue reads as one glance rather than a
-# scrolling wall of text -- the same "nothing on screen is read twice" reasoning
-# scene-authoring.md already applies to slot text.
-MAX_WORDS_PER_CUE = 8
+from mux.caption_cues import group_into_cues
 
 
 def write_srt(segments: list[Segment], dest: Path) -> Path:
@@ -41,18 +40,12 @@ def write_srt(segments: list[Segment], dest: Path) -> Path:
 
 
 def _word_cues(segment: Segment, segment_offset_ms: int) -> list[tuple[int, int, str]]:
-    """Group one segment's word marks into cues of at most ``MAX_WORDS_PER_CUE`` words,
-    translated into the final video's timeline via ``segment_offset_ms``.
-    """
-    cues: list[tuple[int, int, str]] = []
-    words = segment.word_marks
-    for start in range(0, len(words), MAX_WORDS_PER_CUE):
-        group = words[start : start + MAX_WORDS_PER_CUE]
-        cue_start = segment_offset_ms + group[0].offset_ms
-        cue_end = segment_offset_ms + group[-1].offset_ms + group[-1].duration_ms
-        text = " ".join(word.text for word in group)
-        cues.append((cue_start, cue_end, text))
-    return cues
+    """One segment's word marks, grouped via ``mux.caption_cues.group_into_cues`` and translated
+    into the final video's timeline via ``segment_offset_ms``."""
+    return [
+        (segment_offset_ms + cue.start_ms, segment_offset_ms + cue.end_ms, cue.text)
+        for cue in group_into_cues(segment.word_marks)
+    ]
 
 
 def _render_srt(cues: list[tuple[int, int, str]]) -> str:

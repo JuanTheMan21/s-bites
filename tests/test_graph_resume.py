@@ -15,13 +15,20 @@ import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import BaseModel
 
+from core.block_schemas import TitleSlots
 from core.graph import build_graph
 from core.models import VideoJob
-from core.slot_schemas import TitleCardSlots
 from interfaces import ProviderMisconfigured
 from interfaces.llm_provider import T
 from tests.fakes import FakeLLMProvider, FakeStorage, FakeTTSProvider
-from tests.graph_pipeline_fixtures import a_context, a_job, needs_ffmpeg, seeded_llm, slot_payloads
+from tests.graph_pipeline_fixtures import (
+    a_context,
+    a_job,
+    needs_ffmpeg,
+    scene_plan,
+    seeded_llm,
+    slot_payloads,
+)
 
 
 class FailsOnceForSchema(FakeLLMProvider):
@@ -48,7 +55,7 @@ class FailsOnceForSchema(FakeLLMProvider):
 
 
 def _scene_calls(llm: FakeLLMProvider) -> int:
-    return sum(1 for call in llm.calls if call.schema is TitleCardSlots)
+    return sum(1 for call in llm.calls if call.schema is TitleSlots)
 
 
 @needs_ffmpeg
@@ -87,14 +94,15 @@ async def test_a_kill_during_narration_does_not_repeat_completed_segments(tmp_pa
     async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
         graph = build_graph(saver)
         # plan_segments already completed and checkpointed before the kill (D68), so resume never
-        # re-invokes it and no outline or narration response is needed here. assign_tiers and
-        # author_scene, by contrast, never ran at all -- the kill happened upstream of both -- so
-        # the resumed run still makes one scene-authoring call per segment.
+        # re-invokes it and no outline or narration response is needed here. assign_tiers,
+        # plan_visuals, and author_scene, by contrast, never ran at all -- the kill happened
+        # upstream of all three -- so the resumed run still makes plan_visuals' one call plus one
+        # scene-authoring fill call per segment.
         context = a_context(
             tmp_path,
             tts=fake_tts,
             storage=fake_storage,
-            llm=FakeLLMProvider(slot_payloads(job.segment_count)),
+            llm=FakeLLMProvider([scene_plan(job.segment_count), *slot_payloads(job.segment_count)]),
         )
 
         result = await graph.ainvoke(None, config, context=context, durability="sync")
@@ -104,7 +112,7 @@ async def test_a_kill_during_narration_does_not_repeat_completed_segments(tmp_pa
     assert len(result_job.segments) == job.segment_count
     assert all(segment.duration_ms is not None for segment in result_job.segments)
     assert all(segment.tier is not None for segment in result_job.segments)
-    assert all(segment.slots is not None for segment in result_job.segments)
+    assert all(segment.scene is not None for segment in result_job.segments)
 
     # The whole point: total successful narrations equals the segment count, not more. Every
     # completed segment's synthesize call happened exactly once, even though one segment's task
@@ -128,7 +136,7 @@ async def test_a_kill_during_scene_authoring_does_not_repeat_narration(tmp_path:
 
     async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
         graph = build_graph(saver)
-        llm = FailsOnceForSchema(seeded_llm(job.segment_count).responses, TitleCardSlots)
+        llm = FailsOnceForSchema(seeded_llm(job.segment_count).responses, TitleSlots)
         context = a_context(tmp_path, tts=fake_tts, storage=fake_storage, llm=llm)
 
         with pytest.raises(ProviderMisconfigured):
@@ -150,7 +158,7 @@ async def test_a_kill_during_scene_authoring_does_not_repeat_narration(tmp_path:
 
     result_job: VideoJob = result["job"]
     assert result_job.status.value == "succeeded"
-    assert all(segment.slots is not None for segment in result_job.segments)
+    assert all(segment.scene is not None for segment in result_job.segments)
 
     # Not one further TTS call: the resume picked up inside the second fan-out, not at the top.
     assert len(fake_tts.calls) == job.segment_count

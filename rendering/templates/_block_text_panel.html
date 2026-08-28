@@ -1,0 +1,116 @@
+{#
+  BlockType.TEXT_PANEL -- unifies the pre-T18B bullet_list.html and one side of comparison.html
+  (D28-style split: same content shape, headline + items, that only ever differed in how many
+  copies appear on screen at once). compact=false (SINGLE layout, alone): bullet_list's own
+  cascade, numbered circular markers, full-width copy. compact=true (SPLIT_HORIZONTAL, one of
+  two panels): comparison.html's own card-body styling, no markers -- the headline IS the side's
+  label ("Unsafe"/"Safe").
+  Rules composed: waterfall-entry (the list) + spring-pop-entrance (each item's marker, non-compact).
+#}
+
+{% macro markup(prefix, payload, compact=false) %}
+<div id="{{ prefix }}-wrap" class="blk-text-wrap {{ 'blk-text-compact' if compact else '' }}">
+  <h1 id="{{ prefix }}-headline" class="blk-text-headline">{{ payload.headline }}</h1>
+  {% if not compact %}
+  <span id="{{ prefix }}-underline" class="blk-text-underline"></span>
+  {% endif %}
+  <ul id="{{ prefix }}-items" class="blk-text-items">
+    {% for item in payload.items %}
+    <li class="blk-text-row" id="{{ prefix }}-row-{{ loop.index0 }}">
+      {% if not compact %}
+      <span class="blk-text-marker voice-data" id="{{ prefix }}-marker-{{ loop.index0 }}">{{ "%02d" | format(loop.index) }}</span>
+      {% endif %}
+      <span class="blk-text-copy">{{ item }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+<style>
+  .blk-text-wrap { width: 100%; display: flex; flex-direction: column; }
+  .blk-text-headline {
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    max-width: 100%;
+    opacity: {{ "0" if compact else "1" }};
+    will-change: opacity, transform;
+  }
+  .blk-text-wrap:not(.blk-text-compact) .blk-text-headline { font-size: 76px; }
+  .blk-text-compact .blk-text-headline {
+    font-size: 22px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-secondary);
+    font-family: "JetBrains Mono", "Courier New", monospace;
+  }
+  .blk-text-underline {
+    width: 200px;
+    height: 4px;
+    margin-top: 32px;
+    background: var(--accent-primary);
+    transform-origin: left center;
+    display: block;
+    will-change: transform;
+  }
+  .blk-text-items {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: {{ "16px" if compact else "40px" }};
+  }
+  .blk-text-wrap:not(.blk-text-compact) .blk-text-items { margin-top: 64px; max-width: 100%; }
+  .blk-text-compact .blk-text-items { margin-top: 26px; }
+  .blk-text-row {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    opacity: {{ "0" if compact else "0" }};
+    will-change: opacity, transform;
+  }
+  .blk-text-marker {
+    flex: 0 0 auto;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    border: 2px solid var(--accent-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    color: var(--accent-secondary);
+    will-change: opacity, transform;
+  }
+  .blk-text-copy {
+    font-weight: 400;
+    font-size: {{ "30px" if compact else "38px" }};
+    line-height: 1.35;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  {% if compact %}
+  tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, {{ entrance_start + 0.35 }});
+  {% else %}
+  tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -30 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, {{ entrance_start }});
+  tl.fromTo("#{{ prefix }}-underline", { scaleX: 0 }, { scaleX: 1, duration: 0.4, ease: "power2.out" }, {{ entrance_start + 0.45 }});
+  {% endif %}
+
+  // Each row lands on its own narration-anchored beat when one was found, or the old cascade
+  // otherwise (rendering/compose.py already resolved both into item_starts).
+  const {{ prefix }}_rowStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+  {{ prefix }}_rowStarts.forEach(function (t, i) {
+    var row = document.getElementById("{{ prefix }}-row-" + i);
+    // waterfall-entry: opacity is BINARY via tl.set, only y tweens.
+    tl.set(row, { opacity: 1, y: 30 }, t);
+    tl.to(row, { y: 0, duration: 0.3, ease: "power4.out" }, t);
+    {% if not compact %}
+    var marker = document.getElementById("{{ prefix }}-marker-" + i);
+    if (marker) {
+      tl.fromTo(marker, { scale: 0, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.34, ease: "power3.out" }, t);
+    }
+    {% endif %}
+  });
+{% endmacro %}

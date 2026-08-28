@@ -12,33 +12,27 @@ import shutil
 
 import pytest
 
-from core import Segment, Tier, VisualIntent
+from core import Tier
+from core.block_types import BlockType
 from interfaces import CompositionInvalid
 from rendering.render_segment import render_segment
 from tests.fakes import FakeRenderBackend
-from tests.segment_examples import a_segment
-from tests.slot_examples import EXAMPLES
+from tests.segment_examples import an_authored_segment
 
 DURATION_MS = 21_000
 
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
 
 
-def _authored_segment(intent: VisualIntent, tier: Tier) -> Segment:
-    return a_segment(0, intent=intent, duration_ms=DURATION_MS).model_copy(
-        update={"tier": tier, "slots": EXAMPLES[intent]}
-    )
-
-
 @pytest.mark.parametrize(
-    "missing_field", ["duration_ms", "tier", "slots"], ids=lambda f: f"missing_{f}"
+    "missing_field", ["duration_ms", "tier", "scene"], ids=lambda f: f"missing_{f}"
 )
 async def test_a_segment_missing_a_required_field_raises_value_error(
     tmp_path, missing_field: str
 ) -> None:
-    segment = _authored_segment(VisualIntent.TITLE_CARD, Tier.STATIC).model_copy(
-        update={missing_field: None}
-    )
+    segment = an_authored_segment(
+        0, BlockType.TITLE, Tier.STATIC, duration_ms=DURATION_MS
+    ).model_copy(update={missing_field: None})
     render = FakeRenderBackend()
 
     with pytest.raises(ValueError, match=missing_field):
@@ -54,7 +48,7 @@ async def test_a_lint_finding_raises_composition_invalid_before_any_capture_or_r
     tmp_path,
 ) -> None:
     """The "invalid compositions are caught before rendering" half of T17's DoD."""
-    segment = _authored_segment(VisualIntent.BULLET_LIST, Tier.ANIMATED)
+    segment = an_authored_segment(0, BlockType.TEXT_PANEL, Tier.ANIMATED, duration_ms=DURATION_MS)
     render = FakeRenderBackend(findings=["[error] fake_finding: something is wrong"])
 
     with pytest.raises(CompositionInvalid, match="fake_finding"):
@@ -72,7 +66,7 @@ async def test_a_lint_warning_does_not_block_the_render(tmp_path) -> None:
     treating every finding as fatal (D2's original stance) blocked every real render permanently.
     Only [error] severity is fatal now; a [warning] finding must not stop the render.
     """
-    segment = _authored_segment(VisualIntent.STAT_CALLOUT, Tier.ANIMATED)
+    segment = an_authored_segment(0, BlockType.STAT_CALLOUT, Tier.ANIMATED, duration_ms=DURATION_MS)
     render = FakeRenderBackend(findings=["[warning] composition_file_too_large: 315 lines"])
     dest = tmp_path / "clip.mp4"
 
@@ -85,7 +79,7 @@ async def test_a_lint_warning_does_not_block_the_render(tmp_path) -> None:
 
 
 async def test_tier_animated_dispatches_to_render_backend_render(tmp_path) -> None:
-    segment = _authored_segment(VisualIntent.STAT_CALLOUT, Tier.ANIMATED)
+    segment = an_authored_segment(0, BlockType.STAT_CALLOUT, Tier.ANIMATED, duration_ms=DURATION_MS)
     render = FakeRenderBackend()
     dest = tmp_path / "clip.mp4"
 
@@ -101,7 +95,7 @@ async def test_tier_animated_dispatches_to_render_backend_render(tmp_path) -> No
 
 @needs_ffmpeg
 async def test_tier_static_captures_one_timestamp_at_the_end_of_the_composition(tmp_path) -> None:
-    segment = _authored_segment(VisualIntent.CODE_WALKTHROUGH, Tier.STATIC)
+    segment = an_authored_segment(0, BlockType.CODE_PANEL, Tier.STATIC, duration_ms=DURATION_MS)
     render = FakeRenderBackend()
     dest = tmp_path / "clip.mp4"
 
@@ -120,7 +114,7 @@ async def test_tier_static_captures_one_timestamp_at_the_end_of_the_composition(
 async def test_tier_reveal_captures_four_timestamps_past_the_entrance_settle(tmp_path) -> None:
     """Not evenly spaced from t=0 -- the first sample must land after entrance has settled, not
     at the pre-animation blank frame (the bug a real render surfaced)."""
-    segment = _authored_segment(VisualIntent.DIAGRAM_FLOW, Tier.REVEAL)
+    segment = an_authored_segment(0, BlockType.DIAGRAM_CHAIN, Tier.REVEAL, duration_ms=DURATION_MS)
     render = FakeRenderBackend()
     dest = tmp_path / "clip.mp4"
 

@@ -1,0 +1,86 @@
+{% import "_tokens.html" as tokens %}
+{% import "_captions.html" as captions %}
+<!doctype html>
+<!--
+  SceneLayout.SINGLE -- one block fills the frame. T18B's generic replacement for
+  title_card.html/bullet_list.html/diagram_flow.html/code_walkthrough.html/stat_callout.html,
+  each of which is now a _block_*.html partial imported here by whichever block this segment's
+  plan chose. #camera carries the scene-level drift; #stage is exactly what each old template's
+  own #stage was.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>layout-single</title>
+    <script src="./gsap.min.js"></script>
+    {{ tokens.tokens_style(palette) }}
+    <style>
+      #camera {
+        width: 100%;
+        height: 100%;
+        transform-origin: center center;
+        will-change: transform;
+      }
+      #stage {
+        width: 100%;
+        height: 100%;
+        box-sizing: border-box;
+        padding: 130px 170px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="layout-single"
+      data-start="0"
+      data-duration="{{ duration_sec }}"
+      data-width="1920"
+      data-height="1080"
+    >
+      {{ tokens.background_markup('ls', duration_sec) }}
+      {{ captions.captions_markup('ls', cues, duration_sec) }}
+      <div id="content" class="clip df-content-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="1">
+        <div id="camera">
+          <div id="stage">
+            {% for block in blocks %}
+            {% import "_block_" ~ block.block_type ~ ".html" as blk %}
+            {{ blk.markup(block.prefix, block.payload, compact=false) }}
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      {{ tokens.background_script('ls', duration_sec) }}
+      {{ captions.captions_script('ls', cues, duration_sec) }}
+
+      // Scene-level camera drift (T18B): a slow, continuous scale+translate across the full
+      // duration, independent of whichever block fills the frame -- attacks "reads like a
+      // slideshow" at the architecture level, not per-template. Genuine GSAP property tween,
+      // never a manual onUpdate proxy (D89) -- seek(id, t, true) skips onUpdate entirely but
+      // still applies a tracked property's own interpolated value.
+      tl.fromTo(
+        "#camera",
+        { scale: 1, x: 0, y: 0 },
+        { scale: 1.045, x: -14, y: -10, duration: {{ duration_sec }}, ease: "none" },
+        0,
+      );
+
+      {% for block in blocks %}
+      {% import "_block_" ~ block.block_type ~ ".html" as blk %}
+      {{ blk.script(block.prefix, block.payload, block.entrance_start, block.item_starts, block.step_starts, duration_sec, compact=false) }}
+      {% endfor %}
+
+      window.__timelines["layout-single"] = tl;
+    </script>
+  </body>
+</html>

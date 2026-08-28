@@ -12,7 +12,7 @@ Three checks, each reported independently so one failure does not mask the other
 1. **Completion.** Proves endpoint, key, deployment name and non-zero quota at once -- four
    things that are individually invisible and jointly fatal.
 2. **Strict structured output**, against the project's real ``core.outline_schema.Outline``.
-   This closes D26's carried gap: ``tests/test_slot_schemas.py``'s unsupported-keyword list is
+   This closes D26's carried gap: ``tests/test_block_schemas.py``'s unsupported-keyword list is
    the conservative set and has never been checked against a live call.
 3. **TTS**, cross-checked against ``ffprobe``. Invariant 1 rests on measured duration, so the
    first thing worth knowing about a new Speech resource is whether the SDK and the file agree.

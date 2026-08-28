@@ -13,6 +13,8 @@ duplicated here; ``Segment``, ``VisualIntent``, ``Tier`` and ``VideoJob`` are do
 and appear in no interface signature.
 """
 
+from core.block_schemas import BLOCK_SCHEMAS, block_schema_for
+from core.block_types import ALLOWED_BLOCKS, BlockType, MotifName, SceneLayout
 from core.frame_budget import scale_frame_budget
 from core.models import (
     DEFAULT_TARGET_DURATION_MS,
@@ -26,30 +28,40 @@ from core.models import (
     VisualIntent,
 )
 from core.outline_schema import Outline, SegmentPlan
-from core.slot_schemas import SLOT_SCHEMAS, slot_schema_for
+from core.scene_plan_schema import PlannedBlock, SegmentScenePlan, VideoScenePlan
+from core.scene_schemas import ComposedBlock, ComposedScene
 from core.strict_schema import StrictSchema
 from core.synthesis import SynthesisResult, WordMark
 from core.tier_resolver import TierAssignment, TierPlan, resolve_tiers
 
 __all__ = [
+    "ALLOWED_BLOCKS",
+    "BLOCK_SCHEMAS",
     "DEFAULT_TARGET_DURATION_MS",
     "MIN_SEGMENTS",
     "SECONDS_PER_SEGMENT",
-    "SLOT_SCHEMAS",
+    "BlockType",
+    "ComposedBlock",
+    "ComposedScene",
     "Importance",
     "JobStatus",
+    "MotifName",
     "Outline",
+    "PlannedBlock",
+    "SceneLayout",
     "Segment",
     "SegmentPlan",
+    "SegmentScenePlan",
     "StrictSchema",
     "SynthesisResult",
     "Tier",
     "TierAssignment",
     "TierPlan",
     "VideoJob",
+    "VideoScenePlan",
     "VisualIntent",
     "WordMark",
+    "block_schema_for",
     "resolve_tiers",
     "scale_frame_budget",
-    "slot_schema_for",
 ]

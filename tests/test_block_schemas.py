@@ -1,8 +1,14 @@
 """Every LLM-facing schema, checked against Azure strict mode before Azure ever sees it.
 
+Renamed from ``tests/test_slot_schemas.py`` (T18B): schemas are keyed by ``BlockType`` now, and
+this file also covers the new ``core.scene_plan_schema`` classes (``PlannedBlock``,
+``SegmentScenePlan``, ``VideoScenePlan``) -- they inherit ``StrictSchema`` too, so the recursive
+conformance walk already covers them by construction, but a coverage gap there would be just as
+costly (a 400 minutes into a real run) as one in a block schema.
+
 Strict mode rejects an unsupported schema with a 400 at call time, so the cost of getting this
-wrong is a failed run somewhere in T15 or T16, minutes in, pointing at the adapter rather than
-at the schema. These tests move that failure to ``pytest``.
+wrong is a failed run, minutes in, pointing at the adapter rather than at the schema. These tests
+move that failure to ``pytest``.
 
 The conformance test enumerates ``StrictSchema`` subclasses recursively rather than reading a
 list, so a schema added later is covered by virtue of existing. That is the point of the marker
@@ -13,9 +19,12 @@ from typing import Any
 
 import pytest
 
-from core import SLOT_SCHEMAS, Segment, StrictSchema, VisualIntent, slot_schema_for
-from core.slot_schemas import FlowNode
-from tests.slot_examples import EXAMPLES
+from core import StrictSchema
+from core.block_schemas import BLOCK_SCHEMAS, DiagramNode, block_schema_for
+from core.block_types import BlockType
+from core.models import Segment, VisualIntent
+from core.scene_schemas import ComposedBlock, ComposedScene
+from tests.block_examples import EXAMPLES
 
 # Keywords Azure strict mode does not accept. Reaching for one of these is the natural way to
 # say "a headline should be short", and it is exactly what turns a schema into a 400.
@@ -80,22 +89,23 @@ def keywords_in(node: Any) -> set[str]:
     return found
 
 
-def test_every_visual_intent_has_a_slot_schema() -> None:
-    """T4's definition of done. A missing entry surfaces at scene-authoring time otherwise."""
-    assert set(SLOT_SCHEMAS) == set(VisualIntent)
+def test_every_block_type_has_a_block_schema() -> None:
+    """T18B's version of T4's definition of done. A missing entry surfaces at scene-authoring
+    time otherwise."""
+    assert set(BLOCK_SCHEMAS) == set(BlockType)
 
 
-def test_no_slot_schema_is_registered_against_a_dead_intent() -> None:
-    for intent, schema in SLOT_SCHEMAS.items():
-        assert isinstance(intent, VisualIntent)
+def test_no_block_schema_is_registered_against_a_dead_block_type() -> None:
+    for block_type, schema in BLOCK_SCHEMAS.items():
+        assert isinstance(block_type, BlockType)
         assert issubclass(schema, StrictSchema)
 
 
 def test_the_schemas_found_include_the_ones_we_expect() -> None:
     """Guards the enumeration itself -- a walker that finds nothing passes every test below."""
     names = {c.__name__ for c in all_strict_schemas()}
-    assert {"SegmentPlan", "Outline", "FlowNode"} <= names
-    assert {c.__name__ for c in SLOT_SCHEMAS.values()} <= names
+    assert {"SegmentPlan", "Outline", "DiagramNode", "PlannedBlock", "VideoScenePlan"} <= names
+    assert {c.__name__ for c in BLOCK_SCHEMAS.values()} <= names
 
 
 @pytest.mark.parametrize("schema", all_strict_schemas(), ids=lambda c: c.__name__)
@@ -124,28 +134,42 @@ def test_every_field_carries_a_description(schema: type[StrictSchema]) -> None:
         assert field.get("description"), f"{schema.__name__}.{name} has no description"
 
 
-@pytest.mark.parametrize("intent", list(VisualIntent), ids=lambda i: i.value)
-def test_a_realistic_payload_validates_for_every_intent(intent: VisualIntent) -> None:
-    payload = slot_schema_for(intent).model_validate(EXAMPLES[intent])
-    assert payload.model_dump() == EXAMPLES[intent]
+@pytest.mark.parametrize("block_type", list(BlockType), ids=lambda b: b.value)
+def test_a_realistic_payload_validates_for_every_block_type(block_type: BlockType) -> None:
+    payload = block_schema_for(block_type).model_validate(EXAMPLES[block_type])
+    assert payload.model_dump() == EXAMPLES[block_type]
 
 
-@pytest.mark.parametrize("intent", list(VisualIntent), ids=lambda i: i.value)
-def test_a_filled_payload_round_trips_through_a_segment(intent: VisualIntent) -> None:
-    """``Segment.slots`` is an untyped dict; ``slot_schema_for`` gives it back its type."""
+@pytest.mark.parametrize("block_type", list(BlockType), ids=lambda b: b.value)
+def test_a_filled_payload_round_trips_through_a_segment(block_type: BlockType) -> None:
+    """``Segment.scene`` is an untyped dict; ``block_schema_for`` gives a block's payload back
+    its type."""
+    scene = ComposedScene(
+        motif="terminal",
+        layout="single",
+        blocks=[
+            ComposedBlock(
+                block_type=block_type, role="role", anchor_phrase=None, payload=EXAMPLES[block_type]
+            )
+        ],
+        continues_previous=False,
+    )
     segment = Segment(
         index=0,
         title="t",
         summary="s",
-        visual_intent=intent,
+        visual_intent=VisualIntent.BULLET_LIST,
         importance=3,
-        slots=EXAMPLES[intent],
+        scene=scene.model_dump(),
     )
     restored = Segment.model_validate_json(segment.model_dump_json())
-    assert slot_schema_for(restored.visual_intent).model_validate(restored.slots)
+    restored_scene = ComposedScene.model_validate(restored.scene)
+    assert block_schema_for(restored_scene.blocks[0].block_type).model_validate(
+        restored_scene.blocks[0].payload
+    )
 
 
 def test_a_nested_model_is_itself_strict() -> None:
     """The case a top-level-only check would miss: a nested model that forgot the base class."""
-    assert issubclass(FlowNode, StrictSchema)
-    assert FlowNode.model_json_schema()["additionalProperties"] is False
+    assert issubclass(DiagramNode, StrictSchema)
+    assert DiagramNode.model_json_schema()["additionalProperties"] is False

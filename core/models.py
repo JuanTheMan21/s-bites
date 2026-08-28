@@ -90,7 +90,7 @@ class Segment(BaseModel):
 
     The nullable fields fill in stages, and the order is load-bearing. ``narration`` arrives
     from the scripting node, ``duration_ms`` from the TTS adapter *measuring the audio it just
-    wrote*, and only then can ``tier`` be assigned and ``slots`` authored against a real
+    wrote*, and only then can ``tier`` be assigned and ``scene`` authored against a real
     duration.
 
     That ordering is Invariant 1, and it is why this is a separate class rather than
@@ -125,11 +125,14 @@ class Segment(BaseModel):
         default=None,
         description="Assigned by core/tier_resolver.py, once duration_ms is known.",
     )
-    slots: dict[str, Any] | None = Field(
+    scene: dict[str, Any] | None = Field(
         default=None,
-        description="The filled slot payload for this segment's visual intent. Untyped here "
-        "because the shape varies by intent; validate it with "
-        "core.slot_schemas.slot_schema_for(visual_intent).",
+        description="This segment's composed scene: a layout plus the blocks that fill it. "
+        "Untyped here for the same reason `slots` was before it -- the shape is progressive "
+        "(core/graph/nodes/visual_plan.py writes it with each block's payload still null, "
+        "core/graph/nodes/scene_author.py fills them in) and varies with the layout/block "
+        "choice, which the LLM makes per video rather than per intent now. Validate with "
+        "core.scene_schemas.ComposedScene at the point of use.",
     )
     clip_key: str | None = Field(
         default=None,

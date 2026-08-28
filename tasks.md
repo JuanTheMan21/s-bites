@@ -320,58 +320,107 @@ no manual script involved — met, verified end to end with a real Azure-backed 
 — deferred to T18B, not met here.
 **Depends:** T18 — met.
 
-### T18B — Richer templates, real per-segment motion, cue-based captions, a per-video motif system · `todo`
-**Rescoped in planning, after a real viewer reviewed T18A's actual output** (decisionlog D104) —
-supersedes the version of this entry T18A originally wrote. Four real problems drove the rescope,
-each traced to specific code rather than assumed: every template's real choreography ends at
-~1.5s and everything after is a generic idle-bob liveness hack, not genuine full-duration motion;
-`rendering/templates/_captions.html` never clears a word once shown, so captions accumulate into
-a growing wall of text instead of movie-style 1-2 line cues (`mux/subtitles.py`'s own cue grouping,
-`MAX_WORDS_PER_CUE`, was never reused for the in-frame version); all 6 palettes keep `--bg`
-near-black and lean `--accent-secondary` blue, so "6 palettes" doesn't read as varied, especially
-stacked on `diagram_flow` using that token for everything; and nothing structurally guarantees a
-`title_card` opens a video — `runtime_skills/outline/1.0.md` only suggests one, and the real T18A
-test run had none.
+### T18B — Compositional scenes, whole-video visual planning, narration-anchored motion · `done`
+**Rescoped a second time before this task's own build**, on the user's explicit instruction after
+reviewing T18A's real output again: reopen decisionlog D104's "richer fixed template set, not
+fully compositional" boundary outright, forget prior architecture/cost assumptions while
+planning, keep only the ~15-20 minute render ceiling. Supersedes the version of this entry the
+previous checkpoint wrote. Full reasoning: decisionlog D105-D109.
 
-**Scope, agreed with the user (not yet drafted as a formal DoD — negotiate specifics in this
-task's own plan mode):**
-- **Cue-based captions.** Extract the grouping already in `mux/subtitles.py` into something both
-  it and `_captions.html` share; the in-frame band shows and holds one cue, then replaces it —
-  never accumulates.
-- **A per-video motif system.** One motif chosen per video, right after outline, threading through
-  palette family *and* which template variant renders each `VisualIntent` — so repeats within one
-  video and across different videos both look different. Three starting directions: **Blueprint**
-  (light paper background, schematic right-angle connectors — the real fix for "navy blue"),
-  **Terminal** (warm dark charcoal, zero blue, stepped ASCII-style connectors), **Broadcast**
-  (light neutral, one bold accent, lower-third-style labels). Built as a shared token/component
-  layer (same pattern as `_tokens.html`/`_captions.html`), not fully bespoke templates per
-  motif × intent — keeps this buildable in one pass rather than a combinatorial rebuild.
-- **Two new intents**, driven directly by a reference video the user shared: an **array/list
-  visualization** (a row of boxes, narration-synced highlight/cross-out/collapse — what
-  `diagram_flow`'s steps-in-sequence shape cannot express) and a **composite code+diagram split**
-  (two panels sharing one frame, e.g. code on the left, an array or flow diagram on the right).
-  Absorbs most of what `VisualIntent.NETWORK_DIAGRAM` would have been (a `diagram_flow`
-  hub/orbit alternate covers the rest) rather than staying a separate intent.
-- **Shared annotation components** — a pointing-hand/cursor indicator, a success-check — usable
-  by any template rather than exclusive to one, ported from the registry the same way T18A's
-  count-up was (`npx hyperframes add`, inspect, hand-adapt; the registry's own `<template>`/
-  `window.__hyperframes` clone mechanism doesn't fit this project's single-composition-per-segment
-  layout, per D103).
-- **Full-duration per-template motion**, ideally keyed to `word_marks` (real timing now exists)
-  rather than a decorative sine bob.
-- **Force segment 0 to `title_card`** — structural, not advisory.
-- **Iteration budget: one solid pass.** Build, verify with `hyperframes check` per composition,
-  one real end-to-end render at full 7-minute length (not measured directly yet — see T18A's
-  handoff), user review. Not a multi-cycle render/watch/adjust loop.
+**What actually shipped:** the one-`VisualIntent`-picks-one-whole-template dispatch is gone,
+replaced by a `SceneLayout` (`SINGLE`/`SPLIT_HORIZONTAL`) composing `BlockType` partials (6:
+`title`, `text_panel`, `stat_callout`, `code_panel`, `diagram_chain`, and `array_grid` — the one
+genuinely new block, no pre-T18B equivalent, built for exactly the array/list-halving pattern the
+original scoping's reference video called for). A new join node, `plan_visuals`
+(`core/graph/nodes/visual_plan.py`), sees every segment at once and plans the whole video's
+layouts/blocks/motif in one call — the structural fix for the repetition the original scoping
+blamed on template variety, when it was actually the per-segment fan-out's isolation (D105).
+Content is filled one block at a time (`author_scene`'s `fill_block`), routing around Azure strict
+mode's real inability to express a discriminated union (D29) rather than asking for a whole scene
+in one call. Cue-based captions, motif-keyed palettes (Blueprint/Terminal/Broadcast, replacing six
+job-id-hashed ones), narration-anchored block/item timing (`rendering/anchors.py`, spending
+`word_marks` on visuals for the first time, not just captions), a scene-level camera drift on
+every layout, and a structural (code, not prompt) forced title card on segment 0 are all in.
 
-**Explicitly not this task** (decisionlog D104): Mermaid-rendered diagrams (rejected — the
-reference video's actual asks aren't Mermaid's diagram types, and HyperFrames' seekable-timeline
-model would need the same stroke-draw animation on top regardless); fully compositional
-LLM-authored scenes (still the larger, research-shaped undertaking T18A's plan already deferred —
-reopen as its own later task if the richer fixed-template set still isn't enough after a real
-7-minute video); the originally-planned FastAPI route + static page (T18A's terminal-only `cli.py`
-entrypoint covers the DoD); the `--variables`/`--batch` composition refactor.
+**DoD, as actually met:** `pytest` green (562 passed), `ruff` clean, boundary/line-count checks
+clean. `hyperframes check` green for every layout × block combination shipped, via a real 18-combo
+live sweep (`test_render_segment_live.py`, 6 block types × 3 tiers) — four real bugs found only by
+running the real toolchain, all fixed and verified (D106). One real end-to-end render, watched via
+extracted frames, not just duration-asserted (D109) — 90s/3-segment "how binary search works",
+`Tier.ANIMATED` throughout, a genuinely distinct Blueprint motif, working `diagram_chain` and
+`SPLIT_HORIZONTAL` output. Full 7-minute length **not required this task, by design** — see T18C.
+
+**Explicitly not this task** (still true, now for updated reasons — see T18C below for where each
+lands): the broadened primitive set beyond this task's 6 block types (arbitrary graph topology +
+traversal, sequence/lane diagrams, timelines, code diff, generalised annotation/warning
+components); a vision critique/revision loop (needs a real `LLMProvider` image-input interface
+change, its own adapter-parity work); a full 7-minute validation render across varied topic types.
+Mermaid-rendered diagrams remain rejected for the reasons D104 already gave. The originally-listed
+"two new intents" framing is superseded — `array_grid` shipped as a `BlockType`, not a
+`VisualIntent`, and the composite code+diagram split is just `SPLIT_HORIZONTAL` with any two
+blocks, not a dedicated intent either.
+
+**Two pre-existing gaps found during this task's own verification, carried forward, not fixed
+here** (D107): the Blob skill registry had drifted from local disk since T18A (fixed as a one-off
+manual sync this session; no automated sync exists); `tests/test_graph_pipeline_live.py`'s
+mixed-tier test is mathematically unsatisfiable under the post-D99 tier ladder (a T18A-era gap,
+not a T18B regression — worked out by hand in D107, needs a real redesign of that test's segment
+shape, not a constant tweak).
+
 **Depends:** T18A — met.
+
+### T18C — The broadened block library, and the vision critique/revision loop · `todo`
+**Scoped during T18B's own planning** (decisionlog D104-D105), deliberately deferred rather than
+crammed into T18B so the genuinely novel, highest-craft work gets a full session's attention
+instead of being squeezed at the end of an already-large one.
+
+**Scope, reasoned past the user's own three named examples per their explicit instruction not to
+limit the block library to those** — what a general "prompt-to-explainer-video" platform actually
+gets asked for, each new block earning its place the way D30 required of the original six:
+- **`GRAPH_DIAGRAM`** — arbitrary node/edge topology plus a traversal-highlight mode (an
+  `offset-path-traveler`-derived technique, per this session's HyperFrames registry research).
+  Covers graphs, trees, DP state-transition diagrams, and linked lists as a degenerate case,
+  without a block type per structure. `diagram_chain`'s existing linear-rail mode absorbs into
+  this as one of its layouts, not a separate block.
+- **`ARRAY_GRID`, generalized** — an orientation + end-operation field so the same block covers
+  stacks, queues, and sliding windows, not only binary-search-style halving.
+- **`SEQUENCE_DIAGRAM`** (new) — actors/lanes with arrows over time, for protocol/handshake/
+  request-response topics (TCP, OAuth, HTTP) a node-graph represents badly, since they're
+  lane-and-time shaped rather than topology-shaped. A common "how does X work" question class this
+  project currently has no good answer for.
+- **`TIMELINE`** (new) — a horizontal run of labelled events for historical/evolutionary topics.
+  Cheap once `GRAPH_DIAGRAM`'s traveler technique exists.
+- **`CODE_DIFF`** — before/after, red-collapse/green-expand. Direct registry port
+  (`code-diff`).
+- **Annotation components** — `ANNOTATION_CURSOR`, `ANNOTATION_CHECK`, and a generalised
+  `ANNOTATION_WARNING` (past "malicious intent" specifically, to any "here is the dangerous part /
+  the common mistake" beat — a frequent explainer moment, not just a security-topic one).
+  Malicious/glitch *treatment* is a style override on `CODE_PANEL`/`CODE_DIFF`, not a block type,
+  keeping motif orthogonal to content.
+- **The vision critique/revision loop**, the third of T18B's own three-part answer on tightening
+  the agentic harness (decisionlog D105 §7): capture stills from a composed scene
+  (`adapters/local/playwright_capture.py` already does this for Tier 0/1), show them to a
+  vision-capable model, critique, revise the scene plan, re-render only what failed. Requires a
+  real `interfaces/llm_provider.py` change (image input) — `LLMProvider.generate` is text-only
+  today — and the adapter-parity work that follows from it (both Azure and local, D40's
+  `inspect.signature` equality across every implementation including the fake).
+- **Validation:** a full 7-minute render across 2-3 genuinely different topic types (algorithmic,
+  systems/protocol, security) — where D104's original "one real full-length render" promise
+  properly lands, against content that will actually show the payoff T18B's foundation bought.
+
+**Also in scope, cheap given T18B's foundation:** fixing `tests/test_graph_pipeline_live.py`'s
+mixed-tier test (D107) — needs a real segment-shape redesign, a natural fit alongside other live-
+test work this task already does.
+
+**Explicitly not this task:** the document-upload/cursor-navigated-UI-walkthrough direction —
+confirmed the best-supported thing in this session's own HyperFrames research
+(`browser-device-stage`/`simulated-cursor`/`ui-focus-zoom` already take data-driven coordinates),
+but waiting on a document-ingestion path that doesn't exist yet (T29's scope, iteration 6,
+scheduled last per the original requirement). A possible **T18D** — pushing LLM compositionality
+further than the block-schema model, "testing the limits" of what the render-time budget allows,
+per the user's own framing in T18B's planning — is named for continuity but has had no scoping
+conversation and is not promised as this task's or any specific session's work.
+**Depends:** T18B — met.
 
 ---
 

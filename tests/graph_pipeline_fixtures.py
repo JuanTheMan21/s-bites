@@ -3,6 +3,15 @@ for every interface, and the full sequence of LLM responses one run consumes.
 
 Not a test module -- the same role ``tests/plan_segments_fixtures.py`` plays for ``plan_segments``.
 Split out when the graph grew a second fan-out and the resume cases outgrew one file's 200 lines.
+
+T18B: the LLM call sequence grew a step. ``plan_visuals`` (a new join, one call for the whole
+video) now sits between narration and the ``author_scene`` fan-out, and each segment's fan-out
+task makes one fill call *per planned block* rather than one call for the whole scene. Every
+segment here is planned with exactly one TITLE block (segment 0's plan is ignored and forced
+anyway; the rest are planned the same way here on purpose) so every fill call asks for the same
+schema -- the fan-out's tasks reach the fake concurrently, in no guaranteed order, and
+interchangeable payloads are what make that irrelevant rather than flaky (unchanged reasoning
+from before T18B, just now applying to the fill step instead of the old single slot call).
 """
 
 import shutil
@@ -10,11 +19,13 @@ from pathlib import Path
 
 import pytest
 
+from core.block_schemas import TitleSlots
+from core.block_types import BlockType, MotifName, SceneLayout
 from core.graph import GraphContext
 from core.models import Importance, VideoJob, VisualIntent
 from core.outline_schema import Outline, SegmentPlan
+from core.scene_plan_schema import PlannedBlock, SegmentScenePlan, VideoScenePlan
 from core.scripting_schema import Narration
-from core.slot_schemas import TitleCardSlots
 from interfaces import SkillPack
 from tests.fakes import (
     FakeLLMProvider,
@@ -46,21 +57,35 @@ def a_job() -> VideoJob:
     return VideoJob(job_id="job-1", topic="SQL injection", target_duration_ms=TARGET_DURATION_MS)
 
 
-def slot_payloads(segment_count: int) -> list[TitleCardSlots]:
-    """One payload per segment for the ``author_scene`` fan-out.
+def scene_plan(segment_count: int) -> VideoScenePlan:
+    """The whole-video visual plan every run consumes -- one TITLE block per segment. Segment
+    0's own entry is included for shape but ignored by ``plan_visuals`` (forced regardless)."""
+    return VideoScenePlan(
+        motif=MotifName.TERMINAL,
+        segments=[
+            SegmentScenePlan(
+                segment_index=i,
+                layout=SceneLayout.SINGLE,
+                blocks=[PlannedBlock(block_type=BlockType.TITLE, role="Title", anchor_phrase=None)],
+                continues_previous=False,
+            )
+            for i in range(segment_count)
+        ],
+    )
 
-    Every segment in these tests is a title card, so the payloads are interchangeable -- which
-    matters, because this is the first place responses are popped off the queue *concurrently*.
-    The order the fan-out's tasks reach the fake is not deterministic; identical payloads make
-    that irrelevant rather than flaky.
-    """
-    return [TitleCardSlots(headline=f"Headline {i}", subtitle=None) for i in range(segment_count)]
+
+def slot_payloads(segment_count: int) -> list[TitleSlots]:
+    """One fill-call payload per segment's one planned block -- interchangeable, since every
+    segment plans exactly one TITLE block (see ``scene_plan``'s docstring for why that matters
+    under concurrent fan-out)."""
+    return [TitleSlots(headline=f"Headline {i}", subtitle=None) for i in range(segment_count)]
 
 
 def seeded_llm(segment_count: int) -> FakeLLMProvider:
     """The full call sequence a run makes: one Outline (plan_segments' outline call), one
-    Narration per segment (its scripting calls, in index order), then one slot payload per
-    segment (the author_scene fan-out)."""
+    Narration per segment (its scripting calls, in index order), one VideoScenePlan
+    (plan_visuals' single call), then one block-fill payload per segment (the author_scene
+    fan-out, one block each)."""
     outline = Outline(
         segments=[
             SegmentPlan(
@@ -73,7 +98,9 @@ def seeded_llm(segment_count: int) -> FakeLLMProvider:
         ]
     )
     narrations = [Narration(text=f"Narration {i}.") for i in range(segment_count)]
-    return FakeLLMProvider([outline, *narrations, *slot_payloads(segment_count)])
+    return FakeLLMProvider(
+        [outline, *narrations, scene_plan(segment_count), *slot_payloads(segment_count)]
+    )
 
 
 def seeded_skills() -> FakeSkillRegistry:
@@ -81,6 +108,7 @@ def seeded_skills() -> FakeSkillRegistry:
         [
             SkillPack(name="outline", version="1.0", content="outline pack"),
             SkillPack(name="scripting", version="1.0", content="scripting pack"),
+            SkillPack(name="visual-plan", version="1.0", content="visual plan pack"),
             SkillPack(name="scene-authoring", version="1.0", content="scene authoring pack"),
             SkillPack(name="house-style", version="1.0", content="house style pack"),
         ]

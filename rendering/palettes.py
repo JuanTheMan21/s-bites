@@ -1,20 +1,17 @@
-"""Per-job color palettes, so consecutive videos do not all read as the same amber-on-black.
+"""One color family per motif, so a video's palette matches the tone ``plan_visuals`` chose for
+it instead of being an arbitrary hash of the job id.
 
-T18A: D95 replaced glow/gradient "Data Drift" with two flat, semantic tokens
-(``--accent-primary`` = emphasis, ``--accent-secondary`` = structure) but left both hardcoded, so
-every video -- regardless of topic -- used the identical amber/blue pair. D95's own closing note
-flagged this as still reading "blue-dominant" once ``diagram_flow`` (a heavy structure-token user)
-is frequent. This module keeps the semantic split every template already relies on, but gives it
-several hand-picked, contrast-checked color pairs instead of one.
-
-Selection is **deterministic from job_id**, not random: the same job resumed across a checkpoint,
-or re-rendered for debugging, must land on the same palette every time -- a random pick would make
-``diagram_flow``'s marker fix (D94) or a template bug look intermittent across runs of the same job.
+T18B: replaces the six job-id-hashed palettes (D95/T18A) with three motif-keyed families --
+``core.block_types.MotifName`` is chosen once per video by ``core/graph/nodes/visual_plan.py``,
+matched to the topic, so palette variety now comes from a real editorial choice instead of a
+coin flip. Still keeps the semantic split every block partial relies on
+(``--accent-primary`` = emphasis, ``--accent-secondary`` = structure) -- only the concrete
+colors change per family, never what the two tokens mean.
 """
 
-import hashlib
-
 from pydantic import BaseModel, ConfigDict
+
+from core.block_types import MotifName
 
 
 class Palette(BaseModel):
@@ -34,71 +31,59 @@ class Palette(BaseModel):
     accent_secondary: str
 
 
-# Every pair below was picked, then checked, against these two rules:
+# Each pair was picked, then checked, against the same two rules D95 established:
 #   1. fg on bg clears WCAG AA (4.5:1) for body text -- `hyperframes check --contrast` verifies
 #      this for real against the rendered composition, this is the human sanity check before that.
 #   2. accent_primary and accent_secondary read as visibly different hues from each other and
-#      from fg/fg_muted, so the emphasis/structure split (D95) stays legible, not just present.
-# "amber_blue" is D95's original pair, kept as the default/first entry so nothing before this task
-# silently changes appearance if a caller never opts into selection.
-PALETTES: tuple[Palette, ...] = (
-    Palette(
-        name="amber_blue",
-        bg="#08080a",
-        fg="#eeeeee",
-        fg_muted="#8b8b93",
+#      from fg/fg_muted, so the emphasis/structure split stays legible, not just present.
+# Blueprint: light paper background, schematic connectors -- the real fix for D95's "still reads
+# navy blue" finding, which no dark palette (however many of them) could ever answer.
+# Terminal: warm dark charcoal, zero blue in either accent -- a genuinely different hue family
+# from the old amber/blue default, for topics (security, systems) that suit a console feel.
+# Broadcast: light neutral, one bold accent -- a third distinct register, closer to a
+# lower-third/news-graphics look than either of the other two.
+MOTIF_PALETTES: dict[MotifName, Palette] = {
+    MotifName.BLUEPRINT: Palette(
+        name="blueprint",
+        bg="#eef1f6",
+        fg="#101826",
+        fg_muted="#5b6472",
+        accent_primary="#c2410c",
+        accent_secondary="#1d4ed8",
+    ),
+    MotifName.TERMINAL: Palette(
+        name="terminal",
+        bg="#141110",
+        fg="#f5efe6",
+        fg_muted="#a89a89",
         accent_primary="#ffb703",
-        accent_secondary="#4fa8ff",
+        accent_secondary="#4ade80",
     ),
-    Palette(
-        name="coral_teal",
-        bg="#0a0908",
-        fg="#f2ede6",
-        fg_muted="#94897d",
-        accent_primary="#ff6b5e",
-        accent_secondary="#2dd4bf",
+    MotifName.BROADCAST: Palette(
+        name="broadcast",
+        bg="#f7f6f2",
+        fg="#141414",
+        fg_muted="#6b6862",
+        accent_primary="#dc2626",
+        accent_secondary="#0f172a",
     ),
-    Palette(
-        name="violet_lime",
-        bg="#0a0a0f",
-        fg="#ece9f5",
-        fg_muted="#8d89a0",
-        accent_primary="#c084fc",
-        accent_secondary="#a3e635",
-    ),
-    Palette(
-        name="rose_cyan",
-        bg="#0b0709",
-        fg="#f5e9ec",
-        fg_muted="#9c8890",
-        accent_primary="#fb7185",
-        accent_secondary="#22d3ee",
-    ),
-    Palette(
-        name="gold_indigo",
-        bg="#09080c",
-        fg="#efeced",
-        fg_muted="#928da3",
-        accent_primary="#facc15",
-        accent_secondary="#818cf8",
-    ),
-    Palette(
-        name="ember_seafoam",
-        bg="#0a0807",
-        fg="#f1ece5",
-        fg_muted="#998f80",
-        accent_primary="#fb923c",
-        accent_secondary="#5eead4",
-    ),
+}
+
+# The default for a caller with no motif context yet (a bare template test) -- kept as the
+# original amber-on-near-black identity so nothing that predates motifs changes appearance.
+_DEFAULT_PALETTE = Palette(
+    name="amber_blue",
+    bg="#08080a",
+    fg="#eeeeee",
+    fg_muted="#8b8b93",
+    accent_primary="#ffb703",
+    accent_secondary="#4fa8ff",
 )
 
 
-def select_palette(job_id: str | None) -> Palette:
-    """The palette for ``job_id`` -- stable across every call with the same id, spread across
-    every call with different ids. ``job_id=None`` (a caller with no job context, e.g. a bare
-    template test) always gets the original ``amber_blue`` default.
-    """
-    if job_id is None:
-        return PALETTES[0]
-    digest = hashlib.sha256(job_id.encode("utf-8")).digest()
-    return PALETTES[digest[0] % len(PALETTES)]
+def select_palette(motif: MotifName | None) -> Palette:
+    """The palette for ``motif``. ``motif=None`` (a caller with no scene context, e.g. a bare
+    template test) always gets the original amber-on-near-black default."""
+    if motif is None:
+        return _DEFAULT_PALETTE
+    return MOTIF_PALETTES[motif]

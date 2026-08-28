@@ -1,4 +1,9 @@
 """T18A: measure real Tier-2 render throughput, and correct D16's frame budget.
+T18B: re-measures against a realistic *composite* scene under the new compositional mechanism
+(a SPLIT_HORIZONTAL scene with a CODE_PANEL and a DIAGRAM_CHAIN, plus the scene-level camera
+drift every layout now carries) -- Phase 0 of T18B's plan: more DOM/SVG elements and a
+continuous camera tween plausibly cost more per frame than the old single-block templates did,
+and nothing had measured that before this script ran.
 
     PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_render_throughput.py
 
@@ -18,9 +23,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from core.models import Importance, Segment, Tier, VisualIntent
+from core.block_types import BlockType
+from core.models import Importance, Segment, Tier
+from core.scene_schemas import ComposedBlock, ComposedScene
 from rendering.compose import compose_scene
-from tests.slot_examples import EXAMPLES
+from tests.block_examples import EXAMPLES
 
 DURATION_MS = 25_000
 DEST_DIR = Path("artifacts") / "_throughput_probe"
@@ -35,16 +42,35 @@ def _repo_hyperframes() -> list[str]:
 
 
 def main() -> None:
+    scene = ComposedScene(
+        motif="terminal",
+        layout="split_horizontal",
+        blocks=[
+            ComposedBlock(
+                block_type=BlockType.CODE_PANEL,
+                role="probe",
+                anchor_phrase=None,
+                payload=EXAMPLES[BlockType.CODE_PANEL],
+            ),
+            ComposedBlock(
+                block_type=BlockType.DIAGRAM_CHAIN,
+                role="probe",
+                anchor_phrase=None,
+                payload=EXAMPLES[BlockType.DIAGRAM_CHAIN],
+            ),
+        ],
+        continues_previous=False,
+    )
     segment = Segment(
         index=0,
         title="Throughput probe",
-        summary="A realistic bullet-list segment for measuring render throughput.",
-        visual_intent=VisualIntent.BULLET_LIST,
+        summary="A realistic composite two-block segment for measuring render throughput.",
+        visual_intent="code_walkthrough",
         importance=Importance.NORMAL,
         narration="Narration for a throughput probe.",
         duration_ms=DURATION_MS,
         tier=Tier.ANIMATED,
-        slots=EXAMPLES[VisualIntent.BULLET_LIST],
+        scene=scene.model_dump(),
     )
     composition_dir = DEST_DIR / "composition"
     compose_scene(segment, composition_dir)
