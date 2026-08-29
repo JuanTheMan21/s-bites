@@ -113,7 +113,7 @@ def test_the_answer_does_not_depend_on_the_order_segments_arrive_in() -> None:
 
 
 def test_every_visual_intent_declares_its_tier_support() -> None:
-    """Mirrors the SLOT_SCHEMAS coverage test: an intent added to the enum and nowhere else
+    """Mirrors the BLOCK_SCHEMAS coverage test: an intent added to the enum and nowhere else
     would otherwise surface as a KeyError minutes into a job."""
     assert set(TIER_SUPPORT) == set(VisualIntent)
     assert all(Tier.STATIC in tiers for tiers in TIER_SUPPORT.values())

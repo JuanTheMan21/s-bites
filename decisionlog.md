@@ -1919,3 +1919,68 @@ content grows down into that same zone -- a real, not yet realized, risk once T1
 blocks (`SEQUENCE_DIAGRAM` lanes, a `TIMELINE` row, a long `CODE_DIFF`) exist. Recorded in
 `tasks.md`'s T18C entry directly, at the user's explicit request, rather than left to be
 rediscovered live the way the id-collision and static-CSS-transform bugs in D106 were.
+
+### D111 — A cleanup pass over the T18B diff found one genuinely broken script and two actively
+misleading build-time docs; `get_dead_code` found nothing real
+
+**The trigger.** The user asked directly whether the old architecture had actually been cleaned
+up, not just superseded -- a fair question after a rewrite this size. `git grep` for every old
+symbol name (`slot_schema_for`, `SLOT_SCHEMAS`, `TitleCardSlots`/`CodeWalkthroughSlots`/
+`DiagramFlowSlots`/`ComparisonSlots`/`BulletListSlots`/`FlowNode`, the six retired template
+filenames, bare `.slots` access) plus a RepoWise `get_dead_code` sweep, rather than trusting the
+T18B checkpoint's own diff summary.
+
+**Found and fixed:**
+1. **`scripts/measure_segment_concurrency.py` was genuinely broken** -- `from core.slot_schemas
+   import TitleCardSlots`, a module T18B deleted. Not caught by `pytest` because it is a standalone
+   `__main__` script, not a test file. Updated to the plan_visuals+fill_block two-call sequence
+   (mirrors `tests/graph_pipeline_fixtures.py`'s own `scene_plan()`/`slot_payloads()` pattern).
+   **Smoke-running the fixed import surfaced a second, deeper, also pre-existing bug**: its
+   `FRAME_BUDGET=600` (unchanged from before T18B) plus `FakeTTSProvider()`'s un-seeded duration
+   estimate (very short synthetic narration text) promotes some segments to `Tier.ANIMATED` post-
+   D99's `IDEAL_TIER` correction, and `FakeRenderBackend.render()` writes placeholder bytes, not a
+   real MP4, so `render_scene`'s real ffmpeg mux fails on whichever segment lands there. This is
+   the same class of gap as D107's two findings -- a D99-era ladder change silently invalidating a
+   script nobody re-ran since -- just a third instance, found only because this checkpoint's
+   import fix let the script run far enough to reach it for the first time. Fixed by adopting
+   `tests/graph_pipeline_fixtures.py`'s own already-established answer: `FRAME_BUDGET=0`, which
+   keeps every segment on Tier 0 deterministically and is sufficient for what this script actually
+   measures (disk I/O contention, not tier/render behaviour). Re-run end to end after the fix:
+   15 segments, 0.955s, succeeded.
+2. **`.claude/skills/scene-templates/SKILL.md` and `.claude/commands/newintent.md` described the
+   deleted architecture in full** -- one-`VisualIntent`-per-template, a slot schema per intent, no
+   mention of `BlockType`/`SceneLayout`/`plan_visuals` at all. Both are build-time guidance loaded
+   into a *future* Claude Code session's context, not runtime code -- wrong, they actively mislead
+   whoever next touches `rendering/` rather than merely failing to help. Rewritten for the current
+   architecture. `newintent.md`'s registration list shrank to match `VisualIntent`'s much narrower
+   real role (an outline-time hint plus an `ALLOWED_BLOCKS` entry -- no template, no schema, no
+   tier-cost characteristics of its own). **New `/newblock` command** added for the registration
+   workflow that is now the common case -- adding a `BlockType` -- since T18C's whole scope is
+   exactly that.
+3. **Two stale in-code comments** (`core/models.py`'s `VisualIntent` docstring, one line in
+   `tests/test_tier_resolver.py`) still named `core/slot_schemas.py`/`SLOT_SCHEMAS`. Fixed; the
+   `core/models.py` one also needed real content changes, not just a filename swap -- the comment
+   described `/newintent`'s old registration list, which no longer applies to what `VisualIntent`
+   does.
+
+**Checked and NOT touched, on purpose:**
+- `runtime_skills/scene-authoring/{1.0,1.1}.md` -- superseded by `1.2` but deliberately kept, not
+  deleted. Pack versioning is this project's own designed mechanism (T7, D43-D46), the same reason
+  old git commits are not deleted; `SkillRegistry.versions()` promises a real history, and the
+  `DiskSkillRegistry`/`BlobSkillRegistry` parity tests exercise more than one version existing.
+- `rendering/templates/_reference_tier2.html` -- a frozen T4-era hand-written spike composition,
+  labelled as such in its own history, predating and independent of the block/template system
+  entirely. Reference material, not dead code masquerading as current.
+- `.claude/skills/pipeline-debugging/SKILL.md` -- read in full; still substantively accurate
+  (failure modes, artifact layout, isolation technique are all architecture-independent). Left
+  alone rather than rewritten for the sake of touching it.
+- RepoWise's `get_dead_code` flagged 5 `unreachable_file` and 4 `zombie_package` findings, all
+  below the tool's own 0.5 confidence floor and all false positives on inspection: the five are
+  hook scripts the harness invokes via `.claude/settings.json`, not Python imports (expected
+  in-degree of zero), and the four "zombie" packages (`adapters`, `api`, `mux`, `rendering`) are
+  imported constantly via `from adapters.x import y`-style deep imports the tool's package-level
+  heuristic doesn't count. Nothing here indicated a real cleanup gap the manual grep sweep missed.
+
+**Verified after all of the above:** `pytest` (562 passed, 1 skipped, unchanged from before this
+pass), `ruff check .`/`ruff format --check .` clean, boundary/line-count checks clean, and the
+fixed script actually re-run to completion, not just imported successfully.

@@ -41,10 +41,14 @@ class Tier(IntEnum):
     ANIMATED = 2
 
 
-# Each member needs a slot schema in ``core/slot_schemas.py`` and, from T17, a Jinja template in
-# ``rendering/templates/``. A member added without both leaves a gap that surfaces at render
-# time, minutes into a job, on one particular topic -- which is why ``/newintent`` touches every
-# registration point at once.
+# T18B: no longer a template-selection key -- ``rendering/compose.py`` dispatches by
+# ``SceneLayout``/``BlockType`` now, not by this enum. This is a coarse, outline-time hint the
+# LLM fills before the real narration exists; ``core/block_types.py::ALLOWED_BLOCKS`` documents
+# what each member typically becomes, and ``plan_visuals`` (``core/graph/nodes/visual_plan.py``)
+# is free to choose differently once it has the actual narration in hand. A member added here
+# needs an ``ALLOWED_BLOCKS`` entry and a line in ``runtime_skills/outline/1.0.md``'s table --
+# nothing under ``rendering/`` -- see ``/newintent`` for the (now much shorter) registration list,
+# or ``/newblock`` if what's actually needed is a new ``BlockType``, which is the common case.
 #
 # The docstring stays one line on purpose: pydantic copies it into the JSON Schema, so it is
 # sent to the model on every call. Rationale for us belongs up here, where it costs no tokens.

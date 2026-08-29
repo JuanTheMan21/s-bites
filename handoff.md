@@ -3,7 +3,8 @@
 **Overwritten completely at every `/checkpoint`.** This file describes *now*, never history.
 History lives in `decisionlog.md`.
 
-_Last updated: 2026-08-29 · after T18B, including a same-checkpoint caption fix (D110)_
+_Last updated: 2026-08-29 · after T18B, a same-checkpoint caption fix (D110), and a cleanup pass
+over the old architecture (D111)_
 
 ---
 
@@ -188,7 +189,27 @@ guard zone.
 
 ## Gotchas worth remembering
 
-**New this session:**
+**New this session, from a cleanup pass (D111) after the user asked directly whether the old
+architecture had actually been removed, not just superseded:**
+- **A standalone `__main__` script can go stale silently -- `pytest` will never catch it.**
+  `scripts/measure_segment_concurrency.py` imported a module T18B deleted; nothing in the offline
+  suite runs it, so it stayed broken through the whole T18B checkpoint. When retiring a module,
+  grep for it across `scripts/` specifically, not just `core/`/`rendering/`/`tests/`.
+- **A `FakeRenderBackend`-driven script needs `FRAME_BUDGET=0`, not a "realistic" number** --
+  `FakeRenderBackend.render()` (Tier 2) writes placeholder bytes, never a real MP4, so any budget
+  that lets even one segment reach `Tier.ANIMATED` breaks the real ffmpeg mux downstream. Already
+  documented once in `tests/graph_pipeline_fixtures.py`'s own comment; `measure_segment_
+  concurrency.py` didn't follow it and broke exactly the way that comment predicted, post-D99.
+- **`/newblock` now exists** for the common registration workflow (adding a `BlockType`);
+  `/newintent`'s own list shrank to match `VisualIntent`'s much narrower real role. Both
+  `.claude/skills/scene-templates/SKILL.md` and `.claude/commands/newintent.md` were rewritten --
+  they described the deleted one-intent-one-template architecture in full, which is worse than
+  merely unhelpful for a future session relying on them.
+- **`repowise dead-code` is a real check, and it came back clean** -- worth running after a large
+  rewrite even when confident, precisely because it's cheap and the alternative is trusting your
+  own memory of what you touched.
+
+**New this session, from T18B itself:**
 - **A movie-style caption fix has two separate parts, and fixing one does not fix the other**:
   *retention* (does an old cue clear when the next begins) and *reveal* (does a cue appear as one
   unit or assemble itself word by word). D106 fixed the first and, without a fresh look, silently
