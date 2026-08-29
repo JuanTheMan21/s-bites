@@ -1984,3 +1984,50 @@ T18B checkpoint's own diff summary.
 **Verified after all of the above:** `pytest` (562 passed, 1 skipped, unchanged from before this
 pass), `ruff check .`/`ruff format --check .` clean, boundary/line-count checks clean, and the
 fixed script actually re-run to completion, not just imported successfully.
+
+### D112 — RepoWise's index was silently broken (73% SQL/vector drift); a real Azure embedder is
+now wired in; the `/build-task` model-switch claim was false and is now a mandatory self-check
+instead
+
+Three infrastructure findings and fixes, prompted by the user asking directly whether the project's
+own tooling (RepoWise, the plan/build model split) was actually working as documented, not by any
+code change to the pipeline itself.
+
+**RepoWise's index had drifted silently: `repowise doctor` showed `SQL=171, Vector=46,
+Drift=73.1%`** -- 125 wiki pages had never been embedded, so `search_codebase`/`get_answer` had
+been searching over less than a third of the indexed content, with nothing surfacing this until
+asked to check. `repowise reindex --embedder mock` closed the SQL/vector gap structurally
+(0% drift); semantic quality stayed capped by the mock embedder until the fix below.
+
+**A real Azure OpenAI embedder is now wired in, on a separate deployment from the chat model.**
+Quota checked first this time (`az cognitiveservices usage list -l eastus`) -- unlike D49's chat-
+model surprise, every SKU for `text-embedding-3-small` had healthy headroom (1000K TPM under
+`GlobalStandard`), so no repeat of that trap. Deployed `text-embedding-3-small` under
+`GlobalStandard` on the existing `skill-bites` resource, verified working directly against Azure's
+v1 API surface (`https://skill-bites.openai.azure.com/openai/v1/`, no `api-version` query param
+needed) before wiring anything in. RepoWise has no native "Azure OpenAI" embedder, but its generic
+`openai` embedder works unmodified against that v1 surface. Credentials live in `.repowise/.env`
+(gitignored, loaded automatically by `repowise mcp` before the MCP server starts, per its own
+`--help` text) -- **not** this project's own `.env`, and not `.mcp.json` (which is git-tracked;
+committing a secret there was never on the table). `repowise reindex --embedder openai` re-ran
+clean against all 171 pages. **Not yet live for this session's own MCP connection** -- the server
+only reads `.repowise/.env` at startup, so a running session keeps using the mock embedder until
+the MCP connection restarts. Also found, not yet fixed: `get_answer` still reports
+`degraded: no-llm-provider` -- retrieval works, prose synthesis does not, because `REPOWISE_
+PROVIDER` was never set. Separate scope from the embedder question that was actually asked;
+flagged rather than silently fixed with a guessed provider choice.
+
+**The `/build-task` model-switch mechanism was documented as reliable and is not.** CLAUDE.md
+claimed "the session returns to Sonnet on your next message" after `build-task.md`'s `model: opus`
+frontmatter expires. Verified false twice now: T18A's entire build ran on Opus because of exactly
+this (recorded in that checkpoint's own handoff.md), and T18B's build very nearly did too --this
+session was still on Opus when the plan was approved, and only proceeded on Sonnet because the user
+caught it and typed `/model sonnet` by hand before approving. The real, observed behavior: an
+explicit `/model` call earlier in a session pins the model, and nothing in the harness un-pins it
+automatically once a command's own turn-scoped override expires. **Rejected:** continuing to assert
+the false claim and hoping it holds next time. **Landed:** CLAUDE.md's "Which model runs what" and
+`build-task.md`'s closing instruction both now state the real behavior and make a self-check
+mandatory -- read the current-model line from the turn's own system info immediately after plan
+approval, before any `Write`/`Edit`/`Bash`, and refuse to proceed if it isn't Sonnet. This is not a
+technical enforcement (no hook can see which model is active); it is a documented, load-bearing
+discipline replacing a documented, false assumption.
