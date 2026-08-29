@@ -3,7 +3,8 @@
 **Overwritten completely at every `/checkpoint`.** This file describes *now*, never history.
 History lives in `decisionlog.md`.
 
-_Last updated: 2026-08-29 · after T18C (the broadened block library)_
+_Last updated: 2026-08-29 · after T18C (the broadened block library), plus a real render run
+immediately afterward that found and fixed one more real bug (D119)_
 
 ---
 
@@ -93,15 +94,20 @@ git branch --show-current                                                    # f
 PYTHONPATH=. .venv/Scripts/python.exe cli.py                  # prompts for a topic, runs standalone
 ```
 
-**`pytest -m local_live` (the real-render `BlockType x Tier` sweep) was NOT run this checkpoint.**
-The new block types were verified via standalone `hyperframes check --json` runs against
-hand-composed scenes (real toolchain, real findings caught and fixed — D114, D115), but never
-through the actual `render_segment`/`PlaywrightHyperFramesRenderBackend` path the `local_live`
-suite exercises. Run this before trusting the new blocks in a real render, the same trust-gap
-shape D110 already left open once (see below — that one is *still* open too).
+**A real `cli.py` render WAS run and watched immediately after this checkpoint** ("how TCP's
+three-way handshake establishes a connection", 90s target) — see decisionlog D119. Confirmed
+working: D110's caption fix (finally watched, after two checkpoints carrying it forward
+unverified), `SEQUENCE_DIAGRAM`, `GRAPH_DIAGRAM` in its `GRAPH` mode, both `CURSOR`/`CHECK`
+annotations, `SPLIT_HORIZONTAL` — all got real, unprompted use from one topic. Found and fixed: a
+real `SEQUENCE_DIAGRAM`/`TIMELINE` entrance-timing bug (D119). Found and NOT yet fixed: a
+`GRAPH_DIAGRAM` node-overlap bug in compact/`SPLIT_HORIZONTAL` canvases (D119, root cause traced,
+needs a real design pass).
 
-**No real end-to-end `cli.py` render was watched this checkpoint either.** Same caveat as above,
-compounded: two separate real-render verifications are now owed, not one.
+**`pytest -m local_live` (the real-render `BlockType x Tier` sweep) still has NOT been run.** The
+one real render above exercised 5 of 9 block types (title, sequence_diagram, graph_diagram,
+text_panel, plus annotations) — `array_grid`, `code_diff`, `timeline`, `graph_diagram`'s `CHAIN`
+mode, and the `warning` annotation type are still unverified against any real render, only against
+standalone `hyperframes check` probes (D114, D115).
 
 ## Environment state
 
@@ -118,23 +124,34 @@ compounded: two separate real-render verifications are now owed, not one.
 
 ## Before the next session
 
-**Three real things to do, none code-blocking but all trust-blocking, in the order they'd
-naturally get checked:**
-
-1. **D110's caption fix (from T18B) still has not been watched in a real render.** Carried
-   forward unresolved for a second checkpoint now — this file said the same thing after T18B and
-   nothing since has watched a real render to confirm captions actually read as movie-style rather
-   than trusting the description.
-2. **T18C's new blocks have not been through a real render either** — see "Verify at any time"
-   above. `pytest -m local_live` first (fast, no cost), then a real `cli.py` topic that would
-   plausibly reach for the new blocks (a protocol/handshake topic naturally invites
-   `SEQUENCE_DIAGRAM`; an algorithm with a graph or tree naturally invites `GRAPH_DIAGRAM`'s
-   `GRAPH` mode), watched via extracted frames the way D109 did for T18B.
-3. **Merge `feature/scene-composition` back to `dev`** once the above two are done — still not
+1. **`GRAPH_DIAGRAM`'s node-overlap bug in compact canvases (D119) needs a real design pass**,
+   not the one-line fix D119's other finding got. The circular auto-layout fallback assumes a
+   square canvas; a `SPLIT_HORIZONTAL` panel's compact graph canvas is short and wide. Options
+   worth weighing: an aspect-ratio-aware layout formula (ellipse instead of circle, scaled to the
+   canvas's real width:height ratio), a real collision-avoidance pass, or a simpler cap (fewer
+   nodes allowed in `GRAPH` mode when paired in `SPLIT_HORIZONTAL`).
+2. **`pytest -m local_live` still has not been run** — see "Verify at any time" above for exactly
+   which block types that would newly cover (`array_grid`, `code_diff`, `timeline`, `graph_diagram`
+   `CHAIN` mode, the `warning` annotation).
+3. **Merge `feature/scene-composition` back to `dev`** once the above are done — still not
    automatic as part of any checkpoint, per the same standing note this file has carried since
-   T18B.
+   T18B. D110's caption fix is now finally confirmed (D119), so that blocker is cleared; the
+   `GRAPH_DIAGRAM` overlap bug is a new one in its place.
 
 ## Known gaps and open questions
+
+**New since this checkpoint (D119, from the real render):**
+- **`GRAPH_DIAGRAM`'s circular auto-layout fallback overlaps nodes in a compact/`SPLIT_HORIZONTAL`
+  canvas** — confirmed live, root cause traced (square-canvas assumption against a short-wide real
+  container), not yet fixed. See "Before the next session" above.
+- **A short/generic block-type label can spuriously match the wrong position in real narration** —
+  the mechanism D119's `SEQUENCE_DIAGRAM`/`TIMELINE` fix addressed for those two block types is a
+  general risk anywhere `rendering/block_timing.py::resolve_item_starts` derives a timing anchor
+  from an item's own display text rather than an authored `anchor_phrase` — `graph_diagram`'s node
+  labels are the one remaining `_ITEM_FIELDS` case with no `anchor_phrase` alternative available
+  (nodes were never given one). Not proven to have bitten yet beyond the one node that resolved to
+  an oddly late fallback in this same render — worth a closer look if `graph_diagram` node timing
+  ever looks wrong in a future render.
 
 **New this checkpoint:**
 - **The SPLIT_HORIZONTAL "same panel" annotation restriction is prompt-only** — `rendering/

@@ -80,7 +80,9 @@
 {% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
   tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
 
-  const {{ prefix }}_eventStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+  {#- step_starts, not item_starts: each event carries its OWN authored anchor_phrase
+     (TimelineEvent.anchor_phrase) -- same D119 fix as sequence_diagram's messages. #}
+  const {{ prefix }}_eventStarts = [{% for s in step_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
 
   document.querySelectorAll("#{{ prefix }}-rail .blk-tl-marker").forEach((el, i) => {
     tl.fromTo(el, { scale: 0, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.35, ease: "power3.out" }, {{ prefix }}_eventStarts[i]);

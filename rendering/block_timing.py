@@ -24,21 +24,29 @@ from rendering.anchors import derive_item_anchors, resolve_anchor
 _DEFAULT_ITEM_START = 0.75
 _DEFAULT_ITEM_STAGGER = 0.22
 
-# Field name, per block type, holding the list of item strings worth their own anchor. Block
-# types absent here either have no repeated items, or (array_grid, graph_diagram) carry each
-# step/traversal-point's own explicit anchor_phrase in its own schema instead of deriving one
-# from display text.
+# Field name, per block type, holding the list of item strings worth their own anchor, for block
+# types WITHOUT an authored anchor_phrase on each item -- text_panel's bullets and code_diff's
+# lines are bare text/no-anchor-field, graph_diagram's nodes have no anchor_phrase either (only
+# its separate traversal steps do). A block type whose items DO carry their own anchor_phrase
+# belongs in _STEP_FIELDS below instead, not here -- see D119's real-render finding: sequence_
+# diagram's messages and timeline's events were wired through here once, using SequenceMessage.
+# label/TimelineEvent.label (a short 2-5 word caption) as the match text instead of the field
+# authored specifically for narration timing, and a short label matched a spurious, out-of-order
+# position in a real narration ("SYN" landing after "SYN-ACK" was already visible).
 _ITEM_FIELDS: dict[str, str] = {
     "text_panel": "items",
     "graph_diagram": "nodes",
     "code_diff": "lines",
-    "sequence_diagram": "messages",
-    "timeline": "events",
 }
 
 # Block types whose own sub-events carry an authored anchor_phrase, resolved the same way
 # (one resolve_anchor call each) rather than derived from an item's display text.
-_STEP_FIELDS: dict[str, str] = {"array_grid": "steps", "graph_diagram": "traversal"}
+_STEP_FIELDS: dict[str, str] = {
+    "array_grid": "steps",
+    "graph_diagram": "traversal",
+    "sequence_diagram": "messages",
+    "timeline": "events",
+}
 
 
 def item_text(item: Any) -> str:

@@ -98,7 +98,11 @@
     tl.fromTo(el, { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.out" }, {{ entrance_start + 0.6 }});
   });
 
-  const {{ prefix }}_msgStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+  {#- step_starts, not item_starts: each message carries its OWN authored anchor_phrase
+     (SequenceMessage.anchor_phrase), resolved the same way array_grid's steps are -- a real-render
+     bug (D119) found messages entering out of narration order when this used to derive timing
+     from `label` text (a short arrow caption) instead. #}
+  const {{ prefix }}_msgStarts = [{% for s in step_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
   const {{ prefix }}_messages = [
     {% for msg in payload.messages %}
     { from: "{{ msg.from_id }}", to: "{{ msg.to_id }}" }{{ "," if not loop.last }}

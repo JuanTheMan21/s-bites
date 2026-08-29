@@ -2216,3 +2216,49 @@ further, testing the limits of what the render-time budget allows"). This checkp
 edit resolves the collision by merging the new performance item into that placeholder's scope rather
 than renaming either -- all three (vision loop, validation render, performance) are real future work
 with no scoping conversation yet, and none is promised for any particular future session.
+
+### D119 — A real render (post-checkpoint) found `SEQUENCE_DIAGRAM`/`TIMELINE` were resolving
+entrance timing from the wrong field; fixed. A second, distinct `GRAPH_DIAGRAM` layout issue found
+in the same render is confirmed but NOT fixed yet.
+
+Immediately after T18C's checkpoint, a real `cli.py` render ("how TCP's three-way handshake
+establishes a connection", 90s target, `RUNTIME_ENV=azure`) was run specifically because T18C's own
+new blocks had never been through a real render -- the trust-gap `handoff.md` flagged explicitly.
+Frames extracted and watched directly (matching D109's own method), not just duration-asserted.
+
+**Confirmed working:** D110's caption fix (still carried forward from T18B, also never watched
+until now) -- captions appear as one unit and clear cleanly between cues, confirmed across two
+frames in the same segment. `SEQUENCE_DIAGRAM`, `GRAPH_DIAGRAM` (in its `GRAPH` mode, not the
+simpler `CHAIN` mode -- the plan chose the harder case on its own), both `CURSOR` and `CHECK`
+annotations, and a `SPLIT_HORIZONTAL` layout all got real, unprompted use from a single topic.
+
+**A real bug found and fixed:** `SEQUENCE_DIAGRAM`'s messages and `TIMELINE`'s events both carry
+their own authored `anchor_phrase` field (`core/block_schemas_sequence.py`), added specifically for
+narration-anchored timing -- but `rendering/block_timing.py` had them registered in `_ITEM_FIELDS`
+(deriving a timing anchor from each item's own `label` text) rather than `_STEP_FIELDS` (using the
+authored `anchor_phrase` directly), the same mistake `array_grid`'s steps and `graph_diagram`'s
+traversal points do NOT make. The real render's frames showed it directly: the sequence diagram's
+first message ("SYN") visibly entered AFTER its second ("SYN-ACK"), because the bare label "SYN" is
+also a substring of spoken "SYN-ACK," and the narration mentioned "SYN-ACK" (as its own full label
+match) before the standalone "SYN" mention resolved. **Landed:** moved both block types from
+`_ITEM_FIELDS` to `_STEP_FIELDS` and updated both templates' script macros to read `step_starts`
+instead of `item_starts` -- verified against a reconstructed narration reproducing the exact
+ambiguity (a repeated bare "syn" token), producing correctly monotonic entrance times where the old
+path did not. Re-verified against the real `hyperframes check` toolchain (still clean) and the full
+offline suite (still green) after the fix.
+
+**Confirmed but NOT fixed, flagged for a future session:** the same render's `GRAPH_DIAGRAM` (GRAPH
+mode, `SPLIT_HORIZONTAL`'s compact panel) showed two of five nodes visually overlapping, plus an
+edge line running off-frame. Root cause traced, not guessed: the circular auto-layout fallback
+(`0.5 + 0.4*cos/sin(angle)`, `rendering/templates/_block_graph_diagram.html`) treats the canvas as
+if it were square, but a compact `SPLIT_HORIZONTAL` panel's graph canvas is short and wide (`220px`
+tall against ~700-800px wide) -- two adjacent nodes on the circle can land at very different X but
+close-enough Y that their (auto-sized, ~100-150px-tall) bounding boxes collide in the short
+dimension even though their fractional position differs correctly. A fifth node's item_starts also
+resolved to a fallback timestamp (27.7s) that plausibly falls outside its own segment's actual
+on-screen duration, from the same underlying risk D119's fix above addresses for a different block
+type -- worth checking whether `graph_diagram`'s own node labels have the same short/generic-token
+collision risk `sequence_diagram`'s did. **Not fixed here** -- this needs either an aspect-ratio-
+aware layout formula or a real collision-avoidance pass, a genuine design question rather than a
+one-line field-mapping fix, and deserves its own look rather than a rushed change appended to an
+already-large checkpoint's aftermath.
