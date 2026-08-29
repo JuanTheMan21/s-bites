@@ -45,3 +45,13 @@ later work, and pulling their scope forward is how iterations slip.
 
 **Stop after presenting the plan.** The user will approve it, then switch to a smaller model for
 the build. That model reads the plan, not this conversation, so the plan must stand on its own.
+
+**Do not trust the model to switch itself.** This has shipped a real build on Opus twice already
+(T18A entirely, T18B until the user caught it) — the harness does not reliably revert to Sonnet
+just because this command's own `model: opus` frontmatter only applies to this one turn; a session
+already pinned to a specific model by an explicit `/model` call stays pinned. So: the moment the
+plan is approved, **before making any `Write`/`Edit`/`Bash` call**, check your own current-model
+line from this turn's system info. If it is not Sonnet, stop immediately and tell the user plainly
+which model you are on and that `/model sonnet` needs to run first. Do not begin the build on the
+wrong model "just this once" — CLAUDE.md's "Which model runs what" section is the durable version
+of this rule; this is the reminder at the exact moment it matters.

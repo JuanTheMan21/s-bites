@@ -99,9 +99,10 @@ Work proceeds task by task from `tasks.md`, one task per session:
 
 ### Which model runs what
 
-**Opus plans. Sonnet builds and reviews.** Configured, not remembered — the previous version of this
-file asked you to type `/model sonnet` at step 2, and a step you have to remember is a step that
-gets skipped.
+**Opus plans. Sonnet builds and reviews.** Configured as a default, but **not self-enforcing** —
+this has now shipped a real build on the wrong model twice (T18A entirely, and T18B until the user
+caught it and typed `/model sonnet` by hand). Do not trust the mechanism below to switch itself;
+treat the check as mandatory instead.
 
 | Where | Setting | Covers |
 |---|---|---|
@@ -109,10 +110,20 @@ gets skipped.
 | `.claude/commands/build-task.md` | `model: opus` | Planning |
 | `.claude/agents/*.md` | `model: sonnet` | `project-reviewer`, `adapter-parity` |
 
-**The `/build-task` override lasts for that turn only** — the session returns to Sonnet on your next
-message. That covers loading context and drafting the plan, which is the expensive thinking. If a
-plan needs a longer back-and-forth, type `/model opus` first (that persists) and `/model sonnet`
-before building.
+**What is actually true, verified by repeated failure, not assumed:** a command's `model:`
+frontmatter is a per-invocation override, but if the session's model was already pinned by an
+explicit user `/model` call (at session start, or mid-conversation for a longer planning
+back-and-forth) before or during that command, nothing automatically un-pins it afterward. "The
+session returns to Sonnet on your next message" is not something to rely on — verify it instead.
+
+**Mandatory self-check, every time, right after a plan is approved and before the first `Write`/
+`Edit`/`Bash` of the build phase**: read your own current-model line from this turn's system info.
+If it does not say Sonnet, **stop before touching any file** and tell the user plainly which model
+you are on and that they need to run `/model sonnet` — do not proceed "just this once," and do not
+assume a prior `/model sonnet` earlier in the conversation still holds if anything (a nested
+plan-mode re-entry, a resumed session) could have changed it since. This is not optional caution;
+it is the only real enforcement that exists, since nothing in the harness blocks a build from
+running on the wrong model on its own.
 
 **Read `handoff.md` first in any session.** It holds current state. `decisionlog.md` holds history
 and the reasoning behind past choices — consult it before revisiting a settled decision.
