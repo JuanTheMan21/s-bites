@@ -54,6 +54,27 @@ grep -rE "langgraph" core/ --include=*.py | grep -v "^core/graph/"           # m
 - Retry, backoff, and rate limiting live in **adapters**, never in `core/`.
 - Type hints on every public function. Pydantic models for anything crossing a boundary.
 
+### Working with the quality hooks, not against them
+
+Every `Write`/`Edit` to a `.py` file triggers a `PostToolUse` hook (`scripts/hook_py_quality.py`)
+that runs `ruff check --fix` and `ruff format` immediately, automatically. This is deliberate and
+should stay on — it is what keeps the codebase clean without anyone remembering to run it — but it
+has two consequences worth knowing before they cost a retry:
+
+- **An import added in one tool call and used only in a later one gets silently stripped before
+  that later call ever happens.** Add an import in the *same* `Write`/`Edit` as its first real
+  usage, never split across edits.
+- **A file the hook just reformatted can make your next `Edit`'s `old_string` stop matching** —
+  whitespace/import-order changes you didn't ask for. Treat any file a hook touched as stale:
+  re-read it (or trust the `PostToolUse hook additional context` notice you're given) before
+  editing that region again, rather than reusing a string you composed before the hook ran. For a
+  new file with several imports and their first usages arriving together, prefer one `Write` with
+  the complete content over several incremental `Edit`s.
+
+If you find yourself fighting this by shelling out to `sed`/`Bash` to bypass the hook, that is a
+sign the edit should have been one larger `Write` instead of several small `Edit`s — not a reason
+to route around the hook itself.
+
 ## Invariants that break the product if violated
 
 1. **TTS runs before scene authoring.** Scene timing derives from *measured* `duration_ms`, never
