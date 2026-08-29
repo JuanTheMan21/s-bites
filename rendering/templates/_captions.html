@@ -1,22 +1,27 @@
 {#
-  T18B: movie-style captions -- one cue on screen at a time, showing at its own start and
-  clearing the instant the next cue begins, using ``mux/caption_cues.py``'s grouping (shared
-  with the ``.srt`` sidecar so the two can never disagree about where a cue starts or ends).
-  Before this, every word ever shown stayed on screen for the rest of the scene, so captions
-  grew into an unreadable wall of text -- the exact bug this replaces.
+  T18B: movie-style captions -- one cue (1-2 lines) on screen at a time, appearing all at once at
+  its own start and clearing the instant the next cue begins, using ``mux/caption_cues.py``'s
+  grouping (shared with the ``.srt`` sidecar so the two can never disagree about where a cue
+  starts or ends). Before this, every word ever shown stayed on screen for the rest of the scene,
+  so captions grew into an unreadable wall of text -- the exact bug this replaces.
 
-  Within a cue, the same word-by-word-scalar ink mechanic as before (each word lights up at its
-  own real `offset_ms`) is kept -- only the across-cue accumulation is gone.
+  A cue's words are NOT inked in one at a time. An earlier version kept a per-word karaoke-style
+  reveal inside each cue (each word dimmed until its own real `offset_ms`) -- found, after a real
+  render, to still read as "appearing word by word" even though the wall-of-text bug was fixed;
+  the whole point of a movie-style caption is that a line (or two) appears as one unit. Every word
+  in a cue is at full color from the moment the cue itself becomes visible.
 
   captions_markup(prefix, cues, duration_sec) -- one hidden div per cue, each holding its own
-    word spans, ids namespaced "{prefix}-cap-{cue index}-{word index}" so two cues' words never
-    collide.
-  captions_script(prefix, cues, duration_sec) -- shows each cue's div at its own start, hides it
-    the instant the next cue's starts (or at its own end, for the last cue); inks each word
-    within its cue at its real offset.
+    word spans (kept individually addressable for future styling, not for per-word animation),
+    ids namespaced "{prefix}-cap-{cue index}-{word index}" so two cues' words never collide.
+  captions_script(prefix, cues, duration_sec) -- shows each cue's div, instantly, at its own
+    start; hides it, instantly, the moment the next cue's starts (or at its own end, for the
+    last cue). No per-word timing left to get wrong.
 
   Sits inside `hyperframes check --caption-zone`'s default guard band (bottom ~18% of the frame)
-  by construction, same as before -- pinned to the bottom of #root with a fixed inset.
+  by construction -- pinned to the bottom of #root with a fixed inset. That guard is about the
+  caption band's OWN position, not about content elsewhere on screen growing into it -- see
+  tasks.md's T18C entry for the follow-up this doesn't cover.
 #}
 
 {% macro captions_markup(prefix, cues, duration_sec) %}
@@ -63,9 +68,7 @@
     letter-spacing: 0.02em;
   }
   .{{ prefix }}-cap-word {
-    color: var(--fg-muted);
-    opacity: 0;
-    will-change: opacity, color;
+    color: var(--fg);
   }
 </style>
 {% endmacro %}
@@ -75,31 +78,13 @@
     var cueEls = document.querySelectorAll("#{{ prefix }}-captions .{{ prefix }}-cue");
     var cueStarts = [{% for cue in cues %}{{ cue.start_ms / 1000 }}{{ "," if not loop.last }}{% endfor %}];
     var cueEnds = [{% for cue in cues %}{{ cue.end_ms / 1000 }}{{ "," if not loop.last }}{% endfor %}];
-    // Clear-and-replace: cue c shows at its own start and holds until the NEXT cue's start (or,
-    // for the last cue, its own end) -- never two cues visible at once. The old version simply
-    // never hid a word once shown; this is the fix.
+    // Clear-and-replace, movie style: cue c appears all at once (no per-word stagger) at its own
+    // start, and holds until the NEXT cue's start (or, for the last cue, its own end) -- never
+    // two cues visible at once, and never one word lit before its neighbours.
     cueEls.forEach(function (el, i) {
       var hideAt = i + 1 < cueEls.length ? cueStarts[i + 1] : cueEnds[i];
       tl.set(el, { opacity: 1 }, cueStarts[i]);
       tl.set(el, { opacity: 0 }, hideAt);
     });
   })();
-
-  {% for cue in cues %}
-  {% set cue_idx = loop.index0 %}
-  {% for word in cue.words %}
-  tl.fromTo(
-    "#{{ prefix }}-cap-{{ cue_idx }}-{{ loop.index0 }}",
-    { opacity: 0 },
-    { opacity: 1, duration: 0.15, ease: "power1.out" },
-    {{ word.offset_ms / 1000 }},
-  );
-  tl.fromTo(
-    "#{{ prefix }}-cap-{{ cue_idx }}-{{ loop.index0 }}",
-    { color: "var(--fg-muted)" },
-    { color: "var(--fg)", duration: 0.15, ease: "power1.out" },
-    {{ word.offset_ms / 1000 }},
-  );
-  {% endfor %}
-  {% endfor %}
 {% endmacro %}

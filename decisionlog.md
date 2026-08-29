@@ -1876,3 +1876,46 @@ for whichever future session next tunes the pack against more real output, not a
 **Also discovered and fixed in passing**: the real run's first attempt failed outright with
 `SkillPackNotFound: 'visual-plan'` -- see D107, the Blob-registry drift that made this necessary
 before any real `RUNTIME_ENV=azure` render of T18B's work was possible at all.
+
+### D110 — Captions are movie-style at the cue level only after removing the per-word ink; the
+old karaoke reveal survived D106's own fix without being noticed as still-wrong
+
+**The trigger.** The user watched a description of the real render and asked directly whether
+"subs appearing word by word" was actually fixed. It was not, fully: D106's fix (this checkpoint's
+own predecessor) corrected the *wall-of-text* bug -- a cue now clears the instant the next one
+starts -- but kept "the same word-by-word-scalar ink mechanic as before" *inside* each cue on
+purpose, carried forward from the pre-T18B captions rather than questioned. Each word still
+dimmed until its own real `offset_ms`, so a cue still visibly assembled itself one word at a time
+even though it now correctly cleared afterward. Two different bugs, wearing the same symptom --
+fixing the accumulation did not fix the reveal style, and nothing forced a second look at the part
+that was "kept" rather than "changed."
+
+**Rejected:** leaving the per-word ink in place on the reasoning that it is a real, working
+mechanic that D106 already verified. **Reasoning:** a viewer does not experience "the wall-of-text
+bug is fixed" and "the reveal style is still word-by-word" as two separate facts -- both read as
+"the captions come in one word at a time," which is the complaint. Movie-style means a line (or
+the ~8-word cue this project already groups by) appears as one unit; that is a property of the
+*reveal*, not just of *retention*.
+
+**Landed:** `rendering/templates/_captions.html`'s `captions_script` macro no longer emits any
+per-word tween -- the cue-level `tl.set(el, {opacity:1}, cueStarts[i])` (already instant, already
+correct) is now the *only* animation, so every word in a cue is at full color the instant the cue
+appears. `captions_markup`'s per-word `<span>`s and their ids are kept (individually addressable,
+matches the existing id-collision regression test's expectations) but their CSS no longer carries
+an initial dimmed/transparent state -- there is nothing left to tween.
+
+**Verification gap, explicit not silent:** the user asked that this checkpoint run no further
+tests. `pytest`/`ruff`/the boundary greps/`project-reviewer` were **not re-run** after this fix,
+by explicit instruction -- a deliberate, narrower exception to this project's normal checkpoint
+gate, not an oversight. The change itself is small and easy to reason about statically (two `tl.
+fromTo` blocks and three CSS declarations removed, nothing else touched), but it has not been
+verified against the real toolchain the way every other T18B change in this checkpoint was.
+**Whoever next touches `_captions.html`, or runs the next real render, should confirm this by
+actually watching one** rather than assuming it from this entry alone.
+
+**Also flagged for T18C**, not fixed here: the caption band's own position is verified (
+`hyperframes check --caption-zone`, by construction), but nothing checks whether a *block's*
+content grows down into that same zone -- a real, not yet realized, risk once T18C's denser
+blocks (`SEQUENCE_DIAGRAM` lanes, a `TIMELINE` row, a long `CODE_DIFF`) exist. Recorded in
+`tasks.md`'s T18C entry directly, at the user's explicit request, rather than left to be
+rediscovered live the way the id-collision and static-CSS-transform bugs in D106 were.

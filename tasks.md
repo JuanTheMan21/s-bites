@@ -407,6 +407,16 @@ gets asked for, each new block earning its place the way D30 required of the ori
 - **Validation:** a full 7-minute render across 2-3 genuinely different topic types (algorithmic,
   systems/protocol, security) — where D104's original "one real full-length render" promise
   properly lands, against content that will actually show the payoff T18B's foundation bought.
+- **Caption/content overlap is currently unchecked, not just unlikely.** `_captions.html`'s band
+  sits inside `hyperframes check --caption-zone`'s guard by construction (a fixed bottom inset),
+  but that guard only ever verified the band's *own* position — nothing checks whether a block's
+  *content* grows down into that same zone. `SINGLE`/`SPLIT_HORIZONTAL`'s `#stage` padding leaves
+  the same rough margin captions already occupy, so this hasn't bitten yet, but T18C's own new
+  blocks are denser (`SEQUENCE_DIAGRAM`'s lanes, `TIMELINE`'s event row, `CODE_DIFF` against a
+  long file) and more likely to reach the bottom of the frame than T18B's six. Actively check this
+  — `npx hyperframes check --caption-zone` against every new block, not just trust the fixed
+  inset — before shipping any of them, and prefer a block design that reserves its own bottom
+  margin over one that merely hasn't overflowed yet in the fixtures anyone happened to try.
 
 **Also in scope, cheap given T18B's foundation:** fixing `tests/test_graph_pipeline_live.py`'s
 mixed-tier test (D107) — needs a real segment-shape redesign, a natural fit alongside other live-
