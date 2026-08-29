@@ -2031,3 +2031,188 @@ mandatory -- read the current-model line from the turn's own system info immedia
 approval, before any `Write`/`Edit`/`Bash`, and refuse to proceed if it isn't Sonnet. This is not a
 technical enforcement (no hook can see which model is active); it is a documented, load-bearing
 discipline replacing a documented, false assumption.
+
+## 2026-08-29 · T18C — The broadened block library (block-library slice only)
+
+`tasks.md`'s T18C entry scoped a much larger session than what shipped: six block-library items, a
+vision critique/revision loop, and a full 7-minute validation render. Scoped down in planning, on
+the user's agreement, to the block library alone (plus two related pre-existing gaps this session's
+own research surfaced) -- the vision loop and validation render become a future task. Full reasoning
+for each individual decision below.
+
+### D113 — `DIAGRAM_CHAIN` is retired, not kept alongside `GRAPH_DIAGRAM`
+
+**Landed:** `BlockType.DIAGRAM_CHAIN` is deleted outright -- the enum member, its template, its
+schema, every `ALLOWED_BLOCKS`/test/fixture reference. `GRAPH_DIAGRAM` (`core/block_schemas_graph.py`,
+`rendering/templates/_block_graph_diagram.html`) replaces it with two layout modes: `CHAIN`
+reproduces the retired block's single straight rail exactly (a direct port of its entrance/rail-draw
+choreography), `GRAPH` places nodes on a real 2D canvas for arbitrary topology, with a traveler-dot
+traversal highlight (straight-line hops, not a curved path -- the vendored `gsap.min.js` was
+confirmed not to bundle `MotionPathPlugin` before committing to this, `grep -i motionpath` came back
+empty).
+
+**Rejected:** keeping `DIAGRAM_CHAIN` alongside `GRAPH_DIAGRAM` as a separate, simpler block for the
+common linear case, retiring nothing. Lower engineering risk (fewer registration points touched, no
+re-verification that the linear case still renders identically), but leaves two block types with
+overlapping capability, and `tasks.md`'s own T18C scoping already called for the absorption
+explicitly ("`diagram_chain`'s existing linear-rail mode absorbs into this as one of its layouts, not
+a separate block").
+
+**Reasoning:** matches T18B's own precedent (retiring the six old whole-scene templates rather than
+carrying them alongside the new compositional blocks) and the project's stated aversion to
+carrying duplicate capability. The user chose this over the coexistence option directly when asked
+during planning.
+
+### D114 — `ARRAY_GRID` is generalized via a breaking rename, not a parallel legacy field
+
+**Landed:** `ArrayEliminationStep` is renamed `ArrayStep` and gains `op` (`narrow`/`shift`/`push`/
+`pop`) and `end_operation` (an optional `+`/`-` badge); `ArrayGridSlots` gains `orientation`. Every
+consumer was updated in the same pass -- `tests/block_examples.py`'s fixture, the skill-pack
+guidance bullet, the template's script macro -- rather than adding the new fields as optional with
+defaults (Azure strict mode forbids defaulted/optional fields outright, so "additive and backward
+compatible" was never actually available as an option here).
+
+**A real bug in this generalization was found by `project-reviewer` at the FINAL checkpoint review
+gate, after the offline suite was already green.** The new coverage test's own `shift` fixture
+(`tests/test_array_grid_and_graph_modes.py`) started from the array's default full-width active
+range and shifted to a *narrower* one -- numerically valid, but it meant the template's `enter()`
+loop (`prevEnd..step.end`, SHIFT's whole reason for existing as distinct from `narrow`) never ran a
+single iteration, so the "new cell enters as the window advances" code path had zero coverage
+despite a test file whose entire stated purpose was covering exactly that. Fixed by prefixing the
+fixture with a real `narrow` step first, establishing a genuine sub-window before the `shift`
+translates it -- the same lesson D73/D82/D89 already recorded in different shapes: **passing an
+offline test proves the fixture was well-formed, not that the fixture actually exercises the branch
+its own docstring claims to.**
+
+**Rejected:** validating `SHIFT`'s "must be a forward-advancing, width-preserving translation"
+constraint with a pydantic model validator. Considered and dropped for the same reason
+`ArrayEliminationStep`'s pre-T18C "the range only ever shrinks" constraint was never
+validator-enforced either -- only documented in the field's own description, the same convention
+this schema already used and this task chose not to reopen.
+
+### D115 — Annotations are a cross-cutting overlay, not a `BlockType`; two real positioning bugs found only by the real toolchain
+
+**Landed:** a new concept, not a new registration pattern -- `AnnotationType` (cursor/check/warning)
+targets a specific element *inside* an already-planned block (`core/scene_plan_schema.py::
+PlannedAnnotation`, `core/scene_schemas.py::ComposedAnnotation`) rather than filling its own
+`SceneLayout` region. No new LLM call: an annotation's only content (a short optional caption) comes
+from the same single `plan_visuals` call that already produces `PlannedBlock.role`'s free text --
+doubling the call count for something this small was rejected as disproportionate to D2/D29's "one
+call per genuinely separate decision" reasoning.
+
+**Rejected (the more conservative alternative, considered explicitly during planning):** modeling
+annotations as ordinary `BlockType`s occupying their own layout region. Simpler, zero new
+architecture, but cannot literally point at or overlay a specific element inside another block's
+content -- a real capability reduction from D105's own original framing ("shared, reusable...
+usable by any template rather than baked into one"). The user chose the more faithful, more novel
+overlay design when asked directly.
+
+**The render-time positioning mechanism** (`rendering/annotations.py`, `rendering/templates/
+_annotations.html`): every layout's GSAP timeline is built `paused: true` and never played during
+script evaluation, so `getBoundingClientRect()` inside the composition's own inline `<script>`
+always observes the same pristine, untransformed layout regardless of when in the script it runs --
+the same category of technique `diagram_chain`/`graph_diagram` already use (`getTotalLength()`
+measured once, baked into `strokeDasharray`), pointed at a foreign element instead of a block's own
+SVG. The delta between an annotation and its target is computed once and baked into a `tl.set(...)`
+at t=0; because the annotation renders as a DOM sibling inside its target's own container (`#stage`
+for SINGLE, `#<prefix>-region` for SPLIT_HORIZONTAL), that delta stays correct under every later
+transform (camera drift, panel idle-bob) both elements share.
+
+**Two real bugs in this mechanism were found only by this task's own Phase-0 real-toolchain spike,
+not by reasoning about the design** -- the same lesson D89/D106 already recorded for T17/T18B's
+templates, recurring here for a genuinely new rendering mechanism:
+1. `getBoundingClientRect()` returns viewport pixels, which do not equal this composition's own
+   1920x1080 CSS-pixel space whenever the capture harness renders at a different effective scale.
+   `hyperframes check`'s own `escaped_container` finding caught an annotation landing hundreds of
+   pixels outside `#root`. Fixed by normalizing every measured delta against `#root`'s own known
+   1920px width, measured live (`root.getBoundingClientRect().width / 1920`).
+2. The annotation wrapper `<div>`s had `position: absolute` with no explicit `top`/`left` -- their
+   untransformed base position was therefore wherever they naturally fell in the DOM flow (the last
+   flex child in a `flex-direction: column` container), not the container's origin the delta
+   calculation assumed. Fixed by adding explicit `top: 0; left: 0` to all three `.anno-*-wrap`
+   classes. Both bugs, and the fix, were verified by composing real scenes and running the actual
+   `hyperframes check --json` against them -- not merely reasoned through -- confirming `ok: true`,
+   zero findings, in both `SINGLE` and `SPLIT_HORIZONTAL` layouts before being trusted.
+
+An annotation caption legitimately overlapping the specific content it marks (`hyperframes check`'s
+`content_overlap` finding, real and expected) got the same `data-layout-allow-overlap` escape hatch
+D106 item 4 already established for `array_grid`'s intentional strike-through occlusion, rather than
+redesigning the layout to avoid a deliberate overlap.
+
+**Confirmed, not fixed:** the SPLIT_HORIZONTAL "same panel" restriction the skill-pack guidance
+states is prompt-only, with no code-level guard in `rendering/annotations.py`'s bounds check.
+`project-reviewer` confirmed this is not exploitable into a broken frame (an annotation's render
+container is always derived directly from its own target block, never assumed), so it was left as a
+narrative constraint rather than adding a redundant guard.
+
+### D116 — The caption/content-overlap fix, and `--caption-zone`'s finding needs no new assertion
+
+**A real, already-live bug, found by this session's own research, not by any new block:**
+`_captions.html`'s caption band occupies `y=926px` to `y=1016px` on the 1920x1080 canvas. Both
+layout templates' `#stage` used 2-value padding shorthand (`130px <side>px`, top=bottom), putting
+`#stage`'s own content-box bottom edge at `y=950px` -- **already 24px past the band's top edge**,
+before any block content even grew toward it. This predates T18C's new blocks entirely (present
+since T18B) and was simply never checked for. Fixed: 3-value padding shorthand
+(`130px <side>px 170px`) in both `_layout_single.html` and `_layout_split_horizontal.html`, clearing
+the band with a real margin (content-box bottom edge -> `y=910px`).
+
+**`hyperframes check --caption-zone`'s finding folds into the SAME `layout` category the existing
+test already asserts `errorCount == 0` on -- confirmed empirically, not assumed.** Real
+`check --json --caption-zone ...` runs against hand-composed scenes (including a deliberately
+overflowing one, 16 sequence-diagram messages) never produced a separate top-level JSON key; a
+caption-zone collision would surface as a `layout` finding alongside `canvas_overflow`/
+`content_overlap`/etc. **Rejected:** writing a new assertion against a guessed key name (the plan's
+own Phase-0 item explicitly flagged this as something to confirm empirically rather than assume).
+The actual fix in `tests/test_render_segment_live.py::_run_check` is one flag added to an existing
+subprocess call -- no new assertion needed, since the flag's findings are already covered by the
+`errorCount` check two lines below where it was added.
+
+### D117 — D107 closed: the mixed-tier live test's target tier set was unreachable for ANY input, not just the case it happened to use
+
+D107 (recorded at T18B's checkpoint) found `tests/test_graph_pipeline_live.py`'s mixed-tier test
+unsatisfiable at its then-current `FRAME_BUDGET`, and guessed the fix needed "a third segment or a
+different importance pairing." Worked out fully this session, by hand, against
+`core/tier_resolver.py`'s real constants: **`{Tier.STATIC, Tier.ANIMATED}` is unreachable at any
+safe (crossfade-floor-respecting) duration, for any segment count or importance pairing whatsoever**
+-- `REVEAL_FRAME_COST` is a flat `+7` over `STATIC` regardless of duration, while `ANIMATED`'s cost
+is duration-scaled and always far larger at a safe duration, so a segment that fails `REVEAL`
+promotion never leaves enough remaining budget for another segment to reach `ANIMATED`. No segment
+count or pairing changes that arithmetic.
+
+**Landed:** retargeted to `{Tier.REVEAL, Tier.ANIMATED}` instead -- genuinely reachable (minimum
+budget 56, derived by hand from the same two-segment ASIDE+CRITICAL setup already in the test), and
+still exercises the test's actual point, a real two-clip crossfade concat. `FRAME_BUDGET` raised
+55 -> 80; unlike the old target, there is no upper bound to stay under (`ASIDE` can never be promoted
+past `REVEAL` no matter how large the budget grows), so 80 is simply "comfortably above 56," not a
+new fragile boundary. The test's own stale docstring (claiming `DEFAULT_TRANSITION_S` is 1.0s when
+the real constant is 0.5s) was corrected in the same pass.
+
+**Rejected:** chasing a `{STATIC, ANIMATED}` split by tuning a segment to a near-floor duration
+(~500-600ms) where the arithmetic technically closes. Explicitly avoided -- this is the exact
+fragile boundary a different test's own docstring already names as historically flaky ("a duration
+right at that boundary made the one crossfade transition too tight to render reliably").
+
+### D118 — Vision critique loop, full validation render, and a new "faster rendering" request all deferred to a future T18D
+
+Two things were pushed out of this session's scope, both raised as scope questions during planning
+rather than silently absorbed or silently dropped:
+
+**The vision critique/revision loop and the full 7-minute validation render** (both originally part
+of `tasks.md`'s T18C entry) -- deferred on the same reasoning D104 used to split compositional scenes
+out of T18A: each is a substantial, independent axis of work (an `LLMProvider` image-input interface
+change plus real Azure/local adapter parity, in the first case) that deserves its own scoping and
+measurement pass, not a guess bolted onto an already-large block-library session.
+
+**A new request, raised mid-planning: "make video making faster."** Not yet scoped to any specific
+target (render throughput, LLM/TTS call latency, or overall wall-clock were all named as
+possibilities, none chosen). Deferred for the same reason -- performance work needs its own
+measurement pass, the same discipline D16/D99's own history argues for (a wrong measurement, once
+written into a constant, propagates unquestioned across sessions until someone re-derives it from
+first principles).
+
+**Both land in a new task, and the user's own name for it is "T18D."** `tasks.md`'s T18C entry
+already used "T18D" as a placeholder name for a different, unscoped idea ("push LLM compositionality
+further, testing the limits of what the render-time budget allows"). This checkpoint's `tasks.md`
+edit resolves the collision by merging the new performance item into that placeholder's scope rather
+than renaming either -- all three (vision loop, validation render, performance) are real future work
+with no scoping conversation yet, and none is promised for any particular future session.

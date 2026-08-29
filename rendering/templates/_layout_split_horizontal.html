@@ -1,12 +1,18 @@
 {% import "_tokens.html" as tokens %}
 {% import "_captions.html" as captions %}
+{% import "_annotations.html" as annotations %}
 <!doctype html>
 <!--
   SceneLayout.SPLIT_HORIZONTAL -- exactly two blocks side by side. T18B's generic replacement
   for comparison.html's two-card split, generalised: the two panels can now hold any block type
   (usually two TEXT_PANEL blocks for a real comparison, but a code_panel next to a
-  diagram_chain composes just as well). Panels use the same 3D "book-open" entrance
+  graph_diagram composes just as well). Panels use the same 3D "book-open" entrance
   comparison.html proved, kept here rather than reinvented.
+
+  T18C: #stage's bottom padding grew from 130px to 170px, same reasoning as _layout_single.html's
+  own comment -- the caption band already overlapped the old padding by 24px before this fix.
+  Each block's own annotations render as siblings inside that block's OWN #<prefix>-region panel
+  div (never the other panel's), so an annotation always shares its target's own idle-bob phase.
 -->
 <html lang="en">
   <head>
@@ -26,7 +32,7 @@
         width: 100%;
         height: 100%;
         box-sizing: border-box;
-        padding: 130px 140px;
+        padding: 130px 140px 170px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -71,6 +77,10 @@
               {% import "_block_" ~ block.block_type ~ ".html" as blk %}
               <div class="split-panel" id="{{ block.prefix }}-region">
                 {{ blk.markup(block.prefix, block.payload, compact=true) }}
+                {% for annotation in block.annotations %}
+                {% import "_annotation_" ~ annotation.annotation_type ~ ".html" as ann_tpl %}
+                {{ ann_tpl.markup(annotation.prefix, annotation.caption) }}
+                {% endfor %}
               </div>
               {% endfor %}
             </div>
@@ -85,6 +95,7 @@
 
       {{ tokens.background_script('lh', duration_sec) }}
       {{ captions.captions_script('lh', cues, duration_sec) }}
+      {{ annotations.annotation_offset_script() }}
 
       // Scene-level camera drift (T18B), same technique as _layout_single.html.
       tl.fromTo(
@@ -113,6 +124,10 @@
       {% for block in blocks %}
       {% import "_block_" ~ block.block_type ~ ".html" as blk %}
       {{ blk.script(block.prefix, block.payload, block.entrance_start, block.item_starts, block.step_starts, duration_sec, compact=true) }}
+      {% for annotation in block.annotations %}
+      {% import "_annotation_" ~ annotation.annotation_type ~ ".html" as ann_tpl %}
+      {{ ann_tpl.script(annotation.prefix, annotation.caption, annotation.entrance_start, annotation.target_id, annotation.container_id) }}
+      {% endfor %}
       {% endfor %}
 
       // Counter-phase idle bob once both panels have settled -- opposite signs so the pair

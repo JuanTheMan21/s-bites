@@ -1,5 +1,6 @@
 {% import "_tokens.html" as tokens %}
 {% import "_captions.html" as captions %}
+{% import "_annotations.html" as annotations %}
 <!doctype html>
 <!--
   SceneLayout.SINGLE -- one block fills the frame. T18B's generic replacement for
@@ -7,6 +8,14 @@
   each of which is now a _block_*.html partial imported here by whichever block this segment's
   plan chose. #camera carries the scene-level drift; #stage is exactly what each old template's
   own #stage was.
+
+  T18C: #stage's bottom padding grew from 130px to 170px -- the old 130px left #stage's own
+  content-box bottom edge at y=950px on the 1920x1080 canvas, past the caption band's top edge
+  (y=926px, from _captions.html's bottom:64px+height:90px) by 24px, before any block content even
+  reached toward it. 170px clears it with a real margin (content-box bottom edge -> y=910px).
+  Also T18C: each block's own annotations (core.scene_schemas.ComposedAnnotation) render as
+  siblings inside #stage, immediately after that block's own markup/script -- see
+  rendering/annotations.py for why that placement is what keeps them seek-safe.
 -->
 <html lang="en">
   <head>
@@ -26,7 +35,7 @@
         width: 100%;
         height: 100%;
         box-sizing: border-box;
-        padding: 130px 170px;
+        padding: 130px 170px 170px;
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -50,6 +59,10 @@
             {% for block in blocks %}
             {% import "_block_" ~ block.block_type ~ ".html" as blk %}
             {{ blk.markup(block.prefix, block.payload, compact=false) }}
+            {% for annotation in block.annotations %}
+            {% import "_annotation_" ~ annotation.annotation_type ~ ".html" as ann_tpl %}
+            {{ ann_tpl.markup(annotation.prefix, annotation.caption) }}
+            {% endfor %}
             {% endfor %}
           </div>
         </div>
@@ -62,6 +75,7 @@
 
       {{ tokens.background_script('ls', duration_sec) }}
       {{ captions.captions_script('ls', cues, duration_sec) }}
+      {{ annotations.annotation_offset_script() }}
 
       // Scene-level camera drift (T18B): a slow, continuous scale+translate across the full
       // duration, independent of whichever block fills the frame -- attacks "reads like a
@@ -78,6 +92,10 @@
       {% for block in blocks %}
       {% import "_block_" ~ block.block_type ~ ".html" as blk %}
       {{ blk.script(block.prefix, block.payload, block.entrance_start, block.item_starts, block.step_starts, duration_sec, compact=false) }}
+      {% for annotation in block.annotations %}
+      {% import "_annotation_" ~ annotation.annotation_type ~ ".html" as ann_tpl %}
+      {{ ann_tpl.script(annotation.prefix, annotation.caption, annotation.entrance_start, annotation.target_id, annotation.container_id) }}
+      {% endfor %}
       {% endfor %}
 
       window.__timelines["layout-single"] = tl;

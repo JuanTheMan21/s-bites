@@ -1,6 +1,6 @@
 """T18A: measure real Tier-2 render throughput, and correct D16's frame budget.
 T18B: re-measures against a realistic *composite* scene under the new compositional mechanism
-(a SPLIT_HORIZONTAL scene with a CODE_PANEL and a DIAGRAM_CHAIN, plus the scene-level camera
+(a SPLIT_HORIZONTAL scene with a CODE_PANEL and a GRAPH_DIAGRAM, plus the scene-level camera
 drift every layout now carries) -- Phase 0 of T18B's plan: more DOM/SVG elements and a
 continuous camera tween plausibly cost more per frame than the old single-block templates did,
 and nothing had measured that before this script ran.
@@ -53,10 +53,10 @@ def main() -> None:
                 payload=EXAMPLES[BlockType.CODE_PANEL],
             ),
             ComposedBlock(
-                block_type=BlockType.DIAGRAM_CHAIN,
+                block_type=BlockType.GRAPH_DIAGRAM,
                 role="probe",
                 anchor_phrase=None,
-                payload=EXAMPLES[BlockType.DIAGRAM_CHAIN],
+                payload=EXAMPLES[BlockType.GRAPH_DIAGRAM],
             ),
         ],
         continues_previous=False,

@@ -18,7 +18,7 @@ from core.graph.nodes.structured_retry import generate_with_bounded_retries
 from core.graph.state import GraphState
 from core.models import Segment
 from core.scene_plan_schema import SegmentScenePlan, VideoScenePlan
-from core.scene_schemas import ComposedBlock, ComposedScene
+from core.scene_schemas import ComposedAnnotation, ComposedBlock, ComposedScene
 from interfaces import LLMProvider, SkillRegistry
 
 VISUAL_PLAN_PACK = "visual-plan"
@@ -28,6 +28,17 @@ VISUAL_PLAN_PACK = "visual-plan"
 _BLOCK_GUIDANCE = "\n".join(
     f"- {intent.value}: usually {', '.join(sorted(b.value for b in blocks))}"
     for intent, blocks in ALLOWED_BLOCKS.items()
+)
+
+# T18C: annotations are a separate, cross-cutting overlay concept, not a BlockType -- they don't
+# come from ALLOWED_BLOCKS, so their own guidance is a fixed prompt block rather than a table
+# built from an enum mapping.
+_ANNOTATION_GUIDANCE = (
+    "Use sparingly -- at most one or two annotations per scene, only where the narration is "
+    "genuinely pointing something out (a specific mistake, a completed step, something to "
+    "notice). Most scenes should have none at all. target_block_index must name a block THIS "
+    "segment's own plan includes, and for a SPLIT_HORIZONTAL scene must stay within the same "
+    "panel the annotation is about -- never a block in the other panel."
 )
 
 
@@ -76,6 +87,9 @@ def _build_prompt(step: str, segments: list[Segment]) -> str:
         )
     lines.append("## Typical blocks per outline intent (a hint, not a rule)")
     lines.append(_BLOCK_GUIDANCE)
+    lines.append("")
+    lines.append("## Annotations")
+    lines.append(_ANNOTATION_GUIDANCE)
     return "\n".join(lines)
 
 
@@ -127,6 +141,16 @@ async def plan_visuals(state: GraphState, runtime: Runtime[GraphContext]) -> dic
                         for b in segment_plan.blocks
                     ],
                     continues_previous=segment_plan.continues_previous,
+                    annotations=[
+                        ComposedAnnotation(
+                            annotation_type=a.annotation_type,
+                            target_block_index=a.target_block_index,
+                            target_item_index=a.target_item_index,
+                            anchor_phrase=a.anchor_phrase,
+                            caption=a.caption,
+                        )
+                        for a in segment_plan.annotations
+                    ],
                 )
         updated[segment.index] = segment.model_copy(update={"scene": scene.model_dump()})
 

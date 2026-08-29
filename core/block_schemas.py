@@ -6,9 +6,10 @@ _block_*.html``) turns that into markup. Roughly 100 output tokens against ~1500
 composition, and invalid markup becomes structurally impossible rather than something a repair
 loop catches most of the time.
 
-Renamed from ``core/slot_schemas.py`` (T18B): the schemas below are keyed by ``BlockType`` now,
-not ``VisualIntent`` -- a block is a fragment of a scene, filled by its own call
-(``core/graph/nodes/scene_author.py::fill_block``), not a whole scene chosen once per segment.
+T18C split the larger/newer block schemas into their own modules (``block_schemas_graph``,
+``block_schemas_array``, ``block_schemas_diff``, ``block_schemas_sequence``) once this file would
+have crossed the 200-line ceiling with all of them inline -- this file keeps the four small T18B
+originals plus the registry itself.
 
 Every schema here is an LLM-facing strict schema. Read ``core/strict_schema.py`` before adding
 one: no defaults, no length or range constraints, and optionality spelled as an explicit
@@ -22,6 +23,10 @@ whose content only makes sense revealed over time has no Tier 0 form.
 
 from pydantic import Field
 
+from core.block_schemas_array import ArrayGridSlots
+from core.block_schemas_diff import CodeDiffSlots
+from core.block_schemas_graph import GraphDiagramSlots
+from core.block_schemas_sequence import SequenceDiagramSlots, TimelineSlots
 from core.block_types import BlockType
 from core.strict_schema import StrictSchema
 
@@ -101,59 +106,6 @@ class CodePanelSlots(StrictSchema):
     )
 
 
-class DiagramNode(StrictSchema):
-    """One step in a chain diagram."""
-
-    label: str = Field(description="The step itself, two or three words.")
-    caption: str | None = Field(
-        description="A short clarifying line under the label, or null if the label is clear "
-        "on its own."
-    )
-
-
-class DiagramChainSlots(StrictSchema):
-    """An ordered process on one straight rail: a request path, an attack chain, a pipeline."""
-
-    headline: str = Field(description="What this chain shows. A short phrase.")
-    nodes: list[DiagramNode] = Field(
-        description="Three to five steps in order. The template draws the connecting rail "
-        "between them, so do not describe the connections as nodes of their own."
-    )
-
-
-class ArrayEliminationStep(StrictSchema):
-    """One moment where the array's active range narrows -- a binary search's midpoint check,
-    a sliding window closing in, a stack's items popping off one end."""
-
-    anchor_phrase: str = Field(
-        description="A short phrase copied VERBATIM from this segment's narration, marking the "
-        "moment this elimination happens."
-    )
-    remaining_start: int = Field(
-        description="Index (0-based) of the first cell still in play after this step."
-    )
-    remaining_end: int = Field(
-        description="Index (0-based, EXCLUSIVE -- one past the last cell still in play) after "
-        "this step. Must be strictly greater than remaining_start."
-    )
-
-
-class ArrayGridSlots(StrictSchema):
-    """A row of cells -- an array, a list, a search space -- optionally narrowing over time."""
-
-    headline: str = Field(description="What this array or list represents. A short phrase.")
-    cells: list[str] = Field(
-        description="The array's items, left to right, as short labels (a value, a name). "
-        "Keep to twelve or fewer so each cell stays readable at a glance."
-    )
-    steps: list[ArrayEliminationStep] = Field(
-        description="Zero or more moments, in narration order, where the range of cells still "
-        "in play narrows. Each step's remaining_start/remaining_end must be inside the "
-        "previous step's range (or the full array, for the first step) -- the range only ever "
-        "shrinks. Leave empty for a static array with nothing eliminated."
-    )
-
-
 # Every block type, its content schema. The coverage test over this mapping is what stops a
 # block from being added to the enum without a payload to fill -- a gap that would otherwise
 # surface at scene-authoring time, on one topic, minutes into a job.
@@ -162,8 +114,11 @@ BLOCK_SCHEMAS: dict[BlockType, type[StrictSchema]] = {
     BlockType.TEXT_PANEL: TextPanelSlots,
     BlockType.STAT_CALLOUT: StatCalloutSlots,
     BlockType.CODE_PANEL: CodePanelSlots,
-    BlockType.DIAGRAM_CHAIN: DiagramChainSlots,
     BlockType.ARRAY_GRID: ArrayGridSlots,
+    BlockType.GRAPH_DIAGRAM: GraphDiagramSlots,
+    BlockType.CODE_DIFF: CodeDiffSlots,
+    BlockType.SEQUENCE_DIAGRAM: SequenceDiagramSlots,
+    BlockType.TIMELINE: TimelineSlots,
 }
 
 

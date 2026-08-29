@@ -1,0 +1,46 @@
+{#
+  AnnotationType.WARNING -- T18C. No turnkey registry match for a purpose-built warning/danger
+  indicator (confirmed by this task's registry research) -- built from scratch, the same
+  effort/novelty class ARRAY_GRID was in T18B: a triangle/exclamation badge with a shake-and-
+  settle entrance.
+#}
+
+{% macro markup(prefix, caption) %}
+<div id="{{ prefix }}-anno" class="anno-warn-wrap">
+  <svg class="anno-warn-svg" viewBox="0 0 48 48">
+    <path class="anno-warn-tri" d="M24 4 L46 42 L2 42 Z"></path>
+    <text class="anno-warn-mark" x="24" y="34" text-anchor="middle">!</text>
+  </svg>
+  {% if caption %}
+  {#- data-layout-allow-overlap: see _annotation_check.html's identical comment. #}
+  <div class="anno-warn-caption" data-layout-allow-overlap>{{ caption }}</div>
+  {% endif %}
+</div>
+<style>
+  .anno-warn-wrap {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .anno-warn-svg { width: 48px; height: 48px; overflow: visible; }
+  .anno-warn-tri { fill: #d29922; stroke: var(--bg); stroke-width: 2; stroke-linejoin: round; }
+  .anno-warn-mark { font-family: "JetBrains Mono", "Courier New", monospace; font-size: 22px; font-weight: 700; fill: var(--bg); }
+  .anno-warn-caption { margin-top: 6px; font-size: 18px; font-weight: 600; color: #d29922; white-space: nowrap; }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, caption, entrance_start, target_id, container_id) %}
+  (function () {
+    var el = document.getElementById("{{ prefix }}-anno");
+    var off = hfAnnotationOffset("{{ target_id }}", "{{ container_id }}");
+    tl.set(el, { x: off.dx + off.w / 2 - 24, y: off.dy - 46, scale: 0, opacity: 0, rotate: -8, transformOrigin: "50% 100%" }, 0);
+    tl.to(el, { scale: 1, opacity: 1, duration: 0.25, ease: "power3.out" }, {{ entrance_start }});
+    tl.to(el, { rotate: 8, duration: 0.08, ease: "power1.inOut", yoyo: true, repeat: 3 }, {{ entrance_start + 0.25 }});
+    tl.set(el, { rotate: 0 }, {{ entrance_start + 0.57 }});
+  })();
+{% endmacro %}

@@ -1,0 +1,133 @@
+{#
+  BlockType.SEQUENCE_DIAGRAM -- T18C, new. Actors/lanes with messages passing between them over
+  time (a protocol/handshake/request-response exchange) -- a shape a node-graph represents badly,
+  since it is lane-and-time shaped rather than topology-shaped.
+
+  Lane headers are positioned by the same loop.index0/(n-1) single-fraction technique
+  diagram_chain (now GRAPH_DIAGRAM's CHAIN mode) already proved, applied to the X axis. Messages
+  are horizontal arrows, one per row, drawn via the same getTotalLength()/strokeDasharray
+  stroke-draw technique the rail segments already use -- a direct, explicit reuse, not a new
+  technique. This is the block most likely to grow tall and reach the caption band -- the
+  runtime skill pack caps actors/messages accordingly.
+#}
+
+{% macro markup(prefix, payload, compact=false) %}
+{% set n = payload.actors | length %}
+{% set m = payload.messages | length %}
+{% set row_h = 60 if compact else 90 %}
+{% set header_h = 70 if compact else 100 %}
+{% set vb_h = header_h + (m * row_h) + 20 %}
+<div id="{{ prefix }}-wrap" class="blk-seq-wrap">
+  <h1 id="{{ prefix }}-headline" class="blk-seq-headline">{{ payload.headline }}</h1>
+  <div id="{{ prefix }}-area" class="blk-seq-area" style="height: {{ vb_h }}px;">
+    <svg id="{{ prefix }}-svg" viewBox="0 0 1600 {{ vb_h }}" preserveAspectRatio="none">
+      {% for actor in payload.actors %}
+      {% set x = (loop.index0 / (n - 1) * 1600) if n > 1 else 800 %}
+      <line id="{{ prefix }}-life-{{ loop.index0 }}" class="blk-seq-lifeline" x1="{{ x }}" y1="{{ header_h }}" x2="{{ x }}" y2="{{ vb_h }}"></line>
+      {% endfor %}
+      {% for msg in payload.messages %}
+      <line id="{{ prefix }}-msg-{{ loop.index0 }}" class="blk-seq-arrow" x1="0" y1="0" x2="0" y2="0"></line>
+      {% endfor %}
+    </svg>
+    {% for actor in payload.actors %}
+    {% set pct = (loop.index0 / (n - 1) * 100) if n > 1 else 50 %}
+    <div class="blk-seq-lane-header" id="{{ prefix }}-lane-{{ loop.index0 }}" style="left: calc({{ pct }}% - {{ '70px' if compact else '90px' }});">
+      {{ actor.label }}
+    </div>
+    {% endfor %}
+    {% for msg in payload.messages %}
+    <div class="blk-seq-msg-label" id="{{ prefix }}-msg-label-{{ loop.index0 }}">{{ msg.label }}</div>
+    {% endfor %}
+  </div>
+</div>
+<style>
+  .blk-seq-wrap { width: 100%; display: flex; flex-direction: column; }
+  .blk-seq-headline {
+    font-weight: 700;
+    font-size: {{ "42px" if compact else "68px" }};
+    max-width: 100%;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-seq-area { position: relative; width: 100%; margin-top: {{ "40px" if compact else "70px" }}; }
+  .blk-seq-area svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .blk-seq-lifeline { stroke: color-mix(in srgb, var(--accent-secondary) 55%, transparent); stroke-width: 2; stroke-dasharray: 6 8; }
+  .blk-seq-arrow { stroke: var(--accent-primary); stroke-width: 3; stroke-linecap: round; fill: none; }
+  .blk-seq-lane-header {
+    position: absolute;
+    top: 0;
+    width: {{ "140px" if compact else "180px" }};
+    padding: 10px 14px;
+    text-align: center;
+    border: 2px solid var(--accent-secondary);
+    border-radius: 4px;
+    background: var(--bg);
+    font-weight: 700;
+    font-size: {{ "18px" if compact else "24px" }};
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-seq-msg-label {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: {{ "15px" if compact else "19px" }};
+    color: var(--fg-muted);
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
+
+  const {{ prefix }}_actorIds = [{% for actor in payload.actors %}"{{ actor.id }}"{{ "," if not loop.last }}{% endfor %}];
+  const {{ prefix }}_headerH = {{ 70 if compact else 100 }};
+  const {{ prefix }}_rowH = {{ 60 if compact else 90 }};
+  const {{ prefix }}_n = {{ prefix }}_actorIds.length;
+
+  document.querySelectorAll("#{{ prefix }}-area .blk-seq-lane-header").forEach((el, i) => {
+    tl.fromTo(el, { scale: 0.7, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.4, ease: "power3.out" }, {{ entrance_start + 0.25 }} + i * 0.1);
+  });
+  document.querySelectorAll("#{{ prefix }}-area .blk-seq-lifeline").forEach((el) => {
+    var len = el.getTotalLength();
+    el.style.strokeDasharray = String(Math.min(len, 6));
+    tl.fromTo(el, { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.out" }, {{ entrance_start + 0.6 }});
+  });
+
+  const {{ prefix }}_msgStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+  const {{ prefix }}_messages = [
+    {% for msg in payload.messages %}
+    { from: "{{ msg.from_id }}", to: "{{ msg.to_id }}" }{{ "," if not loop.last }}
+    {% endfor %}
+  ];
+
+  function {{ prefix }}_actorX(id) {
+    var i = {{ prefix }}_actorIds.indexOf(id);
+    if (i < 0) return 800;
+    return {{ prefix }}_n > 1 ? (i / ({{ prefix }}_n - 1)) * 1600 : 800;
+  }
+
+  {{ prefix }}_messages.forEach(function (msg, i) {
+    var y = {{ prefix }}_headerH + i * {{ prefix }}_rowH + {{ prefix }}_rowH / 2;
+    var line = document.getElementById("{{ prefix }}-msg-" + i);
+    var x1 = {{ prefix }}_actorX(msg.from);
+    var x2 = {{ prefix }}_actorX(msg.to);
+    line.setAttribute("x1", x1);
+    line.setAttribute("y1", y);
+    line.setAttribute("x2", x1);
+    line.setAttribute("y2", y);
+    var t = {{ prefix }}_msgStarts[i];
+    tl.to(line, { attr: { x2: x2 }, duration: 0.45, ease: "power2.out" }, t);
+
+    // The message area's CSS height (in px) is numerically equal to the SVG's own viewBox
+    // height (both built from the same header_h/row_h constants above and in the markup macro),
+    // so "y" in viewBox units is already the label's real vertical offset in px -- no rescale.
+    var label = document.getElementById("{{ prefix }}-msg-label-" + i);
+    label.style.top = (y - 22) + "px";
+    tl.fromTo(label, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.35, ease: "power2.out" }, t);
+  });
+{% endmacro %}

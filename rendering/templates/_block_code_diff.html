@@ -1,0 +1,139 @@
+{#
+  BlockType.CODE_DIFF -- T18C, new. Reuses CODE_PANEL's panel chrome (dot-bar, monospace lines)
+  verbatim, plus a per-line background tint keyed on op and a leading glyph column. Direct port
+  of the HyperFrames registry's code-diff component's framing ("removed lines collapse in red,
+  added lines expand in green"), hand-adapted rather than cloned (D103) -- the one exact
+  registry name-match this task's research found.
+
+  Every line's start state is set unconditionally in JS via tl.set at t=0 (D106 item 4's rule):
+  CONTEXT/ADD lines start collapsed and expand in on their own beat; REMOVE lines start already
+  visible (the "before" state) and collapse on their own beat.
+#}
+
+{% macro markup(prefix, payload, compact=false) %}
+<div id="{{ prefix }}-wrap" class="blk-diff-wrap">
+  <h1 id="{{ prefix }}-headline" class="blk-diff-headline">{{ payload.headline }}</h1>
+  <div id="{{ prefix }}-panel" class="blk-diff-panel">
+    <div class="blk-diff-bar">
+      <span class="blk-diff-dot"></span><span class="blk-diff-dot"></span><span class="blk-diff-dot"></span>
+      <span class="blk-diff-lang">{{ payload.language }}</span>
+    </div>
+    <div class="blk-diff-area">
+      {% for line in payload.lines %}
+      <div class="blk-diff-line blk-diff-line-{{ line.op }}" id="{{ prefix }}-line-{{ loop.index0 }}">
+        <span class="blk-diff-glyph">{{ "+" if line.op == "add" else ("-" if line.op == "remove" else "") }}</span>
+        <span class="blk-diff-text">{{ line.text }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% if payload.caption %}
+  <p id="{{ prefix }}-caption" class="blk-diff-caption">{{ payload.caption }}</p>
+  {% endif %}
+</div>
+<style>
+  .blk-diff-wrap { width: 100%; display: flex; flex-direction: column; }
+  .blk-diff-headline {
+    font-weight: 700;
+    font-size: {{ "40px" if compact else "62px" }};
+    max-width: 100%;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-diff-panel {
+    margin-top: {{ "28px" if compact else "52px" }};
+    border-radius: 6px;
+    border: 1.5px solid color-mix(in srgb, var(--fg) 14%, transparent);
+    background: color-mix(in srgb, var(--bg) 85%, black 15%);
+    overflow: hidden;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-diff-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: {{ "12px 18px" if compact else "20px 28px" }};
+    background: color-mix(in srgb, var(--fg) 4%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  }
+  .blk-diff-dot { width: 12px; height: 12px; border-radius: 50%; background: color-mix(in srgb, var(--fg) 20%, transparent); }
+  .blk-diff-lang {
+    margin-left: 14px;
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: 18px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent-secondary);
+  }
+  .blk-diff-area { position: relative; padding: {{ "18px 0" if compact else "30px 0" }}; }
+  .blk-diff-line {
+    position: relative;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    height: {{ "36px" if compact else "48px" }};
+    padding: 0 {{ "24px" if compact else "40px" }};
+    gap: {{ "14px" if compact else "20px" }};
+    will-change: height, opacity, background;
+  }
+  .blk-diff-line-add { background: color-mix(in srgb, #3fb950 18%, transparent); }
+  .blk-diff-line-remove { background: color-mix(in srgb, #f85149 18%, transparent); }
+  .blk-diff-glyph {
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: {{ "19px" if compact else "26px" }};
+    min-width: 16px;
+    color: var(--fg-muted);
+  }
+  .blk-diff-text {
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: {{ "19px" if compact else "26px" }};
+    white-space: pre;
+  }
+  .blk-diff-caption {
+    margin-top: 30px;
+    font-weight: 400;
+    font-size: {{ "20px" if compact else "28px" }};
+    color: var(--fg-muted);
+    max-width: 100%;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
+  tl.fromTo("#{{ prefix }}-panel", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out" }, {{ entrance_start + 0.3 }});
+
+  const {{ prefix }}_lineStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+  const {{ prefix }}_LINE_H = {{ "36" if compact else "48" }};
+  const {{ prefix }}_ops = [{% for line in payload.lines %}"{{ line.op }}"{{ "," if not loop.last }}{% endfor %}];
+
+  // Tracked as a plain scalar, not read back out of {{ prefix }}_lineStarts[length-1] --
+  // CodeDiffSlots.lines carries no minimum-length constraint (this project's strict schemas
+  // never do), so an empty diff must not index off the end of an empty array (mirrors
+  // _block_code_panel.html's own {{ prefix }}_lineStart running scalar for the same reason).
+  let {{ prefix }}_lastLineStart = {{ entrance_start + 0.3 }};
+  {{ prefix }}_ops.forEach((op, i) => {
+    const el = document.getElementById("{{ prefix }}-line-" + i);
+    const t = {{ prefix }}_lineStarts[i];
+    {{ prefix }}_lastLineStart = t;
+    if (op === "remove") {
+      tl.set(el, { height: {{ prefix }}_LINE_H, opacity: 1 }, 0);
+      tl.to(el, { height: 0, opacity: 0, duration: 0.3, ease: "power2.in" }, t);
+    } else {
+      tl.set(el, { height: 0, opacity: 0 }, 0);
+      tl.to(el, { height: {{ prefix }}_LINE_H, opacity: 1, duration: 0.3, ease: "power2.out" }, t);
+    }
+  });
+
+  {% if payload.caption %}
+  tl.fromTo(
+    "#{{ prefix }}-caption",
+    { opacity: 0, y: 16 },
+    { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" },
+    {{ prefix }}_lastLineStart + 0.4,
+  );
+  {% endif %}
+{% endmacro %}

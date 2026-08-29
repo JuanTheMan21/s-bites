@@ -114,7 +114,7 @@ async def test_tier_static_captures_one_timestamp_at_the_end_of_the_composition(
 async def test_tier_reveal_captures_four_timestamps_past_the_entrance_settle(tmp_path) -> None:
     """Not evenly spaced from t=0 -- the first sample must land after entrance has settled, not
     at the pre-animation blank frame (the bug a real render surfaced)."""
-    segment = an_authored_segment(0, BlockType.DIAGRAM_CHAIN, Tier.REVEAL, duration_ms=DURATION_MS)
+    segment = an_authored_segment(0, BlockType.GRAPH_DIAGRAM, Tier.REVEAL, duration_ms=DURATION_MS)
     render = FakeRenderBackend()
     dest = tmp_path / "clip.mp4"
 

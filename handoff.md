@@ -3,254 +3,234 @@
 **Overwritten completely at every `/checkpoint`.** This file describes *now*, never history.
 History lives in `decisionlog.md`.
 
-_Last updated: 2026-08-29 · after T18B, a same-checkpoint caption fix (D110), and a cleanup pass
-over the old architecture (D111)_
+_Last updated: 2026-08-29 · after T18C (the broadened block library)_
 
 ---
 
 ## Where we are
 
-**T18B replaced the whole enum-picks-template rendering mechanism with a compositional one**, on
-the user's explicit instruction after reviewing T18A's real output a second time: the six
-`VisualIntent`-keyed whole templates are gone, replaced by two `SceneLayout`s
-(`SINGLE`/`SPLIT_HORIZONTAL`) composing six `BlockType` partials, planned once per video by a new
-`plan_visuals` join node (`core/graph/nodes/visual_plan.py`) rather than authored per-segment in
-isolation. Full reasoning and every decision this reopens/leaves alone: `decisionlog.md` D105.
+**T18C shipped the block-library slice only** — six items (`GRAPH_DIAGRAM` retiring
+`DIAGRAM_CHAIN`, generalized `ARRAY_GRID`, `CODE_DIFF`, `SEQUENCE_DIAGRAM`, `TIMELINE`, and a new
+cross-cutting annotation overlay system) plus two related pre-existing gaps this session's own
+research surfaced: a real caption/content-overlap bug, and D107's unreachable mixed-tier live
+test. `tasks.md`'s original T18C entry also scoped a vision critique/revision loop and a full
+7-minute validation render — both **deferred, not built**, to a new, not-yet-scoped **T18D**
+(decisionlog D118). A user request mid-planning to "make video making faster" is deferred into
+that same T18D, unscoped as of this checkpoint.
 
-**The real structural finding this session**: the "8 of 15 segments were `diagram_flow`"
-repetition D95 recorded was never a template-quality problem -- `author_scene` ran inside a
-`Send` fan-out, so no segment's visual ever knew what any other segment looked like. `plan_visuals`
-is the first thing in this pipeline positioned to prevent that rather than only observe it after
-the fact.
+**The annotation overlay is the genuinely novel piece**, and this session's own Phase-0
+real-toolchain spike (composing hand-built scenes and running the real `hyperframes check`
+against them, not just reasoning about the design) found and fixed two real positioning bugs
+before they'd have shipped silently — see D115. `project-reviewer`'s own final review-gate pass
+then caught a third real bug, in the *test coverage* this session added: a `SHIFT`-op fixture that
+looked correct and passed offline, but never actually exercised the branch it claimed to cover
+(D114). All three are fixed and re-verified against the real toolchain.
 
-**Four real bugs were found only by running the real toolchain** (not by `pytest`/`ruff`, both of
-which stayed clean throughout) -- a captions macro that rendered no visible text and collided ids
-across cues, a split-layout choreography flag that silently never reached its macro, an id
-collision between the split layout's own wrapper and `code_panel`'s internal one (found by a real
-`hyperframes check` warning during this session's own benchmark spike), and a static-CSS/GSAP
-transform conflict in the one genuinely new template (`array_grid`) that produced real
-`text_occluded` errors. All four fixed and verified; full detail in `decisionlog.md` D106.
+**`DIAGRAM_CHAIN` is retired, not kept alongside `GRAPH_DIAGRAM`** (D113) — a breaking change,
+matching T18B's own precedent of retiring superseded templates. `ArrayEliminationStep` is renamed
+`ArrayStep` and generalized to four ops (D114), also breaking, also swept through every consumer
+in the same pass.
 
-**A fifth caption bug was found afterward, by the user, from a description of the real render, and
-fixed in the same checkpoint (D110):** D106's fix corrected the *wall-of-text* accumulation, but
-left the pre-T18B per-word karaoke-style ink reveal running inside each (now-correctly-clearing)
-cue -- so captions still visibly assembled themselves one word at a time. `_captions.html` no
-longer inks words individually; every word in a cue is at full color the instant the cue itself
-appears (still an instant `tl.set`, no fade). **This fix was made at the user's explicit
-instruction to run no further tests this checkpoint** -- `pytest`/`ruff`/the boundary greps/
-`project-reviewer` were not re-run afterward. The change is small and easy to reason about
-statically (two tween blocks and three CSS declarations removed, nothing else touched), but it is
-the one piece of this checkpoint that has not been verified against the real toolchain. **Watch a
-real render of it before trusting this description alone.**
+**Still on `feature/scene-composition`.** Branched from `dev` at `5b4d7ba` (T18B's own start
+point) — this task's work landed on the same branch, not a new one, since T18B's own work was
+never merged back to `dev` (see "Before the next session" below — this was already true at T18B's
+checkpoint and remains true now). `dev` itself is unchanged since before T18B.
 
-**Two pre-existing gaps were found and are carried forward, not fixed here** (D107): the Blob
-skill registry had silently drifted from local disk since T18A (`scene-authoring/1.1.md` was
-never uploaded -- fixed as a one-off manual sync this session, no automated sync exists yet), and
-`tests/test_graph_pipeline_live.py`'s mixed-tier test is mathematically unsatisfiable under the
-current tier ladder (a T18A/D99-era gap, not a T18B regression -- `core/tier_resolver.py` has
-zero diff this task).
+**Done:** T1-T18, T18A, T18B, T18C.
+**Next: not yet numbered.** The unscoped future work (vision critique/revision loop, full
+7-minute validation render, "make video generation faster") needs its own scoping conversation
+before it becomes a real `/build-task` session — see `tasks.md`'s T18C entry, now updated to
+record what actually shipped and what got pushed to "T18D."
 
-**Real end-to-end render verified and watched** (D109, before the caption fix above): `cli.py
-"how binary search works"`, 90s target, `RUNTIME_ENV=azure`+`RENDER_ENV=local`. 3 segments, all
-`Tier.ANIMATED`, 140.8s wall-clock. Frames extracted and inspected directly: a genuinely distinct
-Blueprint motif (light paper, orange accent -- the real fix for D95's "still reads navy blue"), a
-working `diagram_chain` rail, a working `SPLIT_HORIZONTAL` comparison with both panels rendering
-correctly, captions clearing and replacing across cues (the word-by-word reveal inside each cue
-was still present at the time of this specific render -- see D110). `array_grid`/`stat_callout`
-and a second motif were not exercised in *this specific run* (the plan didn't choose them for this
-topic/length) but both are independently verified: `array_grid` via `hyperframes check` (D106 item
-4) and the full 18-combo `test_render_segment_live.py` sweep (every block type, every tier, all
-green, also before the caption fix -- captions aren't part of that sweep's assertions either way).
+## What T18C produced (file-by-file detail lives in the diff and in `decisionlog.md` D113-D118)
 
-**Still on `dev`'s successor branch.** `master` was fast-forwarded to `dev`'s HEAD (`5b4d7ba`)
-and pushed *before* this task started, per the plan's own recommendation, to bank a known-good
-rollback point ahead of an invasive rework. This task's work is on `feature/scene-composition`,
-branched from `dev` at that same point. **Not yet merged back to `dev` and not yet pushed** --
-merge once the caption fix above has been watched in a real render, not just read about.
+**New:** `core/block_schemas_graph.py`, `core/block_schemas_array.py`, `core/block_schemas_diff.py`,
+`core/block_schemas_sequence.py` (split out of `core/block_schemas.py` to stay under the 200-line
+ceiling with every new block added), `rendering/block_timing.py` (per-block narration-anchor
+resolution, split out of `rendering/compose.py`), `rendering/annotations.py` (annotation target
+resolution + bounds-check), `rendering/templates/_block_graph_diagram.html`,
+`_block_code_diff.html`, `_block_sequence_diagram.html`, `_block_timeline.html`,
+`_annotations.html` (shared JS positioning helper), `_annotation_cursor.html`,
+`_annotation_check.html`, `_annotation_warning.html`, `runtime_skills/scene-authoring/1.3.md`,
+`runtime_skills/visual-plan/1.1.md`, `tests/test_array_grid_and_graph_modes.py`,
+`tests/test_compose_annotations.py`.
 
-**Done:** T1-T18, T18A, T18B.
-**Next: T18C** — the broadened primitive library (array/stack/queue generalisation, arbitrary
-graph topology + traversal highlight, sequence/lane diagrams, timelines, code diff, annotation
-components including a generalised "warning" motif) plus the vision critique/revision loop this
-session's own harness-tightening answer named as the next real lever, **plus a new item added
-this checkpoint at the user's explicit request: verify captions never overlap a block's own
-content**, not just that the caption band's own position clears `hyperframes check
---caption-zone` (see `tasks.md`'s T18C entry). **A possible T18D** (pushing LLM compositionality
-further, "testing the limits" per the user's own framing) is named in `tasks.md` but not scoped —
-that conversation has not happened yet.
+**Retired:** `rendering/templates/_block_diagram_chain.html`, `BlockType.DIAGRAM_CHAIN`,
+`DiagramNode`/`DiagramChainSlots` (`core/block_schemas.py`).
 
-## What T18B produced (file-by-file detail lives in the diff and in `decisionlog.md` D105-D110)
+**Renamed/generalized:** `ArrayEliminationStep` → `ArrayStep` (`core/block_schemas_array.py`,
+moved out of `core/block_schemas.py`), now with `op` (narrow/shift/push/pop) and `end_operation`;
+`ArrayGridSlots` gains `orientation`.
 
-**New:** `core/block_types.py`, `core/scene_plan_schema.py`, `core/scene_schemas.py`,
-`core/block_schemas.py` (renamed from `core/slot_schemas.py`), `core/graph/nodes/visual_plan.py`,
-`rendering/anchors.py`, `mux/caption_cues.py`, `rendering/templates/_layout_single.html`,
-`_layout_split_horizontal.html`, `_block_{title,text_panel,stat_callout,code_panel,
-diagram_chain,array_grid}.html`, `runtime_skills/visual-plan/1.0.md`,
-`runtime_skills/scene-authoring/1.2.md`, `tests/block_examples.py` (renamed from
-`tests/slot_examples.py`), `tests/scene_author_fixtures.py`, `tests/test_author_scene_node.py`,
-`tests/test_block_schemas.py` (renamed from `tests/test_slot_schemas.py`).
+**`core/scene_plan_schema.py`/`core/scene_schemas.py`**: new `PlannedAnnotation`/
+`ComposedAnnotation`, `SegmentScenePlan.annotations`/`ComposedScene.annotations` — annotations are
+a separate concept from `BlockType`, not registered the same way (see D115, and the new paragraph
+in `.claude/skills/scene-templates/SKILL.md`).
 
-**Retired:** the six old whole-scene templates (`title_card.html`, `bullet_list.html`,
-`comparison.html`, `diagram_flow.html`, `code_walkthrough.html`, `stat_callout.html`),
-`core/slot_schemas.py`, `tests/slot_examples.py`, `tests/test_slot_schemas.py`.
+**`rendering/templates/_layout_single.html`/`_layout_split_horizontal.html`**: `#stage`'s bottom
+padding `130px` → `170px` (3-value shorthand) — a real, pre-existing 24px gap against the caption
+band, not hypothetical (D116). Both also gained the annotation import/loop wiring.
 
-**Motif system**: folded into `plan_visuals`' single call (`VideoScenePlan.motif`) rather than a
-separate node -- simpler than the originally-scoped design, since one video only ever needs one
-motif decided once, at the same time everything else about the video's visuals is decided.
+**`tests/test_render_segment_live.py`**: `--caption-zone` now passed to the real `hyperframes
+check` call — no new assertion needed, its findings fold into the `layout` category the test
+already asserts on (confirmed empirically, D116).
 
-**`core/models.py`**: `Segment.slots` renamed to `Segment.scene`; no new fields, no line-count
-pressure (still comfortably under 200).
-
-**Captions (`rendering/templates/_captions.html`)**: cue-based (clears and replaces, D106), and as
-of D110, movie-style within a cue too -- a whole cue appears at once, no per-word stagger. This
-last change is the one **not** re-verified against the real toolchain this checkpoint (see above).
+**`tests/test_graph_pipeline_live.py`**: D107 closed — mixed-tier test retargeted from an
+unreachable `{Tier.STATIC, Tier.ANIMATED}` to `{Tier.REVEAL, Tier.ANIMATED}`, `FRAME_BUDGET`
+55 → 80 (D117).
 
 ## Verify at any time
 
 ```bash
-pytest                                    # offline, no network -- 562 passed, 1 skipped as of D106; NOT re-run after D110
-pytest -m local_live                      # opt-in, real browser/CLI/ffmpeg -- 18-combo sweep green as of D106; NOT re-run after D110
-pytest -m live                            # opt-in, real Azure -- not re-run this checkpoint (unchanged surface)
-ruff check . && ruff format --check .     # clean as of D106; NOT re-run after D110
+pytest                                    # offline, no network -- 640 passed, 1 skipped as of this checkpoint
+ruff check . && ruff format --check .     # clean (one pre-existing unrelated file,
+                                           # .claude/skills/python-pro/SKILL.md, was already
+                                           # unformatted before this session and untouched by it)
 grep -rE "azure|openai|huggingface|ollama|playwright" core/ --include=*.py   # must be empty
 grep -rE "langgraph" core/ --include=*.py | grep -v "^core/graph/"           # must be empty
 git branch --show-current                                                    # feature/scene-composition
 
-PYTHONPATH=. .venv/Scripts/python.exe cli.py                  # prompts for a topic, runs standalone -- run this to watch D110's fix for real
-PYTHONPATH=. .venv/Scripts/python.exe scripts/measure_render_throughput.py  # Phase 0's benchmark, reusable
+PYTHONPATH=. .venv/Scripts/python.exe cli.py                  # prompts for a topic, runs standalone
 ```
 
-**Run the full suite once before merging to `dev`** -- it was deliberately skipped for D110's fix
-at the user's own instruction, not because there was reason to believe it would fail.
+**`pytest -m local_live` (the real-render `BlockType x Tier` sweep) was NOT run this checkpoint.**
+The new block types were verified via standalone `hyperframes check --json` runs against
+hand-composed scenes (real toolchain, real findings caught and fixed — D114, D115), but never
+through the actual `render_segment`/`PlaywrightHyperFramesRenderBackend` path the `local_live`
+suite exercises. Run this before trusting the new blocks in a real render, the same trust-gap
+shape D110 already left open once (see below — that one is *still* open too).
+
+**No real end-to-end `cli.py` render was watched this checkpoint either.** Same caveat as above,
+compounded: two separate real-render verifications are now owed, not one.
 
 ## Environment state
 
 | | |
 |---|---|
-| Models | Opus plans. **This build ran on Sonnet throughout, confirmed at session start** -- unlike T18A, which ran entirely on Opus because the harness was pinned before the switch could happen. Confirm again before T18C's build starts. |
+| Models | Opus plans, Sonnet builds — confirmed correctly this task: the plan was approved on Opus, the user then explicitly ran `/model sonnet` (setting it as their default) before the build began, and the mandatory self-check confirmed Sonnet before the first `Write`. |
 | `RUNTIME_ENV` | `azure`, unchanged. |
-| `RENDER_ENV` | `local` (D100) -- unchanged, still temporary until T35. |
-| `FRAME_BUDGET` | `9500`, **unchanged** -- Phase 0's composite-scene measurement (~13% slower than the old single-block baseline, D108) stayed under the threshold that would have required a change. |
-| `RENDER_MAX_CONCURRENCY` | `2`, unchanged this task. |
-| Git | `feature/scene-composition`, branched from `dev` at `5b4d7ba`. `master` fast-forwarded to `5b4d7ba` and pushed *before* this task's work began (banked rollback point). `dev` itself unchanged until this branch merges back. Not yet pushed to `origin`. |
-| Blob skill registry | **Now synced with local disk** (D107) -- all five packs (`house-style`, `outline`, `scene-authoring` at `1.2`, `scripting`, `visual-plan`) uploaded manually this session. No automated sync exists; a future task should build one, or this will silently drift again exactly the way it already did once. |
-| Azure spend | One real render this session (~90s/3 segments, ~140.8s wall-clock) plus the Phase 0 benchmark spikes (render-only, no LLM/TTS). Not itemized by any tooling in this repo, same standing gap as every prior checkpoint. |
+| `RENDER_ENV` | `local` (D100) — unchanged, still temporary until T35. |
+| `FRAME_BUDGET` | `9500`, unchanged this task. |
+| `RENDER_MAX_CONCURRENCY` | `2`, unchanged, still unmeasured under real concurrent load (carried forward). |
+| Git | `feature/scene-composition`, branched from `dev` at `5b4d7ba`. Not yet pushed to `origin` this checkpoint — see the push offer below. `dev` unchanged. |
+| Blob skill registry | **Not synced this checkpoint.** Two new/bumped packs exist only on local disk: `scene-authoring/1.3.md`, `visual-plan/1.1.md`. A real `RUNTIME_ENV=azure` run right now would load the *previous* versions from Blob (`scene-authoring/1.2`, `visual-plan/1.0`) — the same silent-drift gap D107 already found once for T18A's `1.1`. Still no automated sync exists. |
+| Azure spend | No real Azure calls this session — all verification was offline `pytest` plus local `hyperframes check` runs (no LLM/TTS, no network cost). |
 
 ## Before the next session
 
-**One real thing to do, not code-blocking but trust-blocking**: watch a real render (or at least
-extract and look at a couple of frames, the way D109 did) to confirm D110's caption fix actually
-reads as movie-style rather than trusting this file's description of an untested change.
+**Three real things to do, none code-blocking but all trust-blocking, in the order they'd
+naturally get checked:**
 
-**Merge `feature/scene-composition` back to `dev`** once the above is done -- not automatic as
-part of this checkpoint.
+1. **D110's caption fix (from T18B) still has not been watched in a real render.** Carried
+   forward unresolved for a second checkpoint now — this file said the same thing after T18B and
+   nothing since has watched a real render to confirm captions actually read as movie-style rather
+   than trusting the description.
+2. **T18C's new blocks have not been through a real render either** — see "Verify at any time"
+   above. `pytest -m local_live` first (fast, no cost), then a real `cli.py` topic that would
+   plausibly reach for the new blocks (a protocol/handshake topic naturally invites
+   `SEQUENCE_DIAGRAM`; an algorithm with a graph or tree naturally invites `GRAPH_DIAGRAM`'s
+   `GRAPH` mode), watched via extracted frames the way D109 did for T18B.
+3. **Merge `feature/scene-composition` back to `dev`** once the above two are done — still not
+   automatic as part of any checkpoint, per the same standing note this file has carried since
+   T18B.
 
 ## Known gaps and open questions
 
-**Carried into T18C, already scoped (see `tasks.md`):** the broadened primitive library, the
-vision critique/revision loop (needs a real `LLMProvider` interface change for image input --
-`interfaces/llm_provider.py` stays text-only until then, with real adapter-parity work across
-both Azure and local, D40's `inspect.signature` equality included), a full 7-minute validation
-render across genuinely varied topic types, and (added this checkpoint) actively checking that
-captions never overlap a block's own content, not just that the band's own position clears the
-guard zone.
-
-**Still genuinely open, not yet scoped as any numbered task:**
-- **D110's caption fix has not been watched in a real render** (see above) -- the one loose end
-  of this checkpoint.
-- **`tests/test_graph_pipeline_live.py`'s mixed-tier test is currently unsatisfiable** (D107) --
-  needs either a third segment or a different importance pairing to produce a real
-  `{STATIC, ANIMATED}` split under the post-D99 ladder; a single constant tweak cannot fix it
-  (worked out by hand in D107, the arithmetic doesn't close).
-- **No automated Blob skill-pack sync exists** (D107) -- this drifted silently for an entire task
-  once already (T18A's `scene-authoring/1.1.md` was never uploaded) and will again.
-- **T18D** ("test the limits" of LLM compositionality, per the user's own framing) is named as a
-  possible future task in `tasks.md` but has had no scoping conversation. Not started, not
-  promised, explicitly a later decision.
-- **The document-upload / cursor-navigated-UI-walkthrough direction** the user asked about
-  directly this session: confirmed *not* blocked by anything T18B built (a future `UI_WALKTHROUGH`
-  block type slots into the same `BlockType`/schema/partial pattern), and confirmed as the
-  best-supported of everything this session researched in HyperFrames' own registry
-  (`browser-device-stage`, `simulated-cursor`, `ui-focus-zoom` all already take data-driven
-  coordinates/timing) -- waiting only on a document-ingestion path that does not exist yet
-  (that's T29's scope, iteration 6, scheduled last per the original requirement).
+**New this checkpoint:**
+- **The SPLIT_HORIZONTAL "same panel" annotation restriction is prompt-only** — `rendering/
+  annotations.py::resolve_annotations` bounds-checks `target_block_index` against the segment's
+  own block count, but nothing in code stops an annotation from naming a block in the *other*
+  panel. Confirmed not exploitable into a broken frame (the render container is always derived
+  from the target itself), so left as a narrative constraint rather than a redundant guard — but
+  worth knowing if a future session is debugging an annotation that reads as "attached to the
+  wrong panel" conceptually rather than visually broken.
+- **T18D is a real name collision, now resolved by convention, not yet by content.** `tasks.md`'s
+  T18C entry named "T18D" as a placeholder for "push LLM compositionality further, testing the
+  limits" — this checkpoint folds the vision-loop/validation-render/performance work into that
+  same name rather than renaming either. Whichever session next scopes T18D should treat all of
+  this as one basket to sort through, not assume any part of it is already decided.
+- **`ArrayStep.op`'s cross-field consistency (does `remaining_start`/`remaining_end` actually match
+  what `op` claims — a `narrow` that grows, a `shift` that changes width) is prose-only, not
+  validator-enforced** — the same convention the pre-T18C "range only ever shrinks" constraint
+  already used, deliberately not reopened (D114). A real render is what would actually catch a
+  violation, not `pytest`.
 
 **Carried forward, unchanged from prior checkpoints:**
 - The cross-requeue `StructuredOutputError` cap (`QueuedJob.attempt`) is still open (D24/D67).
 - No coverage gate exists (D42).
-- `Segment.slots` is now `Segment.scene`, still untyped by design (D29's pattern) -- revisit at
-  T24 as previously planned.
-- `RENDER_MAX_CONCURRENCY=2` still hasn't been measured under real concurrent load, only chosen
-  from one machine's `hyperframes doctor` output.
+- `Segment.scene` is still untyped by design (D29's pattern) — revisit at T24 as previously
+  planned.
+- `RENDER_MAX_CONCURRENCY=2` still hasn't been measured under real concurrent load.
 - T10 stays `in-progress`, unclaimed. Ollama/Kokoro still don't exist.
-- D47's disk-I/O-under-concurrency measurement (D69) used small WAV files only -- still open.
-- `hyperframes check` is still non-deterministically flaky at times (D96) -- re-run before
-  trusting a single red result. Not hit this session, but the standing caveat remains.
+- D47's disk-I/O-under-concurrency measurement (D69) used small WAV files only — still open.
+- `hyperframes check` is still non-deterministically flaky at times (D96) — re-run before
+  trusting a single red result. Not hit this session (every real-toolchain probe this checkpoint
+  came back consistent across re-runs), but the standing caveat remains.
 
 ## Gotchas worth remembering
 
-**New this session, from a cleanup pass (D111) after the user asked directly whether the old
-architecture had actually been removed, not just superseded:**
-- **A standalone `__main__` script can go stale silently -- `pytest` will never catch it.**
-  `scripts/measure_segment_concurrency.py` imported a module T18B deleted; nothing in the offline
-  suite runs it, so it stayed broken through the whole T18B checkpoint. When retiring a module,
-  grep for it across `scripts/` specifically, not just `core/`/`rendering/`/`tests/`.
-- **A `FakeRenderBackend`-driven script needs `FRAME_BUDGET=0`, not a "realistic" number** --
-  `FakeRenderBackend.render()` (Tier 2) writes placeholder bytes, never a real MP4, so any budget
-  that lets even one segment reach `Tier.ANIMATED` breaks the real ffmpeg mux downstream. Already
-  documented once in `tests/graph_pipeline_fixtures.py`'s own comment; `measure_segment_
-  concurrency.py` didn't follow it and broke exactly the way that comment predicted, post-D99.
-- **`/newblock` now exists** for the common registration workflow (adding a `BlockType`);
-  `/newintent`'s own list shrank to match `VisualIntent`'s much narrower real role. Both
-  `.claude/skills/scene-templates/SKILL.md` and `.claude/commands/newintent.md` were rewritten --
-  they described the deleted one-intent-one-template architecture in full, which is worse than
-  merely unhelpful for a future session relying on them.
-- **`repowise dead-code` is a real check, and it came back clean** -- worth running after a large
-  rewrite even when confident, precisely because it's cheap and the alternative is trusting your
-  own memory of what you touched.
+**New this session, from T18C's own Phase-0 spike and the final review pass:**
+- **`getBoundingClientRect()` returns viewport pixels, not this project's own 1920x1080 CSS-pixel
+  space, whenever the capture harness renders at a different effective scale.** A real, found-live
+  bug (`hyperframes check`'s own `escaped_container` finding caught it) — any future code
+  measuring a real element's position for use inside a GSAP `x`/`y` transform must normalize
+  against `#root`'s own known width first (`rendering/templates/_annotations.html`'s
+  `hfAnnotationOffset` is the reference implementation).
+- **A `position: absolute` element with no explicit `top`/`left` set does NOT default to its
+  container's origin** — it defaults to wherever it would have landed in normal document flow
+  (its "hypothetical box"), which for a flex child can be far from (0,0). Any element meant to be
+  positioned purely via a GSAP `x`/`y` transform needs an explicit `top: 0; left: 0` in its base
+  CSS, or the transform composes with an unpredictable starting point instead of a clean origin.
+- **A test that passes offline does not mean the code path it claims to cover actually ran.**
+  `tests/test_array_grid_and_graph_modes.py`'s first version validated a `shift` fixture against
+  the schema and confirmed the string `"shift"` appeared in composed HTML — both true, and neither
+  proved the template's `enter()` branch (the animation logic `shift` exists to add, distinct from
+  `narrow`) ever actually executed. Caught only by a reviewer tracing the *template's own runtime
+  logic* against the fixture's specific numbers, not by running the test. When a test's whole
+  purpose is covering one specific branch, trace the branch condition by hand against the fixture,
+  don't just confirm the test passes.
+- **`hyperframes check --caption-zone`'s findings fold into the existing `layout` category, under
+  no separate top-level JSON key** — confirmed by real `--json` runs, not assumed. Any future
+  caption-zone-adjacent work should assert against `check["layout"]["errorCount"]`, not invent a
+  `check["captionZone"]` key that doesn't exist.
+- **A block whose payload has no length floor can produce an empty list a template's script macro
+  then indexes into.** `_block_code_diff.html`'s caption-timing tween originally read
+  `{{ prefix }}_lineStarts[{{ prefix }}_lineStarts.length - 1]` — `NaN` for a zero-line diff.
+  Fixed by tracking a plain running scalar instead (matching `_block_code_panel.html`'s own
+  pre-existing pattern) — worth checking any new block's script macro for the same class of
+  off-the-end read wherever it indexes a per-item array by its own length.
 
-**New this session, from T18B itself:**
-- **A movie-style caption fix has two separate parts, and fixing one does not fix the other**:
-  *retention* (does an old cue clear when the next begins) and *reveal* (does a cue appear as one
-  unit or assemble itself word by word). D106 fixed the first and, without a fresh look, silently
-  carried the second forward as "kept, not changed." When touching any per-cue/per-word timing
-  again, check both properties explicitly, not just the one that prompted the change.
+**Carried from T18B, still true:**
+- **A movie-style caption fix has two separate parts** — *retention* (does an old cue clear) and
+  *reveal* (does a cue appear as one unit). Still unwatched in a real render (see "Before the next
+  session").
 - **A CSS initial `transform` paired with a GSAP tween on the same property is a real, currently-
-  live trap** (`_tokens.html`'s own docstring already named it; `array_grid`'s strike-through
-  reintroduced it once, D106 item 4). Set every animated element's *starting* transform state via
-  an unconditional `tl.set(...)` at t=0 in JS, covering every instance regardless of whether a
-  later tween ever actually targets it -- never in static CSS.
+  live trap.** Set every animated element's *starting* transform state via an unconditional
+  `tl.set(...)` at t=0 in JS, never in static CSS.
 - **A block partial's `markup()` and `script()` macros must declare the exact same parameters**,
-  even ones only one of them uses (T18B's `compact` bug, D106 item 2) -- Jinja does not warn on a
-  silently-unbound keyword argument the way a real function signature mismatch would.
-- **Two Jinja templates composing into one page can collide on element ids in ways neither
-  template alone reveals** (D106 item 3) -- a layout's own wrapper id and a block's internal id
-  both reaching for the same short, obvious suffix (`-panel`) is a real, found-live risk once
-  blocks and layouts are authored by different people at different times, not a hypothetical.
-- **`hyperframes benchmark`'s default sweep covers both 30fps and 60fps** -- a `--runs N` budget
-  applies to *both*, so a timeout tuned for one config's worth of runs will read as a hang. Not a
-  bug, just an easy trap for a fresh timeout estimate (D108).
-- **The Blob skill registry does not auto-sync with local disk, ever** -- confirmed this drifted
-  silently for a full task (D107). Any session doing a real `RUNTIME_ENV=azure` run after editing
-  `runtime_skills/` should sync manually first, or expect `SkillPackNotFound` or a stale pack.
-- **The caption band's own position being verified is not the same as content never reaching
-  it** -- `hyperframes check --caption-zone` checks the band, nothing today checks what a block
-  puts above it. Flagged for T18C, not yet a real incident.
+  even ones only one of them uses — Jinja does not warn on a silently-unbound keyword argument.
+- **Two Jinja templates composing into one page can collide on element ids** — check *other*
+  templates' existing id suffixes when adding a new one, not just your own file.
+- **The Blob skill registry does not auto-sync with local disk, ever** — confirmed drifted twice
+  now (T18A once, and this checkpoint leaves it drifted again on purpose, see above). Any session
+  doing a real `RUNTIME_ENV=azure` run after editing `runtime_skills/` should sync manually first.
 
 **Carried from T18A, still true:**
-- **The quality hook strips an import added before its first use** -- even across separate
+- **The quality hook strips an import added before its first use** — even across separate
   Edit/Write calls in the same session. Add the import in the identical tool call that adds its
-  first real usage; bit this task in at least a dozen files across the rename/rewrite.
-- **A wrong measurement, once written into a constant, propagates unquestioned across sessions
-  until someone re-derives it from first principles** (D16 -> D99, and now the ~17fps single-block
-  figure this session correctly treated as "still true for its original case, not the whole
-  story" rather than silently overwriting -- both numbers are recorded, per-scenario).
+  first real usage. Bit this task multiple times (`tests/test_block_schemas.py`,
+  `core/graph/nodes/visual_plan.py`, and a scratchpad probe script all needed a follow-up edit to
+  re-add a stripped import) — a live, recurring trap, not a one-off.
 - **A registry component's `<template>`/`window.__hyperframes` runtime doesn't fit this project's
-  layout -- port the technique, not the file.** Directly relevant again to T18C's block library.
-- **`hyperframes lint`'s severity levels are meaningful** -- only `[error]` blocks a render.
+  layout — port the technique, not the file.** Confirmed again this task for `offset-path-traveler`
+  (`graph_diagram`'s traveler), `code-diff`, `success-check`, and the cursor/press-ripple
+  components — every one hand-ported, none installed as-is.
+- **`hyperframes lint`'s severity levels are meaningful** — only `[error]` blocks a render.
 - **Windows path semantics**: a trailing dot is stripped on existence checks but not on directory
   enumeration (D46).
 - **The hooks fire on `Write|Edit`, not on Bash heredocs.** Use `Write` for `.py` files.
 - **CLAUDE.md's boundary greps are plain text searches.** Verify imports with AST, not text.
-- 200-line ceiling, enforced on write. Split by responsibility, don't compress.
+- 200-line ceiling, enforced on write. Split by responsibility, don't compress — this task split
+  `core/block_schemas.py` into five modules and `rendering/compose.py` into three for exactly this
+  reason.
 - `artifacts/` is gitignored. Nothing you need to keep goes there.

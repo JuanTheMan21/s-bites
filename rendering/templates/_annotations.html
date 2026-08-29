@@ -1,0 +1,41 @@
+{#
+  Shared runtime helper for every annotation overlay (T18C). Computes, once per annotation, the
+  pixel delta between its target element and the container it shares an ancestor chain with
+  (#stage for SINGLE, a block's own #<prefix>-region for SPLIT_HORIZONTAL) -- baked into a plain
+  tl.set(...) at t=0 by each annotation partial's own script(), which is what keeps an annotation
+  positioned correctly under continuous transforms (camera drift, panel idle-bob) it shares with
+  its target for the rest of the timeline, without re-measuring on every frame.
+
+  Every layout builds its GSAP timeline paused and never plays it during script evaluation --
+  tl.fromTo/tl.set calls only record tweens, nothing touches the DOM until something external
+  calls tl.seek(...), later. So getBoundingClientRect() here always observes the same pristine,
+  untransformed CSS layout regardless of when in the script it runs -- no ordering hazard between
+  a block's own script() and an annotation's positioning call.
+
+  Real bug found by this task's own Phase-0 spike, not by reasoning about it: getBoundingClientRect
+  returns VIEWPORT pixels, which do not equal this composition's own 1920x1080 CSS-pixel space
+  whenever the capture harness renders at a different effective scale (confirmed live -- an
+  un-normalized delta produced hyperframes check's own "escaped_container" finding, an element
+  landing hundreds of pixels outside #root). #root is declared width:1920px, so measuring its own
+  real rendered width gives the exact scale factor in one line -- dividing every measured delta by
+  it converts viewport pixels back into the local CSS-pixel space tl.set(...)/GSAP's x/y transform
+  actually operate in, regardless of what the browser is doing outside this document.
+#}
+
+{% macro annotation_offset_script() %}
+  function hfAnnotationOffset(targetId, containerId) {
+    var target = document.getElementById(targetId);
+    var container = document.getElementById(containerId);
+    if (!target || !container) return { dx: 0, dy: 0, w: 0, h: 0 };
+    var root = document.getElementById("root");
+    var scale = root ? root.getBoundingClientRect().width / 1920 : 1;
+    var t = target.getBoundingClientRect();
+    var c = container.getBoundingClientRect();
+    return {
+      dx: (t.left - c.left) / scale,
+      dy: (t.top - c.top) / scale,
+      w: t.width / scale,
+      h: t.height / scale,
+    };
+  }
+{% endmacro %}

@@ -108,7 +108,7 @@ async def test_tier_static_renders_muxes_and_persists_a_playable_clip(tmp_path: 
 
 @needs_ffmpeg
 async def test_tier_reveal_renders_muxes_and_persists_a_playable_clip(tmp_path: Path) -> None:
-    segment = an_authored_segment(0, BlockType.DIAGRAM_CHAIN, Tier.REVEAL, duration_ms=DURATION_MS)
+    segment = an_authored_segment(0, BlockType.GRAPH_DIAGRAM, Tier.REVEAL, duration_ms=DURATION_MS)
     storage = FakeStorage()
     context = a_context(tmp_path, storage=storage, render=FakeRenderBackend())
     _write_narration(context.working_dir)

@@ -51,20 +51,90 @@ EXAMPLES: dict[BlockType, dict[str, Any]] = {
         "highlight_lines": [2],
         "caption": "The value is spliced into the query before the parser ever runs.",
     },
-    BlockType.DIAGRAM_CHAIN: {
-        "headline": "The attack path",
-        "nodes": [
-            {"label": "Form input", "caption": "An apostrophe and a comment marker"},
-            {"label": "String concatenation", "caption": None},
-            {"label": "Database executes", "caption": "Now running the attacker's clause"},
-        ],
-    },
     BlockType.ARRAY_GRID: {
         "headline": "Searching a sorted list",
+        "orientation": "horizontal",
         "cells": ["2", "5", "8", "12", "16", "23", "38", "56", "72", "91"],
         "steps": [
-            {"anchor_phrase": "check the middle", "remaining_start": 0, "remaining_end": 5},
-            {"anchor_phrase": "narrow again", "remaining_start": 3, "remaining_end": 5},
+            {
+                "op": "narrow",
+                "anchor_phrase": "check the middle",
+                "remaining_start": 0,
+                "remaining_end": 5,
+                "end_operation": "none",
+            },
+            {
+                "op": "narrow",
+                "anchor_phrase": "narrow again",
+                "remaining_start": 3,
+                "remaining_end": 5,
+                "end_operation": "none",
+            },
+        ],
+    },
+    BlockType.GRAPH_DIAGRAM: {
+        "headline": "The attack path",
+        "layout": "chain",
+        "nodes": [
+            {"id": "n1", "label": "Form input", "caption": "An apostrophe and a comment marker"},
+            {"id": "n2", "label": "String concatenation", "caption": None},
+            {
+                "id": "n3",
+                "label": "Database executes",
+                "caption": "Now running the attacker's clause",
+            },
+        ],
+        "edges": [
+            {"from_id": "n1", "to_id": "n2"},
+            {"from_id": "n2", "to_id": "n3"},
+        ],
+        "positions": [],
+        "traversal": [],
+    },
+    BlockType.CODE_DIFF: {
+        "headline": "Parameterizing the query",
+        "language": "python",
+        "lines": [
+            {"op": "context", "text": "name = request.args['name']"},
+            {
+                "op": "remove",
+                "text": 'query = "SELECT * FROM users WHERE name = \'" + name + "\'"',
+            },
+            {"op": "add", "text": 'query = "SELECT * FROM users WHERE name = %s"'},
+            {"op": "add", "text": "cursor.execute(query, (name,))"},
+        ],
+        "caption": "The driver escapes the value instead of the app splicing it in.",
+    },
+    BlockType.SEQUENCE_DIAGRAM: {
+        "headline": "A parameterized query round trip",
+        "actors": [
+            {"id": "app", "label": "App"},
+            {"id": "db", "label": "Database"},
+        ],
+        "messages": [
+            {
+                "anchor_phrase": "sends the query and the value separately",
+                "from_id": "app",
+                "to_id": "db",
+                "label": "query + params",
+            },
+            {
+                "anchor_phrase": "the database returns the matching rows",
+                "from_id": "db",
+                "to_id": "app",
+                "label": "rows",
+            },
+        ],
+    },
+    BlockType.TIMELINE: {
+        "headline": "How the fix landed",
+        "events": [
+            {
+                "anchor_phrase": "the bug was first reported",
+                "label": "Reported",
+                "date_label": "Day 1",
+            },
+            {"anchor_phrase": "a patch went out", "label": "Patched", "date_label": "Day 3"},
         ],
     },
 }

@@ -11,6 +11,9 @@ Also where T18B's narration-anchored choreography (see ``rendering/anchors.py``)
 concrete number: a block's own ``anchor_phrase`` (from the plan) and each of its items' own text
 are matched against ``word_marks`` here, before a template ever sees them, so a block partial
 just reads ``block.entrance_start``/``block.item_starts`` rather than re-deriving timing itself.
+T18C split the per-item/per-step/per-node resolution itself into ``rendering/block_timing.py``,
+and added ``rendering/annotations.py`` for the new cross-cutting overlay marks -- this module
+stays the orchestration layer: build every block, resolve every annotation, render.
 
 Per D2 the LLM never wrote HTML -- ``core/graph/nodes/scene_author.py`` filled each block's
 small slot payload, and this is where those payloads become markup. The composition always
@@ -18,7 +21,7 @@ lands as ``dest_dir/index.html``: ``hyperframes lint`` (D60) hard-requires that 
 """
 
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +32,9 @@ from core.models import Segment
 from core.scene_schemas import ComposedBlock, ComposedScene
 from interfaces.tts_provider import WordMark
 from mux.caption_cues import group_into_cues
-from rendering.anchors import derive_item_anchors, resolve_anchor
+from rendering.anchors import resolve_anchor
+from rendering.annotations import RenderableAnnotation, resolve_annotations
+from rendering.block_timing import resolve_item_starts, resolve_step_starts
 from rendering.palettes import select_palette
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -47,24 +52,14 @@ _env = Environment(
 # block in a SPLIT_HORIZONTAL scene doesn't land on top of the first.
 _DEFAULT_ENTRANCE_BASE = 0.15
 _DEFAULT_ENTRANCE_STEP = 0.25
-# Fallback per-item cascade when an item's own text doesn't match the narration -- bullet_list's
-# and diagram_flow's original 0.75s-start/0.22s-stagger waterfall, unchanged.
-_DEFAULT_ITEM_START = 0.75
-_DEFAULT_ITEM_STAGGER = 0.22
-
-# Field name, per block type, holding the list of item strings worth their own anchor -- a
-# TEXT_PANEL's bullets, a DIAGRAM_CHAIN's node labels. Block types absent here (title,
-# stat_callout, code_panel, array_grid) either have no repeated items or -- array_grid -- carry
-# each step's own explicit anchor_phrase in its own schema instead of deriving one.
-_ITEM_FIELDS: dict[str, str] = {"text_panel": "items", "diagram_chain": "nodes"}
 
 
 @dataclass(frozen=True, slots=True)
 class RenderableBlock:
     """One block, ready for a layout template: its content validated into its own typed schema
     instance (so a block partial writes ``block.payload.headline`` the same way every pre-T18B
-    template wrote ``slots.headline``), an id prefix unique within the composition, and
-    narration-anchored timing already resolved."""
+    template wrote ``slots.headline``), an id prefix unique within the composition, narration-
+    anchored timing already resolved, and (T18C) the annotations that target it."""
 
     prefix: str
     block_type: str
@@ -72,42 +67,7 @@ class RenderableBlock:
     entrance_start: float
     item_starts: list[float] | None
     step_starts: list[float] | None
-
-
-def _item_text(item: Any) -> str:
-    """A DIAGRAM_CHAIN node is a ``DiagramNode`` (``.label``); a TEXT_PANEL item is a bare
-    string. Both are "the text this item is anchored by"."""
-    return item.label if hasattr(item, "label") else str(item)
-
-
-def _resolve_item_starts(
-    block_type: str, payload: Any, word_marks: list[WordMark]
-) -> list[float] | None:
-    field = _ITEM_FIELDS.get(block_type)
-    if field is None:
-        return None
-    items = getattr(payload, field)
-    anchors_ms = derive_item_anchors(word_marks, [_item_text(item) for item in items])
-    return [
-        (ms / 1000) if ms is not None else _DEFAULT_ITEM_START + i * _DEFAULT_ITEM_STAGGER
-        for i, ms in enumerate(anchors_ms)
-    ]
-
-
-def _resolve_step_starts(
-    block_type: str, payload: Any, word_marks: list[WordMark]
-) -> list[float] | None:
-    """ARRAY_GRID's elimination steps carry their OWN authored ``anchor_phrase`` per step
-    (unlike TEXT_PANEL/DIAGRAM_CHAIN's items, whose anchor comes from their own display text) --
-    resolved the same way, one ``resolve_anchor`` call each, same fallback cascade."""
-    if block_type != "array_grid":
-        return None
-    starts = []
-    for i, step in enumerate(payload.steps):
-        anchor_ms = resolve_anchor(word_marks, step.anchor_phrase)
-        fallback = _DEFAULT_ITEM_START + i * _DEFAULT_ITEM_STAGGER
-        starts.append(anchor_ms / 1000 if anchor_ms is not None else fallback)
-    return starts
+    annotations: list[RenderableAnnotation]
 
 
 def _build_renderable(
@@ -120,6 +80,7 @@ def _build_renderable(
         )
     schema = block_schema_for(block.block_type)
     payload = schema.model_validate(block.payload)
+    block_type = block.block_type.value
 
     anchor_ms = resolve_anchor(word_marks, block.anchor_phrase)
     entrance_start = (
@@ -130,11 +91,12 @@ def _build_renderable(
 
     return RenderableBlock(
         prefix=f"b{index}",
-        block_type=block.block_type.value,
+        block_type=block_type,
         payload=payload,
         entrance_start=entrance_start,
-        item_starts=_resolve_item_starts(block.block_type.value, payload, word_marks),
-        step_starts=_resolve_step_starts(block.block_type.value, payload, word_marks),
+        item_starts=resolve_item_starts(block_type, payload, word_marks),
+        step_starts=resolve_step_starts(block_type, payload, word_marks),
+        annotations=[],
     )
 
 
@@ -170,6 +132,11 @@ def compose_scene(segment: Segment, dest_dir: Path) -> Path:
     renderable = [
         _build_renderable(index, block, segment.word_marks)
         for index, block in enumerate(scene.blocks)
+    ]
+    annotations_by_block = resolve_annotations(scene, renderable, segment.word_marks)
+    renderable = [
+        replace(block, annotations=annotations_by_block.get(index, []))
+        for index, block in enumerate(renderable)
     ]
     palette = select_palette(scene.motif)
 

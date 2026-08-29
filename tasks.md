@@ -369,10 +369,44 @@ shape, not a constant tweak).
 
 **Depends:** T18A — met.
 
-### T18C — The broadened block library, and the vision critique/revision loop · `todo`
+### T18C — The broadened block library · `done`
 **Scoped during T18B's own planning** (decisionlog D104-D105), deliberately deferred rather than
 crammed into T18B so the genuinely novel, highest-craft work gets a full session's attention
 instead of being squeezed at the end of an already-large one.
+
+**Rescoped during this task's own planning, by the user's agreement:** the entry below originally
+bundled the block library with the vision critique/revision loop and a full 7-minute validation
+render. Too much for one session — each new block type has historically needed its own
+real-toolchain verification pass (D106: four real bugs found only by the actual toolchain, across
+just one new block last time). **What actually shipped is the block library only, plus two related
+pre-existing gaps this task's own research surfaced** (the caption/content-overlap check the
+original entry below already named, and D107's mixed-tier live test fix). The vision loop and the
+validation render are deferred to a new, not-yet-scoped **T18D** — see that entry below, which also
+absorbs the "make video generation faster" request raised mid-planning and the previously-vague
+"push LLM compositionality further" placeholder this section used to point at. Full reasoning:
+decisionlog D113-D118.
+
+**What actually shipped, DoD as met:** `GRAPH_DIAGRAM` (retiring `DIAGRAM_CHAIN`, both CHAIN and
+GRAPH layout modes, D113), `ARRAY_GRID` generalized to four step ops plus orientation (D114),
+`CODE_DIFF`, `SEQUENCE_DIAGRAM`, `TIMELINE`, and a new cross-cutting annotation overlay system
+(cursor/check/warning — not a `BlockType`, D115). The caption/content-overlap check is real and
+closed (D116): a genuine pre-existing 24px gap between `#stage`'s padding and the caption band was
+found and fixed, and `hyperframes check --caption-zone` is now wired into the real toolchain test
+— its findings fold into the existing `layout` category, no new assertion needed. D107's mixed-tier
+live test is fixed (D117), retargeted to a genuinely reachable tier pair rather than the
+mathematically-unreachable one it asked for before. `pytest` green (640+, up from 622), `ruff`
+clean, boundary/line-count checks clean, and every new block type (plus both `GRAPH_DIAGRAM`
+modes, all four `ArrayStep` ops, and annotations in both layouts) verified against the real
+`hyperframes check` toolchain — two real bugs found this way in the annotation positioning
+mechanism, both fixed and re-verified (D115), plus a third found by `project-reviewer`'s own final
+pass in this task's *own new test coverage*, also fixed (D114).
+
+**Not done, explicitly deferred to T18D, not silently dropped:** the vision critique/revision loop
+and the full 7-minute validation render (both described below, unchanged from the original scoping
+— still real, still not started). **Not done, flagged as trust-blocking in `handoff.md`, not
+silently skipped:** no `pytest -m local_live` run and no real `cli.py` render of any new block type
+— this task's own real-toolchain verification used standalone `hyperframes check` probes against
+hand-composed scenes, never the actual render/capture path.
 
 **Scope, reasoned past the user's own three named examples per their explicit instruction not to
 limit the block library to those** — what a general "prompt-to-explainer-video" platform actually
@@ -426,11 +460,35 @@ test work this task already does.
 confirmed the best-supported thing in this session's own HyperFrames research
 (`browser-device-stage`/`simulated-cursor`/`ui-focus-zoom` already take data-driven coordinates),
 but waiting on a document-ingestion path that doesn't exist yet (T29's scope, iteration 6,
-scheduled last per the original requirement). A possible **T18D** — pushing LLM compositionality
-further than the block-schema model, "testing the limits" of what the render-time budget allows,
-per the user's own framing in T18B's planning — is named for continuity but has had no scoping
-conversation and is not promised as this task's or any specific session's work.
+scheduled last per the original requirement).
 **Depends:** T18B — met.
+
+### T18D — Vision critique/revision loop, full validation render, and rendering/pipeline speed · `todo`
+**Not yet scoped as a real plan — this entry records what it needs to cover, not a committed
+design.** Absorbs three things, per D118: two carried forward unbuilt from T18C's original (too
+large) scoping, one raised fresh during T18C's own planning. Previously also carried a vaguer
+placeholder framing ("push LLM compositionality further, testing the limits of what the
+render-time budget allows," from T18B's planning) — folded into this same task rather than kept as
+a separate untracked idea; whoever scopes this next should treat that framing as one possible angle
+on the validation-render item below, not a separate obligation.
+
+- **The vision critique/revision loop** — capture stills from a composed scene
+  (`adapters/local/playwright_capture.py` already does this for Tier 0/1), show them to a
+  vision-capable model, critique, revise the scene plan, re-render only what failed. Requires a
+  real `interfaces/llm_provider.py` change (image input) — `LLMProvider.generate` is text-only
+  today — and the adapter-parity work that follows from it (both Azure and local, D40's
+  `inspect.signature` equality across every implementation including the fake).
+- **A full 7-minute validation render** across 2-3 genuinely different topic types (algorithmic,
+  systems/protocol, security) — where D104's original "one real full-length render" promise
+  properly lands, against content that will actually exercise T18C's broadened block library, not
+  just T18B's original six.
+- **Rendering/pipeline speed** — raised mid-planning during T18C, not yet scoped to a specific
+  target. Candidates named but not chosen: render throughput (`FRAME_BUDGET`/tier assignment),
+  LLM/TTS call latency, or overall end-to-end wall-clock. Needs its own measurement pass before any
+  code changes — the same discipline D16/D99's history argues for (a wrong measurement, once
+  written into a constant, propagates unquestioned across sessions until someone re-derives it).
+
+**Depends:** T18C — met.
 
 ---
 

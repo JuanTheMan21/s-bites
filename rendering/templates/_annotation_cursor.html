@@ -1,0 +1,60 @@
+{#
+  AnnotationType.CURSOR -- T18C. Hand-ported combination of the HyperFrames registry's
+  simulated-cursor (a pointer glyph) and press-ripple (a click-pulse) techniques -- no single
+  canonical registry match, so this adapts the simplest combination rather than cloning either
+  (D103).
+#}
+
+{% macro markup(prefix, caption) %}
+<div id="{{ prefix }}-anno" class="anno-cursor-wrap">
+  <svg class="anno-cursor-svg" viewBox="0 0 40 40">
+    <path class="anno-cursor-glyph" d="M6 4 L34 20 L21 23 L16 36 Z"></path>
+  </svg>
+  <div id="{{ prefix }}-anno-pulse" class="anno-cursor-pulse"></div>
+  {% if caption %}
+  {#- data-layout-allow-overlap: see _annotation_check.html's identical comment. #}
+  <div class="anno-cursor-caption" data-layout-allow-overlap>{{ caption }}</div>
+  {% endif %}
+</div>
+<style>
+  .anno-cursor-wrap {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .anno-cursor-svg { width: 40px; height: 40px; overflow: visible; }
+  .anno-cursor-glyph { fill: var(--accent-primary); stroke: var(--bg); stroke-width: 2; }
+  .anno-cursor-pulse {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid var(--accent-primary);
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .anno-cursor-caption { margin-top: 4px; font-size: 18px; font-weight: 600; color: var(--accent-primary); white-space: nowrap; }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, caption, entrance_start, target_id, container_id) %}
+  (function () {
+    var el = document.getElementById("{{ prefix }}-anno");
+    var pulse = document.getElementById("{{ prefix }}-anno-pulse");
+    var off = hfAnnotationOffset("{{ target_id }}", "{{ container_id }}");
+    var landX = off.dx + off.w / 2;
+    var landY = off.dy + off.h / 2;
+    tl.set(el, { x: landX + 60, y: landY - 60, scale: 0.6, opacity: 0 }, 0);
+    tl.set(pulse, { scale: 0.6, opacity: 0 }, 0);
+    tl.to(el, { x: landX, y: landY, scale: 1, opacity: 1, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
+    tl.to(pulse, { scale: 1.8, opacity: 0.8, duration: 0.01 }, {{ entrance_start + 0.4 }});
+    tl.to(pulse, { scale: 2.6, opacity: 0, duration: 0.45, ease: "power2.out" }, {{ entrance_start + 0.41 }});
+  })();
+{% endmacro %}

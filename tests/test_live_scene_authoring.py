@@ -78,7 +78,7 @@ def _a_block(block_type: BlockType) -> ComposedBlock:
 
 def _strings(value: Any) -> Iterator[str]:
     """Every string anywhere in a block payload -- nested lists and objects included, since
-    ``diagram_chain``'s nodes and ``code_panel``'s lines are where markup would hide."""
+    ``graph_diagram``'s nodes and ``code_panel``'s lines are where markup would hide."""
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):

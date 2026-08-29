@@ -31,16 +31,26 @@ from tests.fakes import FakeLLMProvider, FakeSkillRegistry, FakeStorage, FakeTTS
 pytestmark = pytest.mark.local_live
 
 DURATION_MS = 2_000
-# Comfortably above 2x mux.concat_segments.DEFAULT_TRANSITION_S (1.0s) -- a duration right at
-# that boundary made the one crossfade transition below too tight against the STATIC clip's own
-# length to render reliably.
+# Comfortably above 2x mux.concat_segments.DEFAULT_TRANSITION_S (0.5s) -- a duration right at
+# that boundary made the one crossfade transition below too tight to render reliably.
+#
+# T18C/D107: the original target here was {Tier.STATIC, Tier.ANIMATED}, discovered to be
+# unreachable at any safe duration for any segment count or importance pairing -- REVEAL's frame
+# cost is a flat +7 over STATIC regardless of duration, while ANIMATED's cost is duration-scaled
+# and always far larger at a safe duration, so a segment that fails REVEAL promotion never leaves
+# enough remaining budget for another segment to reach ANIMATED. Retargeted to
+# {Tier.REVEAL, Tier.ANIMATED} instead -- genuinely reachable, and still exercises the real
+# two-clip crossfade concat this test actually cares about.
 #
 # FRAME_BUDGET chosen against core/tier_resolver.py's own arithmetic (checked by hand, not
-# guessed): base cost is 2 (one STATIC frame per segment). Promoting the CRITICAL segment to
-# REVEAL costs +7 (spent=9); promoting it on to ANIMATED at DURATION_MS/FPS costs +40 more
-# (ceil(2000/1000*24)=48, minus the 8 it already cost at REVEAL) for spent=49. 55 clears that with
-# room, while never affording the ASIDE segment (ideal STATIC) anything beyond Tier 0.
-FRAME_BUDGET = 55
+# guessed): base cost is 2 (one STATIC frame per segment). Pass 1 promotes BOTH segments to
+# REVEAL -- ASIDE's ideal tier is REVEAL, CRITICAL's ideal (ANIMATED) is >= REVEAL too -- costing
+# +7 each (spent=16). Pass 2 promotes only CRITICAL to ANIMATED (ASIDE's ideal tier structurally
+# excludes it from this pass, regardless of remaining budget); that costs +40 more
+# (ceil(2000/1000*24)=48, minus the 8 it already cost at REVEAL) for a minimum of 56. Unlike the
+# old target, there is no upper bound to stay under -- ASIDE can never be promoted past REVEAL no
+# matter how large the budget grows -- so 80 is simply "comfortably above 56," not a boundary.
+FRAME_BUDGET = 80
 FPS = 24
 
 
@@ -70,6 +80,7 @@ def _seeded_llm() -> FakeLLMProvider:
                 layout=SceneLayout.SINGLE,
                 blocks=[PlannedBlock(block_type=BlockType.TITLE, role="Title", anchor_phrase=None)],
                 continues_previous=False,
+                annotations=[],
             )
             for i in range(2)
         ],
@@ -123,8 +134,8 @@ async def test_a_mixed_tier_job_renders_muxes_and_concats_to_one_playable_video(
     assert result_job.status.value == "succeeded"
 
     tiers = {segment.tier for segment in result_job.segments}
-    assert tiers == {Tier.STATIC, Tier.ANIMATED}, (
-        f"expected exactly one STATIC and one ANIMATED segment to exercise the mixed-tier concat "
+    assert tiers == {Tier.REVEAL, Tier.ANIMATED}, (
+        f"expected exactly one REVEAL and one ANIMATED segment to exercise the mixed-tier concat "
         f"path, got {tiers} -- FRAME_BUDGET's arithmetic above may need revisiting"
     )
 

@@ -1,0 +1,108 @@
+{#
+  BlockType.TIMELINE -- T18C, new. A horizontal run of labelled events, for historical or
+  evolutionary topics. A third reuse of GRAPH_DIAGRAM's CHAIN-mode rail technique (single
+  straight spine via loop.index0/(n-1)*1600, stroke-draw segments) -- events alternate above and
+  below the spine instead of sitting on one side, each showing date_label above label.
+#}
+
+{% macro markup(prefix, payload, compact=false) %}
+{% set n = payload.events | length %}
+<div id="{{ prefix }}-wrap" class="blk-tl-wrap">
+  <h1 id="{{ prefix }}-headline" class="blk-tl-headline">{{ payload.headline }}</h1>
+  <div id="{{ prefix }}-rail" class="blk-tl-rail" style="height: {{ '260px' if compact else '420px' }};">
+    <svg viewBox="0 0 1600 {{ 260 if compact else 420 }}" preserveAspectRatio="none">
+      {% for event in payload.events %}
+      {% if not loop.last %}
+      {% set x1 = (loop.index0 / (n - 1) * 1600) if n > 1 else 800 %}
+      {% set x2 = ((loop.index0 + 1) / (n - 1) * 1600) if n > 1 else 800 %}
+      {% set mid = (260 if compact else 420) / 2 %}
+      <line id="{{ prefix }}-seg-{{ loop.index0 }}" class="blk-tl-line" x1="{{ x1 }}" y1="{{ mid }}" x2="{{ x2 }}" y2="{{ mid }}"></line>
+      {% endif %}
+      {% endfor %}
+    </svg>
+    {% for event in payload.events %}
+    {% set pct = (loop.index0 / (n - 1) * 100) if n > 1 else 50 %}
+    {% set above = loop.index0 % 2 == 0 %}
+    <div class="blk-tl-marker" id="{{ prefix }}-marker-{{ loop.index0 }}" style="left: calc({{ pct }}% - 10px);"></div>
+    <div class="blk-tl-event blk-tl-event-{{ 'above' if above else 'below' }}" id="{{ prefix }}-event-{{ loop.index0 }}" style="left: calc({{ pct }}% - {{ '85px' if compact else '110px' }});">
+      <div class="blk-tl-date voice-data">{{ event.date_label }}</div>
+      <div class="blk-tl-label">{{ event.label }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+<style>
+  .blk-tl-wrap { width: 100%; display: flex; flex-direction: column; }
+  .blk-tl-headline {
+    font-weight: 700;
+    font-size: {{ "42px" if compact else "68px" }};
+    max-width: 100%;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-tl-rail { position: relative; width: 100%; margin-top: {{ "40px" if compact else "70px" }}; }
+  .blk-tl-rail svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .blk-tl-line { stroke: var(--accent-secondary); stroke-width: 4; stroke-linecap: round; fill: none; }
+  .blk-tl-marker {
+    position: absolute;
+    top: calc(50% - 10px);
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 3px solid var(--accent-secondary);
+    background: var(--bg);
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-tl-event {
+    position: absolute;
+    width: {{ "170px" if compact else "220px" }};
+    text-align: center;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-tl-event-above { top: calc(50% - {{ "95px" if compact else "130px" }}); }
+  .blk-tl-event-below { top: calc(50% + 30px); }
+  .blk-tl-date {
+    font-size: {{ "16px" if compact else "20px" }};
+    color: var(--accent-primary);
+    font-weight: 600;
+  }
+  .blk-tl-label {
+    margin-top: 6px;
+    font-weight: 700;
+    font-size: {{ "20px" if compact else "26px" }};
+    line-height: 1.25;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
+
+  const {{ prefix }}_eventStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+
+  document.querySelectorAll("#{{ prefix }}-rail .blk-tl-marker").forEach((el, i) => {
+    tl.fromTo(el, { scale: 0, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.35, ease: "power3.out" }, {{ prefix }}_eventStarts[i]);
+  });
+  document.querySelectorAll("#{{ prefix }}-rail .blk-tl-event").forEach((el, i) => {
+    var above = el.classList.contains("blk-tl-event-above");
+    tl.fromTo(
+      el,
+      { opacity: 0, y: above ? 16 : -16 },
+      { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" },
+      {{ prefix }}_eventStarts[i] + 0.15,
+    );
+  });
+
+  (function () {
+    var segs = document.querySelectorAll("#{{ prefix }}-rail line");
+    segs.forEach(function (seg, i) {
+      var len = seg.getTotalLength();
+      seg.style.strokeDasharray = String(len);
+      seg.style.strokeDashoffset = String(len);
+      var start = {{ prefix }}_eventStarts[i] + 0.2;
+      tl.to(seg, { strokeDashoffset: 0, duration: 0.4, ease: "power2.out" }, start);
+    });
+  })();
+{% endmacro %}

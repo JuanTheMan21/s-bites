@@ -85,6 +85,7 @@ def _seeded_llm(segment_count: int) -> FakeLLMProvider:
                 layout=SceneLayout.SINGLE,
                 blocks=[PlannedBlock(block_type=BlockType.TITLE, role="Title", anchor_phrase=None)],
                 continues_previous=False,
+                annotations=[],
             )
             for i in range(segment_count)
         ],

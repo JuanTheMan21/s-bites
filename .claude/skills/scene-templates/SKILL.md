@@ -52,10 +52,18 @@ a duration inside a template, stop — that is the drift bug reintroducing itsel
 
 **Narration-anchored timing, not just narration-derived duration.** `rendering/anchors.py` matches
 a block's own `anchor_phrase` (from the plan) and, for blocks with repeated items (`text_panel`'s
-items, `diagram_chain`'s nodes), each item's own text against `segment.word_marks` — real timing
-when a match is found, a fixed cascade otherwise. This happens in `rendering/compose.py` before a
-template ever sees it; a block partial reads `block.entrance_start`/`item_starts`/`step_starts`,
-already resolved.
+items, `graph_diagram`'s nodes), each item's own text against `segment.word_marks` — real timing
+when a match is found, a fixed cascade otherwise. This resolution now lives in
+`rendering/block_timing.py` (split out of `rendering/compose.py` in T18C), called from
+`compose.py` before a template ever sees it; a block partial reads
+`block.entrance_start`/`item_starts`/`step_starts`, already resolved.
+
+**T18C added annotations — a separate concept from a `BlockType`.** An annotation (cursor/check/
+warning) targets a specific element *inside* an already-planned block rather than filling its own
+`SceneLayout` region — see `core/scene_plan_schema.py::PlannedAnnotation`'s docstring and
+`rendering/annotations.py`. Do not register a new annotation type the same way as "Adding a block
+type" below; it follows its own pattern (`_annotation_<name>.html`, `AnnotationType` in
+`core/block_types.py`, no `BLOCK_SCHEMAS`/`ALLOWED_BLOCKS` entry).
 
 ## HyperFrames essentials
 

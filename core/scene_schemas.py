@@ -18,7 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.block_types import BlockType, MotifName, SceneLayout
+from core.block_types import AnnotationType, BlockType, MotifName, SceneLayout
 
 
 class ComposedBlock(BaseModel):
@@ -36,6 +36,22 @@ class ComposedBlock(BaseModel):
     )
 
 
+class ComposedAnnotation(BaseModel):
+    """One overlay mark on a scene, targeting an element inside one of its blocks.
+
+    Never filled by its own LLM call the way a ``ComposedBlock``'s payload is -- ``caption`` is
+    already produced by the single ``plan_visuals`` call, so ``author_scene``/``fill_block`` are
+    untouched by this type entirely (see ``core/graph/nodes/visual_plan.py``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    annotation_type: AnnotationType
+    target_block_index: int
+    target_item_index: int | None
+    anchor_phrase: str | None
+    caption: str | None
+
+
 class ComposedScene(BaseModel):
     """One segment's whole scene: the video's motif, a layout, and the blocks that fill it."""
 
@@ -45,3 +61,4 @@ class ComposedScene(BaseModel):
     layout: SceneLayout
     blocks: list[ComposedBlock]
     continues_previous: bool
+    annotations: list[ComposedAnnotation] = Field(default_factory=list)

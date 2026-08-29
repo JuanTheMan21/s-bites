@@ -1,31 +1,30 @@
 {#
-  BlockType.ARRAY_GRID -- T18B's one genuinely new block, with no pre-T18B equivalent and no
-  turnkey HyperFrames registry component (confirmed by this session's research): a row of cells
-  that can visually narrow over the course of the narration -- a binary search's halving, a
-  sliding window closing in, a stack's items falling away from one end. Composed from
-  grid-card-assemble's stagger-in technique and strikethrough-replace's strike-then-fade
-  technique, both hand-adapted rather than cloned (the registry's own runtime doesn't fit this
-  project's single-composition-per-segment layout, D103).
+  BlockType.ARRAY_GRID -- T18B's one genuinely new block, generalized in T18C beyond pure
+  narrowing: op says whether a step narrows (a binary search's halving, unchanged from T18B),
+  shifts (a sliding window translating), or pushes/pops (a stack or queue's own end growing or
+  shrinking by exactly one cell). end_operation is a separate, optional '+'/'-' badge at a step's
+  acting cell. orientation swaps the row to a column for content that reads top-to-bottom.
 
-  Each ArrayEliminationStep narrows the active window to [remaining_start, remaining_end) --
-  cells that fall OUTSIDE the new window but were still inside the previous one get struck
-  through and faded at that step's own narration-anchored beat (step_starts, resolved in
-  rendering/compose.py from each step's own anchor_phrase).
+  Composed from grid-card-assemble's stagger-in technique and strikethrough-replace's
+  strike-then-fade technique, both hand-adapted rather than cloned (the registry's own runtime
+  doesn't fit this project's single-composition-per-segment layout, D103).
 #}
 
 {% macro markup(prefix, payload, compact=false) %}
 {% set n = payload.cells | length %}
+{% set vertical = payload.orientation == "vertical" %}
 <div id="{{ prefix }}-wrap" class="blk-array-wrap">
   <h1 id="{{ prefix }}-headline" class="blk-array-headline">{{ payload.headline }}</h1>
-  <div id="{{ prefix }}-row" class="blk-array-row">
+  <div id="{{ prefix }}-row" class="blk-array-row {{ 'blk-array-row-vertical' if vertical else '' }}">
     {% for cell in payload.cells %}
-    <div class="blk-array-cell" id="{{ prefix }}-cell-{{ loop.index0 }}">
+    <div class="blk-array-cell {{ 'blk-array-cell-vertical' if vertical else '' }}" id="{{ prefix }}-cell-{{ loop.index0 }}">
       {#- data-layout-allow-occlusion: the strike is DESIGNED to cross the value once eliminated
          -- hyperframes check's text_occluded finding is correct that the strike overlaps the
          text, and wrong that it is a legibility bug; a strikethrough crossing its own text is
          the whole point of the mark, not an accident. #}
       <span class="blk-array-cell-value" data-layout-allow-occlusion>{{ cell }}</span>
       <span class="blk-array-cell-strike" id="{{ prefix }}-strike-{{ loop.index0 }}"></span>
+      <span class="blk-array-badge" id="{{ prefix }}-badge-{{ loop.index0 }}"></span>
     </div>
     {% endfor %}
   </div>
@@ -41,10 +40,12 @@
   }
   .blk-array-row {
     display: flex;
+    flex-direction: row;
     gap: {{ "6px" if compact else "10px" }};
     margin-top: {{ "50px" if compact else "90px" }};
     width: 100%;
   }
+  .blk-array-row-vertical { flex-direction: column; width: auto; max-width: {{ "260px" if compact else "360px" }}; }
   .blk-array-cell {
     position: relative;
     flex: 1 1 0;
@@ -59,6 +60,7 @@
     transform-origin: center;
     will-change: opacity, transform;
   }
+  .blk-array-cell-vertical { height: {{ "56px" if compact else "76px" }}; width: 100%; }
   .blk-array-cell-value {
     font-family: "JetBrains Mono", "Courier New", monospace;
     font-weight: 600;
@@ -78,6 +80,23 @@
     transform-origin: center;
     will-change: transform;
   }
+  .blk-array-badge {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    color: var(--bg);
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-weight: 700;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    will-change: opacity, transform;
+  }
 </style>
 {% endmacro %}
 
@@ -95,39 +114,72 @@
       { scale: 1, opacity: 1, y: 0, duration: 0.3, ease: "power3.out" },
       t,
     );
-    // Every strike line's collapsed state is set here, in JS, at t=0 -- never in static CSS
-    // (hyperframes-core's rule, same one _tokens.html's background frame follows: a CSS initial
-    // transform paired with a GSAP tween on the same property is a lint failure, and for a cell
-    // whose range is never eliminated, no other tween would ever touch it, leaving it at CSS's
-    // un-transformed (fully visible, occluding) default instead of collapsed).
+    // Every strike line's collapsed state, and every badge's hidden state, is set here, in JS,
+    // at t=0 -- never in static CSS (D106 item 4's rule): a cell whose range is never touched by
+    // any step would otherwise sit at CSS's un-transformed default instead of collapsed/hidden.
     tl.set("#{{ prefix }}-strike-" + i, { scaleX: 0 }, 0);
+    tl.set("#{{ prefix }}-badge-" + i, { scale: 0, opacity: 0 }, 0);
   }
 
-  // Elimination steps: cells outside this step's remaining window, but still inside the
-  // previous one, strike through and fade -- one moment at a time, each on its own
-  // narration-anchored beat (step_starts).
+  // Steps: NARROW strikes/fades cells that fall outside the new range (unchanged from T18B).
+  // SHIFT strikes/fades cells the range is leaving and pop-enters cells the range is gaining.
+  // PUSH pop-enters exactly one new cell at the range's end; POP strikes/fades exactly one.
+  // end_operation, independently, shows a '+'/'-' badge at the step's own acting cell.
   (function () {
     var prevStart = 0;
     var prevEnd = {{ prefix }}_cellCount;
     var stepStarts = [{% for s in step_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
     var steps = [
       {% for step in payload.steps %}
-      { start: {{ step.remaining_start }}, end: {{ step.remaining_end }} }{{ "," if not loop.last }}
+      { op: "{{ step.op }}", start: {{ step.remaining_start }}, end: {{ step.remaining_end }}, endOp: "{{ step.end_operation }}" }{{ "," if not loop.last }}
       {% endfor %}
     ];
+
+    function leave(idx, t) {
+      tl.to("#{{ prefix }}-cell-" + idx, { opacity: 0.28, duration: 0.35, ease: "power2.out" }, t);
+      tl.fromTo("#{{ prefix }}-strike-" + idx, { scaleX: 0 }, { scaleX: 1, duration: 0.3, ease: "power2.out" }, t);
+    }
+    function enter(idx, t) {
+      tl.fromTo(
+        "#{{ prefix }}-cell-" + idx,
+        { scale: 0.7, opacity: 0.3 },
+        { scale: 1, opacity: 1, duration: 0.3, ease: "back.out(2)" },
+        t,
+      );
+    }
+    function badge(idx, symbol, t) {
+      if (idx == null || idx < 0) return;
+      var el = document.getElementById("{{ prefix }}-badge-" + idx);
+      if (!el) return;
+      el.textContent = symbol;
+      tl.to(el, { scale: 1, opacity: 1, duration: 0.2, ease: "power2.out" }, t);
+      tl.to(el, { scale: 0, opacity: 0, duration: 0.2, ease: "power2.in" }, t + 0.6);
+    }
+
     steps.forEach(function (step, i) {
       var t = stepStarts[i];
-      for (var idx = prevStart; idx < prevEnd; idx++) {
-        if (idx < step.start || idx >= step.end) {
-          tl.to("#{{ prefix }}-cell-" + idx, { opacity: 0.28, duration: 0.35, ease: "power2.out" }, t);
-          tl.fromTo(
-            "#{{ prefix }}-strike-" + idx,
-            { scaleX: 0 },
-            { scaleX: 1, duration: 0.3, ease: "power2.out" },
-            t,
-          );
+      var actingIdx = null;
+
+      if (step.op === "narrow") {
+        for (var idx = prevStart; idx < prevEnd; idx++) {
+          if (idx < step.start || idx >= step.end) leave(idx, t);
         }
+      } else if (step.op === "shift") {
+        for (var li = prevStart; li < step.start; li++) leave(li, t);
+        for (var ei = prevEnd; ei < step.end; ei++) enter(ei, t);
+        actingIdx = step.endOp === "plus" ? step.end - 1 : prevStart;
+      } else if (step.op === "push") {
+        enter(step.end - 1, t);
+        actingIdx = step.end - 1;
+      } else if (step.op === "pop") {
+        leave(prevEnd - 1, t);
+        actingIdx = prevEnd - 1;
       }
+
+      if (step.endOp !== "none") {
+        badge(actingIdx, step.endOp === "plus" ? "+" : "-", t);
+      }
+
       prevStart = step.start;
       prevEnd = step.end;
     });

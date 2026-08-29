@@ -53,9 +53,9 @@ def shipped() -> SkillRegistry:
 LATEST_VERSION = {
     "house-style": "1.0",
     "outline": "1.0",
-    "scene-authoring": "1.2",
+    "scene-authoring": "1.3",
     "scripting": "1.0",
-    "visual-plan": "1.0",
+    "visual-plan": "1.1",
 }
 
 

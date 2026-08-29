@@ -20,7 +20,8 @@ from typing import Any
 import pytest
 
 from core import StrictSchema
-from core.block_schemas import BLOCK_SCHEMAS, DiagramNode, block_schema_for
+from core.block_schemas import BLOCK_SCHEMAS, block_schema_for
+from core.block_schemas_graph import GraphNode
 from core.block_types import BlockType
 from core.models import Segment, VisualIntent
 from core.scene_schemas import ComposedBlock, ComposedScene
@@ -104,7 +105,7 @@ def test_no_block_schema_is_registered_against_a_dead_block_type() -> None:
 def test_the_schemas_found_include_the_ones_we_expect() -> None:
     """Guards the enumeration itself -- a walker that finds nothing passes every test below."""
     names = {c.__name__ for c in all_strict_schemas()}
-    assert {"SegmentPlan", "Outline", "DiagramNode", "PlannedBlock", "VideoScenePlan"} <= names
+    assert {"SegmentPlan", "Outline", "GraphNode", "PlannedBlock", "VideoScenePlan"} <= names
     assert {c.__name__ for c in BLOCK_SCHEMAS.values()} <= names
 
 
@@ -171,5 +172,5 @@ def test_a_filled_payload_round_trips_through_a_segment(block_type: BlockType) -
 
 def test_a_nested_model_is_itself_strict() -> None:
     """The case a top-level-only check would miss: a nested model that forgot the base class."""
-    assert issubclass(DiagramNode, StrictSchema)
-    assert DiagramNode.model_json_schema()["additionalProperties"] is False
+    assert issubclass(GraphNode, StrictSchema)
+    assert GraphNode.model_json_schema()["additionalProperties"] is False

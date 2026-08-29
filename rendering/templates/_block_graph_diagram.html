@@ -1,0 +1,227 @@
+{#
+  BlockType.GRAPH_DIAGRAM -- T18C, retires DIAGRAM_CHAIN. Two layout modes selected by
+  payload.layout: CHAIN reproduces the retired block's single straight rail exactly (same
+  loop.index0/(n-1)*1600 fraction math, same node/marker/rail-segment choreography, byte-for-byte
+  the same visual); GRAPH places nodes on a real 2D canvas for arbitrary topology, with an
+  optional traversal highlight -- the hand-ported *technique* from the HyperFrames registry's
+  offset-path-traveler component (a marker that moves to indicate traversal), not the component
+  itself (D103: the registry's own runtime doesn't fit this project's composition model).
+
+  GRAPH mode's node positions are a one-time layout, never a tracked GSAP tween property, so they
+  are resolved in plain synchronous JS (authored payload.positions win, an evenly spaced circular
+  layout fills in the rest) rather than threaded through as a new macro parameter -- this keeps
+  markup()/script()'s signature identical to every other block partial's.
+
+  GRAPH_DIAGRAM's traversal points share the same step_starts slot ARRAY_GRID's elimination steps
+  use (rendering/block_timing.py resolves whichever field a block type actually has).
+#}
+
+{% macro markup(prefix, payload, compact=false) %}
+{% set n = payload.nodes | length %}
+<div id="{{ prefix }}-wrap" class="blk-graph-wrap">
+  <h1 id="{{ prefix }}-headline" class="blk-graph-headline">{{ payload.headline }}</h1>
+  {% if payload.layout == "chain" %}
+  <div id="{{ prefix }}-rail" class="blk-graph-rail" style="height: {{ '220px' if compact else '340px' }};">
+    <svg viewBox="0 0 1600 340" preserveAspectRatio="none">
+      {% for node in payload.nodes %}
+      {% if not loop.last %}
+      {% set x1 = (loop.index0 / (n - 1) * 1600) if n > 1 else 800 %}
+      {% set x2 = ((loop.index0 + 1) / (n - 1) * 1600) if n > 1 else 800 %}
+      <line id="{{ prefix }}-seg-{{ loop.index0 }}" class="blk-graph-line" x1="{{ x1 }}" y1="36" x2="{{ x2 }}" y2="36"></line>
+      {% endif %}
+      {% endfor %}
+    </svg>
+    {% for node in payload.nodes %}
+    {% set pct = (loop.index0 / (n - 1) * 100) if n > 1 else 50 %}
+    <div class="blk-graph-node blk-graph-node-chain" id="{{ prefix }}-node-{{ loop.index0 }}" style="left: calc({{ pct }}% - {{ '100px' if compact else '140px' }});">
+      <div class="blk-graph-marker voice-data">{{ "%02d" | format(loop.index) }}</div>
+      <div class="blk-graph-label">{{ node.label }}</div>
+      {% if node.caption %}
+      <div class="blk-graph-caption">{{ node.caption }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div id="{{ prefix }}-canvas" class="blk-graph-canvas" style="height: {{ '220px' if compact else '620px' }};">
+    <svg id="{{ prefix }}-svg" viewBox="0 0 1600 {{ 400 if compact else 700 }}" preserveAspectRatio="none">
+      {% for edge in payload.edges %}
+      <line id="{{ prefix }}-edge-{{ loop.index0 }}" class="blk-graph-line" x1="0" y1="0" x2="0" y2="0"></line>
+      {% endfor %}
+      <circle id="{{ prefix }}-traveler" class="blk-graph-traveler" r="14" cx="0" cy="0"></circle>
+    </svg>
+    {% for node in payload.nodes %}
+    <div class="blk-graph-node blk-graph-node-free" id="{{ prefix }}-node-{{ loop.index0 }}">
+      <div class="blk-graph-marker voice-data">{{ "%02d" | format(loop.index) }}</div>
+      <div class="blk-graph-label">{{ node.label }}</div>
+      {% if node.caption %}
+      <div class="blk-graph-caption">{{ node.caption }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+<style>
+  .blk-graph-wrap { width: 100%; display: flex; flex-direction: column; }
+  .blk-graph-headline {
+    font-weight: 700;
+    font-size: {{ "42px" if compact else "68px" }};
+    max-width: 100%;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-graph-rail { position: relative; width: 100%; margin-top: {{ "50px" if compact else "90px" }}; }
+  .blk-graph-canvas { position: relative; width: 100%; margin-top: {{ "40px" if compact else "70px" }}; }
+  .blk-graph-rail svg, .blk-graph-canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .blk-graph-line { stroke: var(--accent-secondary); stroke-width: 4; stroke-linecap: round; fill: none; }
+  .blk-graph-traveler { fill: var(--accent-primary); stroke: none; }
+  .blk-graph-node {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-graph-node-chain { top: 0; width: {{ "200px" if compact else "280px" }}; }
+  .blk-graph-node-free { transform: translate(-50%, -50%); width: {{ "160px" if compact else "220px" }}; }
+  .blk-graph-marker {
+    flex: 0 0 auto;
+    width: {{ "52px" if compact else "72px" }};
+    height: {{ "52px" if compact else "72px" }};
+    border-radius: 50%;
+    border: 3px solid var(--accent-secondary);
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: {{ "18px" if compact else "26px" }};
+    color: var(--accent-secondary);
+  }
+  .blk-graph-label {
+    margin-top: 18px;
+    font-weight: 700;
+    font-size: {{ "22px" if compact else "30px" }};
+    line-height: 1.25;
+  }
+  .blk-graph-caption {
+    margin-top: 8px;
+    font-weight: 400;
+    font-size: {{ "16px" if compact else "22px" }};
+    color: var(--fg-muted);
+    line-height: 1.3;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
+
+  const {{ prefix }}_nodeStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+
+  {% if payload.layout == "chain" %}
+  // CHAIN mode: identical entrance/rail choreography to the retired DIAGRAM_CHAIN block.
+  document.querySelectorAll("#{{ prefix }}-rail .blk-graph-node").forEach((el, i) => {
+    tl.fromTo(
+      el,
+      { scale: 0, opacity: 0, y: 20 },
+      { scale: 1, opacity: 1, y: 0, duration: 0.45, ease: "power3.out" },
+      {{ prefix }}_nodeStarts[i],
+    );
+  });
+  (function () {
+    var segs = document.querySelectorAll("#{{ prefix }}-rail line");
+    var SEG_DUR = 0.45;
+    segs.forEach(function (seg, i) {
+      var len = seg.getTotalLength();
+      seg.style.strokeDasharray = String(len);
+      seg.style.strokeDashoffset = String(len);
+      var start = {{ prefix }}_nodeStarts[i] + 0.3;
+      tl.to(seg, { strokeDashoffset: 0, duration: SEG_DUR, ease: "power2.out" }, start);
+    });
+  })();
+  {% else %}
+  // GRAPH mode: resolve every node's (x, y) once -- authored positions win, an evenly spaced
+  // circular fallback fills the rest -- in the SAME 1600 x {{ 400 if compact else 700 }} virtual
+  // space the SVG's own viewBox uses, so a node div's CSS left/top percentage and an edge line's
+  // viewBox coordinates always agree (preserveAspectRatio="none" stretches the viewBox to fill
+  // the container exactly, so viewBox units and percent-of-container are the same fraction).
+  (function () {
+    var VBW = 1600, VBH = {{ 400 if compact else 700 }};
+    var nodeIds = [{% for node in payload.nodes %}"{{ node.id }}"{{ "," if not loop.last }}{% endfor %}];
+    var authored = {};
+    {% for pos in payload.positions %}
+    authored["{{ pos.node_id }}"] = [{{ pos.x }}, {{ pos.y }}];
+    {% endfor %}
+    var n = nodeIds.length;
+    var positions = nodeIds.map(function (id, i) {
+      if (authored[id]) return authored[id];
+      var angle = (2 * Math.PI * i) / Math.max(1, n);
+      return [0.5 + 0.4 * Math.cos(angle), 0.5 + 0.4 * Math.sin(angle)];
+    });
+
+    var els = document.querySelectorAll("#{{ prefix }}-canvas .blk-graph-node-free");
+    var byId = {};
+    els.forEach(function (el, i) {
+      var pos = positions[i];
+      el.style.left = (pos[0] * 100) + "%";
+      el.style.top = (pos[1] * 100) + "%";
+      byId[nodeIds[i]] = { el: el, x: pos[0] * VBW, y: pos[1] * VBH };
+    });
+
+    var edges = [
+      {% for edge in payload.edges %}
+      { from: "{{ edge.from_id }}", to: "{{ edge.to_id }}" }{{ "," if not loop.last }}
+      {% endfor %}
+    ];
+    var lines = document.querySelectorAll("#{{ prefix }}-svg .blk-graph-line");
+    edges.forEach(function (edge, i) {
+      var a = byId[edge.from], b = byId[edge.to], line = lines[i];
+      if (!a || !b || !line) return;
+      line.setAttribute("x1", a.x);
+      line.setAttribute("y1", a.y);
+      line.setAttribute("x2", b.x);
+      line.setAttribute("y2", b.y);
+    });
+
+    els.forEach(function (el, i) {
+      tl.fromTo(
+        el,
+        { scale: 0, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.45, ease: "power3.out" },
+        {{ prefix }}_nodeStarts[i],
+      );
+    });
+    lines.forEach(function (line, i) {
+      var len = line.getTotalLength();
+      line.style.strokeDasharray = String(len);
+      line.style.strokeDashoffset = String(len);
+      var start = {{ prefix }}_nodeStarts[0] + 0.3;
+      tl.to(line, { strokeDashoffset: 0, duration: 0.4, ease: "power2.out" }, start);
+    });
+
+    // Traversal: the traveler dot hops node-to-node, straight-line (no MotionPathPlugin), one
+    // ring-pulse on the node it lands on. Always initialised in JS, never left to CSS's default
+    // (D106 item 4's rule) -- hidden until the first hop even when there is no traversal at all.
+    var traveler = document.getElementById("{{ prefix }}-traveler");
+    tl.set(traveler, { opacity: 0, x: 0, y: 0 }, 0);
+    var stepStarts = [{% for s in step_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+    var traversal = [{% for step in payload.traversal %}"{{ step.node_id }}"{{ "," if not loop.last }}{% endfor %}];
+    traversal.forEach(function (nodeId, i) {
+      var target = byId[nodeId];
+      if (!target) return;
+      var t = stepStarts[i];
+      tl.to(traveler, { opacity: 1, x: target.x, y: target.y, duration: 0.4, ease: "power2.inOut" }, t);
+      tl.fromTo(
+        target.el,
+        { scale: 1 },
+        { scale: 1.15, duration: 0.25, yoyo: true, repeat: 1, ease: "power2.out" },
+        t + 0.35,
+      );
+    });
+  })();
+  {% endif %}
+{% endmacro %}

@@ -43,13 +43,30 @@ DURATION_MS = 4_000
 FPS = 24
 
 
+# T18C: the real geometry of _captions.html's caption band, as canvas fractions
+# (926/1080=0.8574 top, 1016/1080=0.9407 bottom) -- confirmed empirically (this task's own
+# Phase-0 spike) that a caption_zone_collision finding folds into the SAME "layout" category
+# already asserted below, under no separate top-level JSON key, so passing this flag here is the
+# whole fix: no new assertion needed, only real content reaching the band now gets caught.
+_CAPTION_ZONE = "x0=0;y0=0.8574;x1=1;y1=0.9407;severity=error"
+
+
 def _run_check(composition_dir) -> dict:
     # _NPX, not the bare string "npx": on Windows, npx is npx.cmd, and CreateProcess (which
     # subprocess.run uses without shell=True) does not resolve PATHEXT itself -- the same reason
     # adapters/local/hyperframes_cli.py resolves it this way rather than passing "npx" directly.
     assert _NPX is not None, "npx is not on PATH"
     result = subprocess.run(
-        [_NPX, "--no-install", "hyperframes", "check", "--json", str(composition_dir)],
+        [
+            _NPX,
+            "--no-install",
+            "hyperframes",
+            "check",
+            "--json",
+            "--caption-zone",
+            _CAPTION_ZONE,
+            str(composition_dir),
+        ],
         capture_output=True,
         text=True,
         timeout=120,
