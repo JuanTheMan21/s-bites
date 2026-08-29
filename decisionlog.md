@@ -2262,3 +2262,61 @@ collision risk `sequence_diagram`'s did. **Not fixed here** -- this needs either
 aware layout formula or a real collision-avoidance pass, a genuine design question rather than a
 one-line field-mapping fix, and deserves its own look rather than a rushed change appended to an
 already-large checkpoint's aftermath.
+
+### D120 — Watching D119's own verification render found more real problems than its one fix
+covered; split into T18D (catalog, no fixing) and T18E (one comprehensive fix pass), video
+generation deferred to T18D's own session
+
+D119 fixed one bug (`SEQUENCE_DIAGRAM`/`TIMELINE` entrance timing) found by watching the real
+render its own Phase-0-style verification produced. The user then watched the same video frame by
+frame and found more, worse ones no toolchain check had caught:
+
+1. **Segment 0 (the title card) sat static for ~25 seconds while the narration moved well past
+   it** -- nothing new appeared on screen the whole time. The exact "reads like a slideshow"
+   problem T18A/T18B already fought once (D95, D99), recurring in a place neither task's fixes
+   covered -- a single static block with no per-word reveal and no visual progression, held for a
+   duration a static card was never designed to justify.
+2. **`SEQUENCE_DIAGRAM`'s annotation coverage was incomplete and, on inspection, timed wrong.**
+   The user expected all three messages in the handshake (SYN, SYN-ACK, ACK) to get their own
+   annotation, appearing one by one as each was spoken. Only the later ones did, and even those
+   didn't clearly land on their own message's beat. Two candidate causes, not yet distinguished:
+   `runtime_skills/visual-plan/1.1.md`'s "use annotations sparingly, one or two per scene" guidance
+   fighting a case where per-step marking is exactly right, or a planning-choice problem
+   independent of that guidance.
+3. **`GRAPH_DIAGRAM`'s GRAPH-mode layout is confirmed broken in the exact two ways D119 already
+   traced** (node overlap in a compact/split canvas; one node's entrance timing landing outside
+   its own segment's window) -- watching it directly, rather than just reading the composed HTML,
+   added one more concrete symptom: an edge line running off-frame, never closing on its own
+   target node. **The user's own proposed design alternative is recorded here because it changes
+   what T18E should actually build, not just what it should fix**: rather than keep chasing
+   reliable per-node entrance timing (fragile by construction -- short/generic node labels can
+   mismatch narration the same way `sequence_diagram`'s did before this session's own fix),
+   reveal the whole graph up front and let the traversal dot alone carry the "explained in order"
+   storytelling. The user explicitly accepted either that, or a correctly-working one-by-one
+   reveal -- just not the mix of both this render produced.
+
+**Rejected: fixing any of this now, in the same session that just checkpointed T18C.** Considered
+and explicitly declined by the user -- this session is already large, and D119's own one-bug fix
+already showed that a fix made without seeing the fuller picture risks missing a shared root cause
+another bug would have revealed. **Landed: split into two tasks.** `tasks.md`'s new **T18D**
+catalogs -- renders a deliberately varied topic matrix (chosen to individually stress block
+types/situations this session's one video never exercised: `ARRAY_GRID` with `shift`/`push`/`pop`,
+`CODE_DIFF`, `TIMELINE`, `GRAPH_DIAGRAM` in `SINGLE` layout, a denser `SEQUENCE_DIAGRAM`, multiple
+annotations in one segment), watches every render properly (full playback or dense frame
+extraction, not just `hyperframes check` -- which caught none of the three findings above), and
+documents everything found, categorized by root cause where one can be traced. **No fixing in
+T18D**, on purpose. `tasks.md`'s new **T18E** is the comprehensive fix pass against T18D's finished
+catalog, flagged with a working hypothesis worth testing before assuming N independent fixes are
+needed: several of these findings (item-anchor-timing reliability, pacing/density judgment) may
+share root causes closer to the surface than they first look.
+
+**Video generation is deferred to T18D's own fresh session, not done in this one** -- also the
+user's own call, made explicitly on context-budget grounds (this session was already large from
+T18C's own build). This session's job was writing up exactly what T18D should render and why, so
+that session can start executing immediately rather than re-deriving scope.
+
+**The pre-existing `tasks.md` T18D entry (vision critique/revision loop, full validation render,
+rendering speed -- D118) is renamed to T18F**, same content, same unscoped status, moved only to
+free the T18D/T18E names for the split above. Its own validation-render item is now explicitly
+sequenced after T18E, not before -- a full-length showcase render belongs after known bugs are
+fixed, not before.

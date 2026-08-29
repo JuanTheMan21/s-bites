@@ -3,8 +3,10 @@
 **Overwritten completely at every `/checkpoint`.** This file describes *now*, never history.
 History lives in `decisionlog.md`.
 
-_Last updated: 2026-08-29 · after T18C (the broadened block library), plus a real render run
-immediately afterward that found and fixed one more real bug (D119)_
+_Last updated: 2026-08-29 · after T18C (the broadened block library), a real render run
+immediately afterward that found and fixed one more real bug (D119), and the user's own frame-
+by-frame critique of that same render, which found several more and reshaped the near-term
+backlog (D120)_
 
 ---
 
@@ -37,11 +39,22 @@ point) — this task's work landed on the same branch, not a new one, since T18B
 never merged back to `dev` (see "Before the next session" below — this was already true at T18B's
 checkpoint and remains true now). `dev` itself is unchanged since before T18B.
 
+**Then the user watched the real D119 render frame by frame and found more, worse problems** —
+see D120. A title card sitting static for ~25s while narration moved well past it; a
+`SEQUENCE_DIAGRAM` where only some of three messages got annotated, not clearly one-by-one as
+each was spoken; and a third, uglier symptom of the already-known `GRAPH_DIAGRAM` layout bug (an
+edge running off-frame, never closing). **Nothing was fixed** — the user's own call, made
+explicitly to avoid fixing piecemeal in an already-large session. `tasks.md` now has a real
+**T18D** (render a deliberately varied topic matrix, watch properly, catalog everything found — no
+fixing) and **T18E** (one comprehensive fix pass against T18D's finished catalog). The old T18D
+placeholder (vision loop, validation render, "make it faster") is renamed **T18F**, sequenced
+after T18E on purpose — a validation render should show off a *fixed* block library.
+
 **Done:** T1-T18, T18A, T18B, T18C.
-**Next: not yet numbered.** The unscoped future work (vision critique/revision loop, full
-7-minute validation render, "make video generation faster") needs its own scoping conversation
-before it becomes a real `/build-task` session — see `tasks.md`'s T18C entry, now updated to
-record what actually shipped and what got pushed to "T18D."
+**Next: T18D**, ready to start without a fresh scoping conversation — `tasks.md`'s entry names
+the specific topic matrix to render and seeds the catalog with D120's findings already in hand.
+Deliberately a fresh session (context-budget discipline, this session's own call) — do not try to
+continue T18D inside this one.
 
 ## What T18C produced (file-by-file detail lives in the diff and in `decisionlog.md` D113-D118)
 
@@ -124,48 +137,50 @@ standalone `hyperframes check` probes (D114, D115).
 
 ## Before the next session
 
-1. **`GRAPH_DIAGRAM`'s node-overlap bug in compact canvases (D119) needs a real design pass**,
-   not the one-line fix D119's other finding got. The circular auto-layout fallback assumes a
-   square canvas; a `SPLIT_HORIZONTAL` panel's compact graph canvas is short and wide. Options
-   worth weighing: an aspect-ratio-aware layout formula (ellipse instead of circle, scaled to the
-   canvas's real width:height ratio), a real collision-avoidance pass, or a simpler cap (fewer
-   nodes allowed in `GRAPH` mode when paired in `SPLIT_HORIZONTAL`).
-2. **`pytest -m local_live` still has not been run** — see "Verify at any time" above for exactly
-   which block types that would newly cover (`array_grid`, `code_diff`, `timeline`, `graph_diagram`
-   `CHAIN` mode, the `warning` annotation).
-3. **Merge `feature/scene-composition` back to `dev`** once the above are done — still not
+1. **Run T18D.** `tasks.md`'s entry is ready to execute as-is — a specific topic matrix, why each
+   topic was chosen, and D120's findings already seeded into the catalog. Start a fresh session for
+   it; don't try to continue inside whichever session is reading this.
+2. **Do not fix anything found before T18D's catalog is complete** — including anything that looks
+   trivial. That's the entire point of the T18D/T18E split (D120): a fix made without the fuller
+   picture already missed a shared root cause once (D119 fixed `sequence_diagram`/`timeline`
+   without yet knowing `graph_diagram`'s node-timing symptom was the same underlying class of bug).
+3. **Merge `feature/scene-composition` back to `dev`** once T18D and T18E are both done — still not
    automatic as part of any checkpoint, per the same standing note this file has carried since
-   T18B. D110's caption fix is now finally confirmed (D119), so that blocker is cleared; the
-   `GRAPH_DIAGRAM` overlap bug is a new one in its place.
+   T18B. D110's caption fix is confirmed (D119); the block library's known-broken pieces
+   (`GRAPH_DIAGRAM` layout, title-card pacing, annotation coverage — D120) are what's blocking now.
 
 ## Known gaps and open questions
 
-**New since this checkpoint (D119, from the real render):**
-- **`GRAPH_DIAGRAM`'s circular auto-layout fallback overlaps nodes in a compact/`SPLIT_HORIZONTAL`
-  canvas** — confirmed live, root cause traced (square-canvas assumption against a short-wide real
-  container), not yet fixed. See "Before the next session" above.
-- **A short/generic block-type label can spuriously match the wrong position in real narration** —
-  the mechanism D119's `SEQUENCE_DIAGRAM`/`TIMELINE` fix addressed for those two block types is a
-  general risk anywhere `rendering/block_timing.py::resolve_item_starts` derives a timing anchor
-  from an item's own display text rather than an authored `anchor_phrase` — `graph_diagram`'s node
-  labels are the one remaining `_ITEM_FIELDS` case with no `anchor_phrase` alternative available
-  (nodes were never given one). Not proven to have bitten yet beyond the one node that resolved to
-  an oddly late fallback in this same render — worth a closer look if `graph_diagram` node timing
-  ever looks wrong in a future render.
+**New from the user's own critique of the D119 render (D120) — this is T18D's seed catalog, not
+a random list:**
+- **Static/low-motion segments can run far longer than their narration justifies, with nothing new
+  appearing on screen** — a title card sat still for ~25s while narration moved well past it. The
+  "reads like a slideshow" problem T18A/T18B already fought (D95, D99), recurring somewhere
+  neither task's fixes covered.
+- **`SEQUENCE_DIAGRAM` annotation coverage was incomplete and, on inspection, not clearly timed
+  one-by-one** — the user expected all three handshake messages (SYN, SYN-ACK, ACK) to get their
+  own annotation as each was spoken; only some did. Not yet known whether `visual-plan`'s "use
+  sparingly" guidance is actively wrong for this case, or whether it's a planning-choice issue.
+- **`GRAPH_DIAGRAM` GRAPH-mode layout has a third confirmed symptom** beyond D119's two (node
+  overlap, wrong entrance timing): an edge line running off-frame, never closing on its target
+  node. The user's own proposed redesign is worth carrying into T18E directly — stop chasing
+  reliable per-node entrance timing and instead reveal the whole graph up front, letting the
+  traversal dot alone carry the "explained in order" storytelling.
 
-**New this checkpoint:**
+**From D119, still open, now folded into T18D's scope rather than tracked separately:**
+- `GRAPH_DIAGRAM`'s circular auto-layout fallback overlaps nodes in a compact/`SPLIT_HORIZONTAL`
+  canvas — root cause traced (square-canvas assumption against a short-wide real container).
+- A short/generic block-type label can spuriously match the wrong position in real narration —
+  `graph_diagram`'s node labels are the one remaining `_ITEM_FIELDS` case with no `anchor_phrase`
+  alternative (`rendering/block_timing.py`). Confirmed to have bitten once (D119's oddly-late
+  fifth node); worth checking for elsewhere.
+
+**New this checkpoint, unrelated to D120:**
 - **The SPLIT_HORIZONTAL "same panel" annotation restriction is prompt-only** — `rendering/
   annotations.py::resolve_annotations` bounds-checks `target_block_index` against the segment's
   own block count, but nothing in code stops an annotation from naming a block in the *other*
   panel. Confirmed not exploitable into a broken frame (the render container is always derived
-  from the target itself), so left as a narrative constraint rather than a redundant guard — but
-  worth knowing if a future session is debugging an annotation that reads as "attached to the
-  wrong panel" conceptually rather than visually broken.
-- **T18D is a real name collision, now resolved by convention, not yet by content.** `tasks.md`'s
-  T18C entry named "T18D" as a placeholder for "push LLM compositionality further, testing the
-  limits" — this checkpoint folds the vision-loop/validation-render/performance work into that
-  same name rather than renaming either. Whichever session next scopes T18D should treat all of
-  this as one basket to sort through, not assume any part of it is already decided.
+  from the target itself), so left as a narrative constraint rather than a redundant guard.
 - **`ArrayStep.op`'s cross-field consistency (does `remaining_start`/`remaining_end` actually match
   what `op` claims — a `narrow` that grows, a `shift` that changes width) is prose-only, not
   validator-enforced** — the same convention the pre-T18C "range only ever shrinks" constraint

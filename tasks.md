@@ -463,14 +463,71 @@ but waiting on a document-ingestion path that doesn't exist yet (T29's scope, it
 scheduled last per the original requirement).
 **Depends:** T18B — met.
 
-### T18D — Vision critique/revision loop, full validation render, and rendering/pipeline speed · `todo`
-**Not yet scoped as a real plan — this entry records what it needs to cover, not a committed
-design.** Absorbs three things, per D118: two carried forward unbuilt from T18C's original (too
-large) scoping, one raised fresh during T18C's own planning. Previously also carried a vaguer
-placeholder framing ("push LLM compositionality further, testing the limits of what the
-render-time budget allows," from T18B's planning) — folded into this same task rather than kept as
-a separate untracked idea; whoever scopes this next should treat that framing as one possible angle
-on the validation-render item below, not a separate obligation.
+### T18D — Systematic real-render bug catalog for the block library · `todo`
+**Scoped during a post-T18C-checkpoint verification render, by the user's own direct critique of
+the real output** (decisionlog D120). The checkpoint's own single verification render (D119) found
+and fixed one real bug, but watching the actual video turned up several more the toolchain-only
+checks never could — the same lesson D89/D106/D109/D119 already recorded, recurring again. Rather
+than fix piecemeal in an already-large session, this task **only catalogs** — render, watch,
+document, categorize by root cause where one can be traced. **No fixing in this task**; T18E does
+that, once the catalog is complete. Video generation itself is deliberately deferred to this task's
+own fresh session, not squeezed into whichever session scopes it (context-budget discipline, per
+the same session that wrote this entry).
+
+**Seed the catalog with the findings already in hand, not summarized away** (D120 has the full
+detail):
+- **Static/low-motion segments can run far longer than their narration justifies, with nothing new
+  appearing on screen** — a title card sat still for ~25s while narration moved well past it. The
+  "slideshow" problem T18A/T18B already fought once, recurring somewhere neither task's fixes
+  covered. Two options the user raised worth testing: more/shorter segments, or narration-timed
+  supporting content appearing even on an otherwise-static card.
+- **`SEQUENCE_DIAGRAM` annotation coverage**: the user expected all three messages in a handshake
+  (SYN, SYN-ACK, ACK) to get their own annotation, one by one as each was spoken; only one or two
+  did. Check whether `visual-plan`'s "use annotations sparingly, one or two per scene" guidance is
+  actively wrong for a case where per-step marking is exactly the right call, or whether this is a
+  planning-choice issue instead.
+- **`GRAPH_DIAGRAM` GRAPH-mode layout**, already confirmed broken two ways (D119): node overlap in
+  a compact/split canvas (root cause traced — the circular auto-layout fallback assumes a square
+  canvas), and one node's entrance timing landing outside its own segment's window entirely, while
+  the other four appeared together rather than individually. **The user's own proposed
+  alternative, worth carrying into T18E's design directly**: stop anchoring every node's entrance
+  to its own narration mention (fragile — short/generic labels can mismatch, the same class of bug
+  D119 already fixed once for a different block type) and instead reveal the whole graph up front,
+  letting the traversal dot alone carry the "explained in order" storytelling — or, if per-node
+  reveal is kept, make it reveal correctly one-by-one or not at all, never a mix.
+
+**Render a deliberate topic matrix, not random topics** — chosen to individually stress block
+types/situations this session's one video never touched: `ARRAY_GRID` with a real `shift`/`push`/
+`pop` sequence (not just `narrow`), `CODE_DIFF`, `TIMELINE`, `GRAPH_DIAGRAM` in `SINGLE` layout
+(isolating whether the overlap bug is specific to the compact/split canvas or broader), a
+`SEQUENCE_DIAGRAM`-heavy topic with more actors/messages, and a scene with multiple annotations in
+one segment. Prefer topics where a specific block type is the *obvious* choice over topics that
+merely might invite it.
+
+**Watch every render properly** — full playback or dense frame extraction, not just `hyperframes
+check` (which caught none of D120's real problems: wrong timing, wrong pacing, and layout overlap
+are all things the checker's structural/contrast/lint passes don't evaluate).
+
+**Depends:** T18C — met.
+
+### T18E — Comprehensive fix pass for T18D's block-library bug catalog · `todo`
+**Not yet scoped beyond "address T18D's catalog"** — real scope gets written once that catalog
+exists. One working hypothesis worth testing before assuming N independent fixes are needed:
+several of D120's findings (item-anchor-timing reliability across `graph_diagram`/
+`sequence_diagram`/`timeline`, and possibly pacing/density judgment across any low-motion block)
+may share root causes closer to the surface than they first look, meaning this task may turn out
+smaller and more structural than "fix each bug separately" implies.
+**Depends:** T18D.
+
+### T18F — Vision critique/revision loop, full validation render, and rendering/pipeline speed · `todo`
+**Renamed from T18D** (this checkpoint's own T18D/T18E now cover the bug-catalog/fix-pass split
+above instead). Same content, same "not yet scoped as a real plan" status, just moved to make room.
+Absorbs three things, per D118: two carried forward unbuilt from T18C's original (too large)
+scoping, one raised fresh during T18C's own planning. Previously also carried a vaguer placeholder
+framing ("push LLM compositionality further, testing the limits of what the render-time budget
+allows," from T18B's planning) — folded into this same task rather than kept as a separate
+untracked idea; whoever scopes this next should treat that framing as one possible angle on the
+validation-render item below, not a separate obligation.
 
 - **The vision critique/revision loop** — capture stills from a composed scene
   (`adapters/local/playwright_capture.py` already does this for Tier 0/1), show them to a
@@ -481,14 +538,16 @@ on the validation-render item below, not a separate obligation.
 - **A full 7-minute validation render** across 2-3 genuinely different topic types (algorithmic,
   systems/protocol, security) — where D104's original "one real full-length render" promise
   properly lands, against content that will actually exercise T18C's broadened block library, not
-  just T18B's original six.
+  just T18B's original six. Should land after T18E, against a block library that's had its known
+  bugs fixed, not before.
 - **Rendering/pipeline speed** — raised mid-planning during T18C, not yet scoped to a specific
   target. Candidates named but not chosen: render throughput (`FRAME_BUDGET`/tier assignment),
   LLM/TTS call latency, or overall end-to-end wall-clock. Needs its own measurement pass before any
   code changes — the same discipline D16/D99's history argues for (a wrong measurement, once
   written into a constant, propagates unquestioned across sessions until someone re-derives it).
 
-**Depends:** T18C — met.
+**Depends:** T18C — met. (Not on T18D/T18E structurally, but scoping it before T18E's fixes land
+would be premature — the validation render item above exists to show off a working block library.)
 
 ---
 
