@@ -10,6 +10,7 @@ attempts, what is retried at all, whether the vendor type escapes, and whether `
 honoured. Whether Azure really sends a 429 is Azure's business.
 """
 
+import logging
 from dataclasses import dataclass, field
 
 import httpx
@@ -91,6 +92,24 @@ async def test_a_transient_rate_limit_is_survived(no_waiting: None) -> None:
 
     assert await provider.generate("topic", Outline) is stub.result
     assert stub.calls == 3
+
+
+async def test_a_retry_logs_the_attempt_and_backoff(
+    no_waiting: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T18E, D121/D122: a ~216s silent gap between two LLM calls in one real render was almost
+    certainly retry/backoff stacking, and nothing logged enough to say so for certain -- this is
+    the log line that would have."""
+    caplog.set_level(logging.WARNING, logger="adapters.azure.llm_provider")
+    provider = a_provider(max_attempts=3)
+    stub = StubParse(failures=[rate_limited()], result=an_outline())
+    provider._parse = stub  # type: ignore[method-assign]
+
+    await provider.generate("topic", Outline)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("attempt" in message.lower() and "retry" in message.lower() for message in messages)
+    assert any("RateLimitError" in message for message in messages)
 
 
 async def test_attempts_are_capped_and_the_vendor_type_never_escapes(no_waiting: None) -> None:

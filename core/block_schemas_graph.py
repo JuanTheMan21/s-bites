@@ -33,6 +33,11 @@ class GraphEdge(StrictSchema):
 
     from_id: str = Field(description="The id of the edge's source node.")
     to_id: str = Field(description="The id of the edge's destination node.")
+    label: str | None = Field(
+        description="A short weight, cost, or condition on this connection, e.g. '4', "
+        "'O(log n)', 'if valid' -- shown on the edge itself. Null for a plain connection with no "
+        "such fact. Never invent a number or condition the narration does not supply."
+    )
 
 
 class GraphNodePosition(StrictSchema):

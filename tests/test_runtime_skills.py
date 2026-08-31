@@ -21,10 +21,19 @@ from interfaces import SkillRegistry
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = REPO_ROOT / "runtime_skills"
 
-# The five LLM-facing steps of the pipeline: one pack each for outline (T15), scripting (T15),
-# whole-video visual planning (T18B), and scene authoring (T16), plus the shared voice pack the
-# other four are interpolated alongside.
-EXPECTED_PACKS = ["house-style", "outline", "scene-authoring", "scripting", "visual-plan"]
+# The six LLM-facing steps of the pipeline: one pack each for outline (T15), scripting (T15),
+# whole-video visual planning (T18B), scene authoring (T16), and (T18E) annotation authoring --
+# run once a scene's blocks already have real content, so it can name a real item -- plus the
+# shared voice pack the other five are interpolated alongside. Sorted, matching list_packs()'s
+# own contract (DiskSkillRegistry.list_packs returns names alphabetically).
+EXPECTED_PACKS = [
+    "annotation-authoring",
+    "house-style",
+    "outline",
+    "scene-authoring",
+    "scripting",
+    "visual-plan",
+]
 
 # The modules that stand between a pack file and a prompt. Nothing in this path may evaluate.
 LOADING_MODULES = [
@@ -46,16 +55,18 @@ def shipped() -> SkillRegistry:
     return DiskSkillRegistry(SKILLS_ROOT)
 
 
-# scene-authoring is at 1.2 (T18B: per-block-type guidance, including array_grid, replacing the
-# 1.1/1.0 per-intent sections). visual-plan is new at T18B, so it starts at 1.0. Every other pack
-# is still at its original 1.0. Keyed per-pack rather than one constant so a future version bump
+# scene-authoring is at 1.4 (T18E: graph_diagram edges may carry a weight/cost/condition label).
+# visual-plan is at 1.2 (T18E: annotations moved out to their own step, so this pack no longer
+# plans them). annotation-authoring is new at T18E, so it starts at 1.0. Every other pack is
+# still at its original 1.0. Keyed per-pack rather than one constant so a future version bump
 # anywhere only has to update this map, not the reasoning around it.
 LATEST_VERSION = {
+    "annotation-authoring": "1.0",
     "house-style": "1.0",
     "outline": "1.0",
-    "scene-authoring": "1.3",
+    "scene-authoring": "1.4",
     "scripting": "1.0",
-    "visual-plan": "1.1",
+    "visual-plan": "1.2",
 }
 
 

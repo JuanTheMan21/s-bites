@@ -1,20 +1,21 @@
 """Coverage for the branches ``tests/block_examples.py::EXAMPLES`` doesn't reach: ``ArrayStep``'s
 ``shift``/``push``/``pop`` ops (``EXAMPLES[BlockType.ARRAY_GRID]`` only exercises ``narrow``, the
-one T18B already had) and ``GRAPH_DIAGRAM``'s ``GRAPH`` layout mode (``EXAMPLES`` only exercises
-``chain``, the retired ``DIAGRAM_CHAIN``'s direct replacement).
+one T18B already had).
 
 Found missing by ``project-reviewer`` during T18C's own build: every parametrized sweep over
-``BlockType`` draws from ``EXAMPLES``, so three of ``ArrayStep``'s four ops and one of
-``GraphLayoutMode``'s two modes were exercised only by this task's own ad-hoc real-toolchain
-probes, never by anything that runs in CI. Not part of ``EXAMPLES`` itself, the same reason
-``STAT_CALLOUT_WITH_COUNT_UP`` isn't -- these are additive scenario coverage for block types that
-already have one canonical fixture, not a second "the" payload.
+``BlockType`` draws from ``EXAMPLES``, so three of ``ArrayStep``'s four ops were exercised only by
+this task's own ad-hoc real-toolchain probes, never by anything that runs in CI. Not part of
+``EXAMPLES`` itself, the same reason ``STAT_CALLOUT_WITH_COUNT_UP`` isn't -- additive scenario
+coverage for a block type that already has one canonical fixture, not a second "the" payload.
+
+``GRAPH_DIAGRAM``'s own ``GRAPH`` layout mode coverage split out to ``test_graph_diagram_edges.py``
+once T18E's edge-anchoring/gating/label/compact-layout additions pushed this file over the
+200-line ceiling.
 """
 
 from pathlib import Path
 
 from core.block_schemas_array import ArrayGridSlots
-from core.block_schemas_graph import GraphDiagramSlots
 from core.block_types import BlockType
 from core.scene_schemas import ComposedBlock, ComposedScene
 from rendering.compose import compose_scene
@@ -71,25 +72,6 @@ ARRAY_GRID_ALL_OPS: dict = {
     ],
 }
 
-GRAPH_DIAGRAM_GRAPH_MODE: dict = {
-    "headline": "A small service graph",
-    "layout": "graph",
-    "nodes": [
-        {"id": "a", "label": "Gateway", "caption": None},
-        {"id": "b", "label": "Auth", "caption": None},
-        {"id": "c", "label": "Orders", "caption": None},
-    ],
-    "edges": [
-        {"from_id": "a", "to_id": "b"},
-        {"from_id": "a", "to_id": "c"},
-    ],
-    "positions": [],
-    "traversal": [
-        {"anchor_phrase": "starts at the gateway", "node_id": "a"},
-        {"anchor_phrase": "checks auth first", "node_id": "b"},
-    ],
-}
-
 
 def _a_composed_segment(block_type: BlockType, payload: dict):
     scene = ComposedScene(
@@ -138,21 +120,3 @@ def test_array_grid_all_ops_render_without_error_and_each_op_reaches_the_templat
         assert f'"{op}"' in html, f"op {op!r} never reaches the composed script"
     assert 'endOp: "plus"' in html
     assert 'endOp: "minus"' in html
-
-
-def test_graph_diagram_graph_mode_validates_against_the_schema() -> None:
-    payload = GraphDiagramSlots.model_validate(GRAPH_DIAGRAM_GRAPH_MODE)
-    assert payload.layout.value == "graph"
-    assert len(payload.traversal) == 2
-
-
-def test_graph_diagram_graph_mode_renders_the_free_canvas_not_the_rail(tmp_path: Path) -> None:
-    segment = _a_composed_segment(BlockType.GRAPH_DIAGRAM, GRAPH_DIAGRAM_GRAPH_MODE)
-
-    dest = compose_scene(segment, tmp_path)
-    html = dest.read_text(encoding="utf-8")
-
-    assert 'id="b0-canvas"' in html
-    assert 'id="b0-rail"' not in html
-    assert 'id="b0-traveler"' in html
-    assert 'from: "a", to: "b"' in html

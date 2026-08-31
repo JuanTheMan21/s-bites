@@ -20,19 +20,20 @@ from core.graph import build_graph
 from core.models import VideoJob
 from interfaces import ProviderMisconfigured
 from interfaces.llm_provider import T
-from tests.fakes import FakeLLMProvider, FakeStorage, FakeTTSProvider
+from tests.fakes import FakeStorage, FakeTTSProvider
 from tests.graph_pipeline_fixtures import (
+    PhaseQueueLLMProvider,
     a_context,
     a_job,
+    author_scene_responses,
     needs_ffmpeg,
     scene_plan,
     seeded_llm,
-    slot_payloads,
 )
 
 
-class FailsOnceForSchema(FakeLLMProvider):
-    """A ``FakeLLMProvider`` that fails the first request for one particular schema.
+class FailsOnceForSchema(PhaseQueueLLMProvider):
+    """A ``PhaseQueueLLMProvider`` that fails the first request for one particular schema.
 
     ``fail_next`` arms the *next* call whatever it is, which in a full run is always
     ``plan_segments``' outline call -- far upstream of what this file needs to interrupt. Keying
@@ -54,7 +55,7 @@ class FailsOnceForSchema(FakeLLMProvider):
         return await super().generate(prompt, schema, system=system)
 
 
-def _scene_calls(llm: FakeLLMProvider) -> int:
+def _scene_calls(llm: PhaseQueueLLMProvider) -> int:
     return sum(1 for call in llm.calls if call.schema is TitleSlots)
 
 
@@ -97,12 +98,14 @@ async def test_a_kill_during_narration_does_not_repeat_completed_segments(tmp_pa
         # re-invokes it and no outline or narration response is needed here. assign_tiers,
         # plan_visuals, and author_scene, by contrast, never ran at all -- the kill happened
         # upstream of all three -- so the resumed run still makes plan_visuals' one call plus one
-        # scene-authoring fill call per segment.
+        # scene-authoring fill call and one annotations call per segment (T18E).
         context = a_context(
             tmp_path,
             tts=fake_tts,
             storage=fake_storage,
-            llm=FakeLLMProvider([scene_plan(job.segment_count), *slot_payloads(job.segment_count)]),
+            llm=PhaseQueueLLMProvider(
+                [scene_plan(job.segment_count), *author_scene_responses(job.segment_count)]
+            ),
         )
 
         result = await graph.ainvoke(None, config, context=context, durability="sync")
@@ -151,7 +154,7 @@ async def test_a_kill_during_scene_authoring_does_not_repeat_narration(tmp_path:
 
     async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
         graph = build_graph(saver)
-        resumed_llm = FakeLLMProvider(slot_payloads(job.segment_count))
+        resumed_llm = PhaseQueueLLMProvider(author_scene_responses(job.segment_count))
         context = a_context(tmp_path, tts=fake_tts, storage=fake_storage, llm=resumed_llm)
 
         result = await graph.ainvoke(None, config, context=context, durability="sync")

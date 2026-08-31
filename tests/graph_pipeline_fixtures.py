@@ -12,6 +12,16 @@ anyway; the rest are planned the same way here on purpose) so every fill call as
 schema -- the fan-out's tasks reach the fake concurrently, in no guaranteed order, and
 interchangeable payloads are what make that irrelevant rather than flaky (unchanged reasoning
 from before T18B, just now applying to the fill step instead of the old single slot call).
+
+T18E: ``author_scene`` now makes a SECOND, differently-shaped call per segment
+(``SceneAnnotations``, after the fill call) -- and a real checkpointer (``AsyncSqliteSaver``,
+which both graph-level test modules use) gives each segment's ``Send`` task a genuine suspension
+point, so segments' fill/annotate calls interleave across each other in an order no fixed queue
+position can predict (confirmed empirically, not assumed). ``FakeLLMProvider``'s own strict
+positional FIFO is deliberately tested (``tests/test_fake_providers.py``) and stays as-is;
+``PhaseQueueLLMProvider`` below is a local, narrower substitute for exactly this one scenario --
+same isinstance-based type check, same "no response queued" failure, just matched by type
+anywhere in the queue rather than strictly at position 0.
 """
 
 import shutil
@@ -19,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+from core.annotation_plan_schema import SceneAnnotations
 from core.block_schemas import TitleSlots
 from core.block_types import BlockType, MotifName, SceneLayout
 from core.graph import GraphContext
@@ -27,6 +38,7 @@ from core.outline_schema import Outline, SegmentPlan
 from core.scene_plan_schema import PlannedBlock, SegmentScenePlan, VideoScenePlan
 from core.scripting_schema import Narration
 from interfaces import SkillPack
+from interfaces.llm_provider import T
 from tests.fakes import (
     FakeLLMProvider,
     FakeRenderBackend,
@@ -34,6 +46,26 @@ from tests.fakes import (
     FakeStorage,
     FakeTTSProvider,
 )
+from tests.fakes.llm_provider import LLMCall
+
+
+class PhaseQueueLLMProvider(FakeLLMProvider):
+    """Like ``FakeLLMProvider``, but answers with the first queued response whose type matches
+    the request, from anywhere in the queue -- not strictly the item at position 0. See this
+    module's own docstring for why that is necessary here and nowhere else."""
+
+    async def generate(self, prompt: str, schema: type[T], *, system: str | None = None) -> T:
+        self._maybe_fail("generate")
+        for i, response in enumerate(self.responses):
+            if isinstance(response, schema):
+                self.calls.append(LLMCall(prompt=prompt, schema=schema, system=system))
+                return self.responses.pop(i)
+        raise AssertionError(
+            f"PhaseQueueLLMProvider has no response queued for a {schema.__name__} request. "
+            "That is a test-authoring gap, not a backend failure -- queue one, or arm a "
+            "real error with fail_next('generate', ...)."
+        )
+
 
 needs_ffmpeg = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
 
@@ -68,7 +100,6 @@ def scene_plan(segment_count: int) -> VideoScenePlan:
                 layout=SceneLayout.SINGLE,
                 blocks=[PlannedBlock(block_type=BlockType.TITLE, role="Title", anchor_phrase=None)],
                 continues_previous=False,
-                annotations=[],
             )
             for i in range(segment_count)
         ],
@@ -82,11 +113,26 @@ def slot_payloads(segment_count: int) -> list[TitleSlots]:
     return [TitleSlots(headline=f"Headline {i}", subtitle=None) for i in range(segment_count)]
 
 
-def seeded_llm(segment_count: int) -> FakeLLMProvider:
+def _annotation_payloads(segment_count: int) -> list[SceneAnnotations]:
+    """T18E: ``author_scene`` now makes one ``author_annotations`` call per segment too, after
+    its block fill call(s) -- interchangeable with each other (empty is the common real answer,
+    per the annotation-authoring pack's own "sparingly" guidance) for the same reason
+    ``slot_payloads`` is."""
+    return [SceneAnnotations(annotations=[]) for _ in range(segment_count)]
+
+
+def author_scene_responses(segment_count: int) -> list[TitleSlots | SceneAnnotations]:
+    """Every response one full pass through the ``author_scene`` fan-out consumes: one
+    ``TitleSlots`` and one ``SceneAnnotations`` per segment. Order within this list no longer
+    matters -- ``PhaseQueueLLMProvider`` matches by type, not position, which is what real
+    interleaving across segments' ``Send`` tasks under a checkpointer needs."""
+    return [*slot_payloads(segment_count), *_annotation_payloads(segment_count)]
+
+
+def seeded_llm(segment_count: int) -> PhaseQueueLLMProvider:
     """The full call sequence a run makes: one Outline (plan_segments' outline call), one
-    Narration per segment (its scripting calls, in index order), one VideoScenePlan
-    (plan_visuals' single call), then one block-fill payload per segment (the author_scene
-    fan-out, one block each)."""
+    Narration per segment (its scripting calls), one VideoScenePlan (plan_visuals' single call),
+    then ``author_scene_responses`` for the fan-out that follows."""
     outline = Outline(
         segments=[
             SegmentPlan(
@@ -99,8 +145,8 @@ def seeded_llm(segment_count: int) -> FakeLLMProvider:
         ]
     )
     narrations = [Narration(text=f"Narration {i}.") for i in range(segment_count)]
-    return FakeLLMProvider(
-        [outline, *narrations, scene_plan(segment_count), *slot_payloads(segment_count)]
+    return PhaseQueueLLMProvider(
+        [outline, *narrations, scene_plan(segment_count), *author_scene_responses(segment_count)]
     )
 
 
@@ -112,6 +158,9 @@ def seeded_skills() -> FakeSkillRegistry:
             SkillPack(name="visual-plan", version="1.0", content="visual plan pack"),
             SkillPack(name="scene-authoring", version="1.0", content="scene authoring pack"),
             SkillPack(name="house-style", version="1.0", content="house style pack"),
+            SkillPack(
+                name="annotation-authoring", version="1.0", content="annotation authoring pack"
+            ),
         ]
     )
 

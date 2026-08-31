@@ -3,266 +3,262 @@
 **Overwritten completely at every `/checkpoint`.** This file describes *now*, never history.
 History lives in `decisionlog.md`.
 
-_Last updated: 2026-08-29 · after T18C (the broadened block library), a real render run
-immediately afterward that found and fixed one more real bug (D119), and the user's own frame-
-by-frame critique of that same render, which found several more and reshaped the near-term
-backlog (D120)_
+_Last updated: 2026-08-31 · after T18E ran to completion (all seven sub-parts plus a bounded E2.4
+compact-layout addition), one real bug found by review and fixed pre-render, one real gap in E5's
+own logging found live and fixed in-session, three new findings from real renders recorded for a
+future task, full suite green (D122)_
 
 ---
 
 ## Where we are
 
-**T18C shipped the block-library slice only** — six items (`GRAPH_DIAGRAM` retiring
-`DIAGRAM_CHAIN`, generalized `ARRAY_GRID`, `CODE_DIFF`, `SEQUENCE_DIAGRAM`, `TIMELINE`, and a new
-cross-cutting annotation overlay system) plus two related pre-existing gaps this session's own
-research surfaced: a real caption/content-overlap bug, and D107's unreachable mixed-tier live
-test. `tasks.md`'s original T18C entry also scoped a vision critique/revision loop and a full
-7-minute validation render — both **deferred, not built**, to a new, not-yet-scoped **T18D**
-(decisionlog D118). A user request mid-planning to "make video making faster" is deferred into
-that same T18D, unscoped as of this checkpoint.
+**T18E is done.** All seven planned sub-parts (E1-E7) shipped, plus E2.4 — an aspect-ratio-aware
+fallback layout for `GRAPH_DIAGRAM`'s compact `SPLIT_HORIZONTAL` canvas, a bounded slice of the
+larger layered-layout redesign D121 had deferred, pulled forward at the user's own request when
+approving the plan because nothing else in E1-E7 actually fixed the confirmed node-overlap bug.
+Full reasoning, evidence, and the complete list of what shipped: decisionlog **D122**.
 
-**The annotation overlay is the genuinely novel piece**, and this session's own Phase-0
-real-toolchain spike (composing hand-built scenes and running the real `hyperframes check`
-against them, not just reasoning about the design) found and fixed two real positioning bugs
-before they'd have shipped silently — see D115. `project-reviewer`'s own final review-gate pass
-then caught a third real bug, in the *test coverage* this session added: a `SHIFT`-op fixture that
-looked correct and passed offline, but never actually exercised the branch it claimed to cover
-(D114). All three are fixed and re-verified against the real toolchain.
+**What actually changed, by area:**
+- **E1** — annotation authoring moved out of `plan_visuals` into a new
+  `core/graph/nodes/annotation_author.py`, called from `author_scene` once every block is filled.
+  New `core/annotation_plan_schema.py`, `core/block_items.py`, runtime pack
+  `annotation-authoring/1.0`. `ComposedAnnotation.target_item_index`/`anchor_phrase` are now
+  required, not nullable; `rendering/annotations.py` drops (never guesses at) anything that
+  doesn't resolve to a real item, block, or narration moment. `core/scene_plan_schema.py
+  ::PlannedAnnotation` is gone; `visual-plan` is at `1.2` (no longer plans annotations),
+  `scene-authoring` stayed at `1.3` for the fill call itself.
+- **E2 / E2.4** — `rendering/templates/_block_graph_diagram.html`: edges anchor to the measured
+  marker-circle center (not the node div's CSS center), gate on both endpoints' own entrance
+  times, get arrowheads (also added to `_block_sequence_diagram.html`'s messages and the CHAIN
+  rail). The GRAPH-mode fallback layout is aspect-ratio-aware: SPLIT_HORIZONTAL's compact canvas
+  lays unauthored nodes on the wide axis instead of the circular formula SINGLE's canvas still
+  uses.
+- **E3** — `GraphEdge.label: str | None` (required-but-nullable), rendered at the edge midpoint.
+  `scene-authoring` is at `1.4` for this.
+- **E4** — new `core/block_triggers.py`; `plan_visuals` makes exactly one bounded re-ask when a
+  segment's narration clearly calls for a block type the plan uses nowhere in the video. Real
+  blind spot found this session, recorded below, not yet fixed.
+- **E5** — new `core/graph/node_timing.py::timed()` wraps every node in
+  `core/graph/pipeline.py`; a `before_sleep` callback logs Azure LLM retries. **A real gap found
+  live and fixed in-session**: nothing configured Python's logging module, so the per-node
+  `INFO`-level lines never reached the console in a real run (only the adapter's `WARNING`-level
+  retry line did, by Python's own default last-resort-handler behavior) — fixed with one
+  `logging.basicConfig(...)` call in `cli.py::main()`, smoke-tested directly.
+- **E6** — `_annotations.html::hfAnnotationPlace`, used by all three `_annotation_*.html`
+  partials, replacing three ad hoc fixed offsets with a container-bounded placement (clear of the
+  target block's headline and the caption band).
+- **E7** — `author_scene`'s per-block fills and `write_narration`'s per-segment calls now use
+  `asyncio.gather`, reopening D47 on the user's own explicit instruction.
 
-**`DIAGRAM_CHAIN` is retired, not kept alongside `GRAPH_DIAGRAM`** (D113) — a breaking change,
-matching T18B's own precedent of retiring superseded templates. `ArrayEliminationStep` is renamed
-`ArrayStep` and generalized to four ops (D114), also breaking, also swept through every consumer
-in the same pass.
+**One real bug found by this session's own `project-reviewer` review, before any render, and
+fixed pre-render**: `_block_graph_diagram.html`'s edge-label lookup used a labelled-only counter
+in the script against an overall-position id in the markup — the two only agreed when every
+labelled edge preceded every unlabelled one. Fixed to share the same index both places;
+`tests/test_graph_diagram_edges.py` was reordered specifically to catch this class of bug again.
 
-**Still on `feature/scene-composition`.** Branched from `dev` at `5b4d7ba` (T18B's own start
-point) — this task's work landed on the same branch, not a new one, since T18B's own work was
-never merged back to `dev` (see "Before the next session" below — this was already true at T18B's
-checkpoint and remains true now). `dev` itself is unchanged since before T18B.
+**A real concurrency assumption broke, caught by the test suite, not reasoning about it.**
+`author_scene`'s two per-segment LLM calls (fill, then annotate) can genuinely interleave across
+*different* segments' concurrent `Send` tasks once a real checkpointer (`AsyncSqliteSaver`) is in
+play — its I/O gives each task a real suspension point. `FakeLLMProvider`'s strict-FIFO queue
+(deliberately tested, left untouched) can't handle two differently-typed calls under real
+interleaving, so `tests/graph_pipeline_fixtures.py::PhaseQueueLLMProvider` (a narrowly-scoped
+subclass matching by type, used only by the checkpointer-backed graph-level tests) exists now.
 
-**Then the user watched the real D119 render frame by frame and found more, worse problems** —
-see D120. A title card sitting static for ~25s while narration moved well past it; a
-`SEQUENCE_DIAGRAM` where only some of three messages got annotated, not clearly one-by-one as
-each was spoken; and a third, uglier symptom of the already-known `GRAPH_DIAGRAM` layout bug (an
-edge running off-frame, never closing). **Nothing was fixed** — the user's own call, made
-explicitly to avoid fixing piecemeal in an already-large session. `tasks.md` now has a real
-**T18D** (render a deliberately varied topic matrix, watch properly, catalog everything found — no
-fixing) and **T18E** (one comprehensive fix pass against T18D's finished catalog). The old T18D
-placeholder (vision loop, validation render, "make it faster") is renamed **T18F**, sequenced
-after T18E on purpose — a validation render should show off a *fixed* block library.
+**Verified against three real `RUNTIME_ENV=azure` renders** (`t18e-array-grid`, `t18e-timeline`,
+`t18e-graph-single` — T18D's own topics, for direct before/after comparison), Blob-synced first
+(three packs were missing — `annotation-authoring/1.0`, `scene-authoring/1.4`, `visual-plan/1.2`
+— the same recurring drift D107/T18D already hit; still no automated sync). Each watched via
+targeted frame extraction. E1, E2, E2.4, E3, and E5's retry logging all confirmed working for
+real, not just offline — full account in D122.
 
-**Done:** T1-T18, T18A, T18B, T18C.
-**Next: T18D**, ready to start without a fresh scoping conversation — `tasks.md`'s entry names
-the specific topic matrix to render and seeds the catalog with D120's findings already in hand.
-Deliberately a fresh session (context-budget discipline, this session's own call) — do not try to
-continue T18D inside this one.
+**Three new findings, recorded not fixed — the user's own explicit choice when offered a
+three-way decision (record-only / fix the sharpest one / fix all three).** Read D122's full
+account before assuming any of these are already covered:
+1. Two annotations targeting nearby items in the same block can still collide with *each other*
+   — E6 only keeps one annotation clear of the block's headline and the caption band.
+2. E4's trigger-vocabulary scan misses a narration that signals chronology through
+   domain-specific version numbers ("HTTP 1.0... HTTP 1.1... HTTP/2... HTTP/3...") rather than
+   generic timeline words — `t18e-timeline`'s own topic never got `TIMELINE`.
+3. E2.4 (node layout), E3 (edge labels), and E1/E6 (annotations) were each verified in
+   isolation, not together — a dense compact-canvas graph with all three combined lets labels,
+   captions, and an annotation collide with each other even though nodes themselves stay
+   properly separated.
 
-## What T18C produced (file-by-file detail lives in the diff and in `decisionlog.md` D113-D118)
+**Still on `feature/scene-composition`.** Branched from `dev` at `5b4d7ba`, never merged back —
+unchanged standing note since T18B, still blocked on the user's own decision to merge (not
+automatic as part of any checkpoint).
 
-**New:** `core/block_schemas_graph.py`, `core/block_schemas_array.py`, `core/block_schemas_diff.py`,
-`core/block_schemas_sequence.py` (split out of `core/block_schemas.py` to stay under the 200-line
-ceiling with every new block added), `rendering/block_timing.py` (per-block narration-anchor
-resolution, split out of `rendering/compose.py`), `rendering/annotations.py` (annotation target
-resolution + bounds-check), `rendering/templates/_block_graph_diagram.html`,
-`_block_code_diff.html`, `_block_sequence_diagram.html`, `_block_timeline.html`,
-`_annotations.html` (shared JS positioning helper), `_annotation_cursor.html`,
-`_annotation_check.html`, `_annotation_warning.html`, `runtime_skills/scene-authoring/1.3.md`,
-`runtime_skills/visual-plan/1.1.md`, `tests/test_array_grid_and_graph_modes.py`,
-`tests/test_compose_annotations.py`.
+**Done:** T1-T18, T18A, T18B, T18C, T18D, T18E.
+**Next:** not yet chosen. T18F ("vision critique/revision loop, full validation render,
+rendering/pipeline speed") is still `todo` and still the next placeholder in sequence, but the
+three new findings above are real, un-scoped work too — worth a real conversation with the user
+about priority before assuming T18F is next by default.
 
-**Retired:** `rendering/templates/_block_diagram_chain.html`, `BlockType.DIAGRAM_CHAIN`,
-`DiagramNode`/`DiagramChainSlots` (`core/block_schemas.py`).
+## What T18E produced
 
-**Renamed/generalized:** `ArrayEliminationStep` → `ArrayStep` (`core/block_schemas_array.py`,
-moved out of `core/block_schemas.py`), now with `op` (narrow/shift/push/pop) and `end_operation`;
-`ArrayGridSlots` gains `orientation`.
+**New:** `core/annotation_plan_schema.py`, `core/block_items.py`, `core/block_triggers.py`,
+`core/graph/node_timing.py`, `core/graph/nodes/annotation_author.py`,
+`runtime_skills/annotation-authoring/1.0.md`, `runtime_skills/scene-authoring/1.4.md`,
+`runtime_skills/visual-plan/1.2.md`, plus `tests/test_block_triggers.py`,
+`tests/test_graph_diagram_edges.py`, `tests/test_visual_plan_node.py`,
+`tests/test_concurrent_llm_calls.py`, `tests/test_node_timing.py`,
+`tests/graph_pipeline_live_fixtures.py`.
 
-**`core/scene_plan_schema.py`/`core/scene_schemas.py`**: new `PlannedAnnotation`/
-`ComposedAnnotation`, `SegmentScenePlan.annotations`/`ComposedScene.annotations` — annotations are
-a separate concept from `BlockType`, not registered the same way (see D115, and the new paragraph
-in `.claude/skills/scene-templates/SKILL.md`).
+**Modified:** `cli.py` (logging config), `adapters/azure/llm_provider.py` (retry logging),
+`core/block_schemas_graph.py` (`GraphEdge.label`), `core/graph/nodes/{scene_author,scripting,
+visual_plan}.py`, `core/graph/pipeline.py`, `core/{scene_plan_schema,scene_schemas}.py`,
+`rendering/annotations.py`, `rendering/templates/_annotation*.html`,
+`rendering/templates/_block_graph_diagram.html`, `rendering/templates/_block_sequence_diagram.html`,
+`rendering/templates/_layout_{single,split_horizontal}.html`, plus the test files these changes
+touched (`tests/scene_author_fixtures.py`, `tests/graph_pipeline_fixtures.py`,
+`tests/test_author_scene_node.py`, `tests/test_compose_annotations.py`,
+`tests/test_array_grid_and_graph_modes.py`, `tests/test_azure_retry.py`,
+`tests/test_graph_resume.py`, `tests/test_graph_pipeline_live.py`, `tests/block_examples.py`,
+`tests/test_runtime_skills.py`).
 
-**`rendering/templates/_layout_single.html`/`_layout_split_horizontal.html`**: `#stage`'s bottom
-padding `130px` → `170px` (3-value shorthand) — a real, pre-existing 24px gap against the caption
-band, not hypothetical (D116). Both also gained the annotation import/loop wiring.
-
-**`tests/test_render_segment_live.py`**: `--caption-zone` now passed to the real `hyperframes
-check` call — no new assertion needed, its findings fold into the `layout` category the test
-already asserts on (confirmed empirically, D116).
-
-**`tests/test_graph_pipeline_live.py`**: D107 closed — mixed-tier test retargeted from an
-unreachable `{Tier.STATIC, Tier.ANIMATED}` to `{Tier.REVEAL, Tier.ANIMATED}`, `FRAME_BUDGET`
-55 → 80 (D117).
+**Real render artifacts** (gitignored, not committed): `artifacts/_cli_run/t18e-{array-grid,
+timeline,graph-single}/`, verification frames under `artifacts/_frames/t18e-{array-grid,
+graph-single}/`.
 
 ## Verify at any time
 
 ```bash
-pytest                                    # offline, no network -- 640 passed, 1 skipped as of this checkpoint
-ruff check . && ruff format --check .     # clean (one pre-existing unrelated file,
-                                           # .claude/skills/python-pro/SKILL.md, was already
-                                           # unformatted before this session and untouched by it)
-grep -rE "azure|openai|huggingface|ollama|playwright" core/ --include=*.py   # must be empty
-grep -rE "langgraph" core/ --include=*.py | grep -v "^core/graph/"           # must be empty
+pytest                                    # offline, no network -- 633 passed, 1 skipped
+ruff check . && ruff format --check .     # clean except one pre-existing, unrelated drift
+                                           # (.claude/skills/python-pro/SKILL.md, not T18E's)
+grep -rE "azure|openai|huggingface|ollama|playwright" core/ --include=*.py   # empty (one
+                                           # docstring-text hit in node_timing.py, not a real import)
+grep -rE "langgraph" core/ --include=*.py | grep -v "^core/graph/"           # empty
 git branch --show-current                                                    # feature/scene-composition
 
 PYTHONPATH=. .venv/Scripts/python.exe cli.py                  # prompts for a topic, runs standalone
 ```
 
-**A real `cli.py` render WAS run and watched immediately after this checkpoint** ("how TCP's
-three-way handshake establishes a connection", 90s target) — see decisionlog D119. Confirmed
-working: D110's caption fix (finally watched, after two checkpoints carrying it forward
-unverified), `SEQUENCE_DIAGRAM`, `GRAPH_DIAGRAM` in its `GRAPH` mode, both `CURSOR`/`CHECK`
-annotations, `SPLIT_HORIZONTAL` — all got real, unprompted use from one topic. Found and fixed: a
-real `SEQUENCE_DIAGRAM`/`TIMELINE` entrance-timing bug (D119). Found and NOT yet fixed: a
-`GRAPH_DIAGRAM` node-overlap bug in compact/`SPLIT_HORIZONTAL` canvases (D119, root cause traced,
-needs a real design pass).
-
-**`pytest -m local_live` (the real-render `BlockType x Tier` sweep) still has NOT been run.** The
-one real render above exercised 5 of 9 block types (title, sequence_diagram, graph_diagram,
-text_panel, plus annotations) — `array_grid`, `code_diff`, `timeline`, `graph_diagram`'s `CHAIN`
-mode, and the `warning` annotation type are still unverified against any real render, only against
-standalone `hyperframes check` probes (D114, D115).
-
 ## Environment state
 
 | | |
 |---|---|
-| Models | Opus plans, Sonnet builds — confirmed correctly this task: the plan was approved on Opus, the user then explicitly ran `/model sonnet` (setting it as their default) before the build began, and the mandatory self-check confirmed Sonnet before the first `Write`. |
+| Models | Session ended pinned to Sonnet (the user's own explicit `/model sonnet` mid-session, after this session's own planning phase ran on Opus). No standing default-model change was made this session beyond the earlier one already on record. **Check the model banner before the next session's build phase regardless** — same standing mandatory self-check `CLAUDE.md` requires every time. |
 | `RUNTIME_ENV` | `azure`, unchanged. |
 | `RENDER_ENV` | `local` (D100) — unchanged, still temporary until T35. |
-| `FRAME_BUDGET` | `9500`, unchanged this task. |
-| `RENDER_MAX_CONCURRENCY` | `2`, unchanged, still unmeasured under real concurrent load (carried forward). |
-| Git | `feature/scene-composition`, branched from `dev` at `5b4d7ba`. Not yet pushed to `origin` this checkpoint — see the push offer below. `dev` unchanged. |
-| Blob skill registry | **Not synced this checkpoint.** Two new/bumped packs exist only on local disk: `scene-authoring/1.3.md`, `visual-plan/1.1.md`. A real `RUNTIME_ENV=azure` run right now would load the *previous* versions from Blob (`scene-authoring/1.2`, `visual-plan/1.0`) — the same silent-drift gap D107 already found once for T18A's `1.1`. Still no automated sync exists. |
-| Azure spend | No real Azure calls this session — all verification was offline `pytest` plus local `hyperframes check` runs (no LLM/TTS, no network cost). |
+| `FRAME_BUDGET` | `9500`, unchanged. Still not retuned — E5 (this session) is what a future measurement pass would use, but this session didn't do that measurement pass itself. |
+| `RENDER_MAX_CONCURRENCY` | `2`, unchanged, still unmeasured under real concurrent load. |
+| `AZURE_OPENAI_MAX_CONCURRENCY` | `4`, unchanged. E7's parallelization is safe against this cap regardless of caller pattern (the adapter's own semaphore bounds it) — this session didn't retune the cap itself, per plan. |
+| Git | `feature/scene-composition`, branched from `dev` at `5b4d7ba`. Not yet pushed to `origin`. Not merged back yet. |
+| Blob skill registry | **Synced this session** — `annotation-authoring/1.0.md`, `scene-authoring/1.4.md`, `visual-plan/1.2.md` uploaded to the `runtime-skills` container, verified via `az storage blob list`. Still no automated sync — will drift again the next time `runtime_skills/` changes and nobody syncs by hand. |
+| Azure spend | Three real `RUNTIME_ENV=azure` renders this session (LLM + TTS + Blob), each ~90s target, elapsed 244-349s wall-clock each. Trivial against the $200/30-day credit. No render-backend Azure cost (`RENDER_ENV=local`). |
 
 ## Before the next session
 
-1. **Run T18D.** `tasks.md`'s entry is ready to execute as-is — a specific topic matrix, why each
-   topic was chosen, and D120's findings already seeded into the catalog. Start a fresh session for
-   it; don't try to continue inside whichever session is reading this.
-2. **Do not fix anything found before T18D's catalog is complete** — including anything that looks
-   trivial. That's the entire point of the T18D/T18E split (D120): a fix made without the fuller
-   picture already missed a shared root cause once (D119 fixed `sequence_diagram`/`timeline`
-   without yet knowing `graph_diagram`'s node-timing symptom was the same underlying class of bug).
-3. **Merge `feature/scene-composition` back to `dev`** once T18D and T18E are both done — still not
-   automatic as part of any checkpoint, per the same standing note this file has carried since
-   T18B. D110's caption fix is confirmed (D119); the block library's known-broken pieces
-   (`GRAPH_DIAGRAM` layout, title-card pacing, annotation coverage — D120) are what's blocking now.
+1. **Decide what's next.** T18F is the next placeholder in `tasks.md`, but the three findings
+   D122 recorded (inter-annotation collision, E4's version-number blind spot, the dense-scene
+   E2.4/E3/E1 interaction) are real, currently-unscoped work competing for the same slot — worth
+   discussing with the user rather than defaulting to T18F.
+2. **Merge `feature/scene-composition` back to `dev`**, whenever the user decides — still not
+   automatic as part of any checkpoint, per the standing note this file has carried since T18B.
+   T18D and T18E together are now real shipped fixes against the block library, unlike T18D alone.
 
 ## Known gaps and open questions
 
-**New from the user's own critique of the D119 render (D120) — this is T18D's seed catalog, not
-a random list:**
-- **Static/low-motion segments can run far longer than their narration justifies, with nothing new
-  appearing on screen** — a title card sat still for ~25s while narration moved well past it. The
-  "reads like a slideshow" problem T18A/T18B already fought (D95, D99), recurring somewhere
-  neither task's fixes covered.
-- **`SEQUENCE_DIAGRAM` annotation coverage was incomplete and, on inspection, not clearly timed
-  one-by-one** — the user expected all three handshake messages (SYN, SYN-ACK, ACK) to get their
-  own annotation as each was spoken; only some did. Not yet known whether `visual-plan`'s "use
-  sparingly" guidance is actively wrong for this case, or whether it's a planning-choice issue.
-- **`GRAPH_DIAGRAM` GRAPH-mode layout has a third confirmed symptom** beyond D119's two (node
-  overlap, wrong entrance timing): an edge line running off-frame, never closing on its target
-  node. The user's own proposed redesign is worth carrying into T18E directly — stop chasing
-  reliable per-node entrance timing and instead reveal the whole graph up front, letting the
-  traversal dot alone carry the "explained in order" storytelling.
-
-**From D119, still open, now folded into T18D's scope rather than tracked separately:**
-- `GRAPH_DIAGRAM`'s circular auto-layout fallback overlaps nodes in a compact/`SPLIT_HORIZONTAL`
-  canvas — root cause traced (square-canvas assumption against a short-wide real container).
-- A short/generic block-type label can spuriously match the wrong position in real narration —
-  `graph_diagram`'s node labels are the one remaining `_ITEM_FIELDS` case with no `anchor_phrase`
-  alternative (`rendering/block_timing.py`). Confirmed to have bitten once (D119's oddly-late
-  fifth node); worth checking for elsewhere.
-
-**New this checkpoint, unrelated to D120:**
-- **The SPLIT_HORIZONTAL "same panel" annotation restriction is prompt-only** — `rendering/
-  annotations.py::resolve_annotations` bounds-checks `target_block_index` against the segment's
-  own block count, but nothing in code stops an annotation from naming a block in the *other*
-  panel. Confirmed not exploitable into a broken frame (the render container is always derived
-  from the target itself), so left as a narrative constraint rather than a redundant guard.
-- **`ArrayStep.op`'s cross-field consistency (does `remaining_start`/`remaining_end` actually match
-  what `op` claims — a `narrow` that grows, a `shift` that changes width) is prose-only, not
-  validator-enforced** — the same convention the pre-T18C "range only ever shrinks" constraint
-  already used, deliberately not reopened (D114). A real render is what would actually catch a
-  violation, not `pytest`.
+**New this checkpoint (D122) — three real findings from T18E's own verification renders, not
+covered by anything in E1-E7/E2.4:**
+- Two annotations targeting nearby items in the same block can collide with each other — `E6`'s
+  `hfAnnotationPlace` only accounts for one annotation's own container, headline, and caption
+  band, never a sibling annotation.
+- `E4`'s trigger-vocabulary scan (`core/block_triggers.py::TRIGGER_VOCABULARY`) misses a
+  narration that signals chronology through domain-specific version numbers rather than generic
+  words like "timeline"/"history"/"milestone" — a real, not hypothetical, miss on exactly the
+  topic chosen to force `TIMELINE`.
+- `E2.4`'s compact-canvas layout, `E3`'s edge labels, and `E1`'s annotations were each verified
+  against a simpler scene in isolation — combined on one dense 5-node graph, node separation
+  holds but labels/captions/annotation caption collide with each other.
 
 **Carried forward, unchanged from prior checkpoints:**
+- `rendering/block_timing.py`'s per-item anchor fallback (`_ITEM_FIELDS`:
+  `graph_diagram.nodes`, `text_panel.items`, `code_diff.lines`) is still index-only —
+  T18D's headline finding, explicitly **not** part of T18E's scope (E1 fixed *annotation*
+  timing specifically, not this underlying block-item timing mechanism). Still open.
 - The cross-requeue `StructuredOutputError` cap (`QueuedJob.attempt`) is still open (D24/D67).
 - No coverage gate exists (D42).
 - `Segment.scene` is still untyped by design (D29's pattern) — revisit at T24 as previously
   planned.
-- `RENDER_MAX_CONCURRENCY=2` still hasn't been measured under real concurrent load.
-- T10 stays `in-progress`, unclaimed. Ollama/Kokoro still don't exist.
 - D47's disk-I/O-under-concurrency measurement (D69) used small WAV files only — still open.
+- T10 stays `in-progress`, unclaimed. Ollama/Kokoro still don't exist.
 - `hyperframes check` is still non-deterministically flaky at times (D96) — re-run before
-  trusting a single red result. Not hit this session (every real-toolchain probe this checkpoint
-  came back consistent across re-runs), but the standing caveat remains.
+  trusting a single red result. Not hit this session.
+- `pipeline-debugging`'s documented artifact layout is stale (no `script.json`/`scene.html`; the
+  real layout is `segments/<n>/composition/index.html` + `clip.mp4` + `narration.wav` +
+  `silent.mp4`) — flagged by T18D, not yet fixed, not part of T18E's scope either.
 
 ## Gotchas worth remembering
 
-**New this session, from T18C's own Phase-0 spike and the final review pass:**
+**New this session:**
+- **`FakeLLMProvider`'s strict-FIFO queue breaks the moment a phase makes calls of more than one
+  distinct schema type under real concurrency.** It worked for every case before T18E because
+  every concurrent-fan-out phase only ever queued one homogeneous type. The moment `author_scene`
+  started making two types per segment (fill, then annotate), a real checkpointer's I/O gave
+  each segment's `Send` task a genuine suspension point, and strict positional FIFO could no
+  longer guarantee a matching type at the head. Fix pattern:
+  `tests/graph_pipeline_fixtures.py::PhaseQueueLLMProvider` — match by type anywhere in the
+  queue, not position — used only where this specific problem exists, `FakeLLMProvider` itself
+  untouched. Worth reaching for this pattern again if a future task adds a third differently-typed
+  call to any existing concurrent fan-out.
+- **Python's logging module drops `INFO` and below by default until something calls
+  `logging.basicConfig` (or otherwise attaches a handler).** A `logger.info(...)` call anywhere
+  in the codebase is silently a no-op in a real `cli.py` run unless something configures logging
+  first — confirmed live, not assumed, when three real renders showed zero per-node timing lines
+  despite the code being correct and offline-tested. `cli.py::main()` now does this once; nothing
+  else in the codebase should need its own `basicConfig` call as a result.
+- **A Jinja `loop.index0` inside one `{% for %}` block and a JS counter incremented only under a
+  condition are NOT the same index**, even when a quick real-render sample makes them look like
+  they agree. `_block_graph_diagram.html`'s edge-label bug (found by review, not a render) is the
+  concrete instance: the markup's `loop.index0` runs over every edge, labelled or not; a
+  same-named-feeling JS `labelIndex` that only increments for labelled edges silently desyncs the
+  moment an unlabelled edge precedes a labelled one. Any future per-item id emitted conditionally
+  from a Jinja loop needs the SAME index used on both the markup and script sides — never a
+  separately-scoped counter, however natural it looks at the call site.
+- **`hfAnnotationOffset`/`hfAnnotationPlace`'s scale-cancellation trick (dividing two
+  same-viewport rects by the same `#root`-width-derived scale factor) works for any *ratio*
+  computation, not just absolute-pixel deltas** — `_block_graph_diagram.html`'s marker-center
+  measurement reuses this to convert a node's real screen position into viewBox units without
+  ever touching `#root`'s own rect, because the canvas's own scale factor cancels out of the
+  ratio. Worth remembering as the general technique, not just the two places it's now used.
+
+**Carried from T18D, still true:**
+- **A GRAPH_DIAGRAM node div's CSS center is not its visible marker circle's center** — this is
+  now fixed for edges/traversal (T18E, E2), but the underlying fact (label/caption height shifts
+  the div's true center) is still true of the div itself; any *new* code touching node geometry
+  should measure the marker, never trust the div's own position.
+- **`[await x() for i in xs]` inside a list comprehension is sequential, not concurrent** — fixed
+  for both known instances this session (E7); worth grepping for the same pattern anywhere else
+  before assuming it's now handled everywhere.
+- **The Azure adapter's own `asyncio.Semaphore(max_concurrency)` already makes concurrent calls
+  from any caller safe** — unchanged reasoning, now also covers E7's two new `asyncio.gather`
+  sites.
+- **`mcp__azure__storage`'s AAD-login path can't write blobs on this account; use `az storage blob
+  upload` with the connection string instead.**
+- **A real render's artifact layout does not match `pipeline-debugging`'s documented one** — see
+  "Known gaps" above.
+
+**Carried from T18C, still true:**
 - **`getBoundingClientRect()` returns viewport pixels, not this project's own 1920x1080 CSS-pixel
-  space, whenever the capture harness renders at a different effective scale.** A real, found-live
-  bug (`hyperframes check`'s own `escaped_container` finding caught it) — any future code
-  measuring a real element's position for use inside a GSAP `x`/`y` transform must normalize
-  against `#root`'s own known width first (`rendering/templates/_annotations.html`'s
-  `hfAnnotationOffset` is the reference implementation).
-- **A `position: absolute` element with no explicit `top`/`left` set does NOT default to its
-  container's origin** — it defaults to wherever it would have landed in normal document flow
-  (its "hypothetical box"), which for a flex child can be far from (0,0). Any element meant to be
-  positioned purely via a GSAP `x`/`y` transform needs an explicit `top: 0; left: 0` in its base
-  CSS, or the transform composes with an unpredictable starting point instead of a clean origin.
+  space** whenever the capture harness renders at a different effective scale — normalize against
+  `#root`'s own known width first.
+- **A `position: absolute` element with no explicit `top`/`left` does NOT default to its
+  container's origin.**
 - **A test that passes offline does not mean the code path it claims to cover actually ran.**
-  `tests/test_array_grid_and_graph_modes.py`'s first version validated a `shift` fixture against
-  the schema and confirmed the string `"shift"` appeared in composed HTML — both true, and neither
-  proved the template's `enter()` branch (the animation logic `shift` exists to add, distinct from
-  `narrow`) ever actually executed. Caught only by a reviewer tracing the *template's own runtime
-  logic* against the fixture's specific numbers, not by running the test. When a test's whole
-  purpose is covering one specific branch, trace the branch condition by hand against the fixture,
-  don't just confirm the test passes.
-- **`hyperframes check --caption-zone`'s findings fold into the existing `layout` category, under
-  no separate top-level JSON key** — confirmed by real `--json` runs, not assumed. Any future
-  caption-zone-adjacent work should assert against `check["layout"]["errorCount"]`, not invent a
-  `check["captionZone"]` key that doesn't exist.
-- **A block whose payload has no length floor can produce an empty list a template's script macro
-  then indexes into.** `_block_code_diff.html`'s caption-timing tween originally read
-  `{{ prefix }}_lineStarts[{{ prefix }}_lineStarts.length - 1]` — `NaN` for a zero-line diff.
-  Fixed by tracking a plain running scalar instead (matching `_block_code_panel.html`'s own
-  pre-existing pattern) — worth checking any new block's script macro for the same class of
-  off-the-end read wherever it indexes a per-item array by its own length.
+- **The Blob skill registry does not auto-sync with local disk, ever** — confirmed drifted a
+  fourth time now (T18A, T18B, T18D, T18E).
 
-**Carried from T18B, still true:**
-- **A movie-style caption fix has two separate parts** — *retention* (does an old cue clear) and
-  *reveal* (does a cue appear as one unit). Still unwatched in a real render (see "Before the next
-  session").
-- **A CSS initial `transform` paired with a GSAP tween on the same property is a real, currently-
-  live trap.** Set every animated element's *starting* transform state via an unconditional
-  `tl.set(...)` at t=0 in JS, never in static CSS.
-- **A block partial's `markup()` and `script()` macros must declare the exact same parameters**,
-  even ones only one of them uses — Jinja does not warn on a silently-unbound keyword argument.
-- **Two Jinja templates composing into one page can collide on element ids** — check *other*
-  templates' existing id suffixes when adding a new one, not just your own file.
-- **The Blob skill registry does not auto-sync with local disk, ever** — confirmed drifted twice
-  now (T18A once, and this checkpoint leaves it drifted again on purpose, see above). Any session
-  doing a real `RUNTIME_ENV=azure` run after editing `runtime_skills/` should sync manually first.
-
-**Carried from T18A, still true:**
-- **The quality hook strips an import added before its first use** — even across separate
-  Edit/Write calls in the same session. Add the import in the identical tool call that adds its
-  first real usage. Bit this task multiple times (`tests/test_block_schemas.py`,
-  `core/graph/nodes/visual_plan.py`, and a scratchpad probe script all needed a follow-up edit to
-  re-add a stripped import) — a live, recurring trap, not a one-off.
-- **A registry component's `<template>`/`window.__hyperframes` runtime doesn't fit this project's
-  layout — port the technique, not the file.** Confirmed again this task for `offset-path-traveler`
-  (`graph_diagram`'s traveler), `code-diff`, `success-check`, and the cursor/press-ripple
-  components — every one hand-ported, none installed as-is.
+**Carried from T18A/T18B, still true:**
+- **The quality hook strips an import added before its first use** — add the import in the same
+  tool call as its first real usage. Hit repeatedly this session across nearly every multi-edit
+  file; worth treating as the default assumption for any edit that adds an import, not a
+  surprise when it happens.
 - **`hyperframes lint`'s severity levels are meaningful** — only `[error]` blocks a render.
-- **Windows path semantics**: a trailing dot is stripped on existence checks but not on directory
-  enumeration (D46).
 - **The hooks fire on `Write|Edit`, not on Bash heredocs.** Use `Write` for `.py` files.
-- **CLAUDE.md's boundary greps are plain text searches.** Verify imports with AST, not text.
-- 200-line ceiling, enforced on write. Split by responsibility, don't compress — this task split
-  `core/block_schemas.py` into five modules and `rendering/compose.py` into three for exactly this
-  reason.
+- **CLAUDE.md's boundary greps are plain text searches.** Verify imports with AST, not text —
+  `core/graph/node_timing.py`'s own docstring mentioning `adapters/azure/llm_provider.py` by name
+  is this session's own live example of a false positive.
+- 200-line ceiling, enforced on write. Split by responsibility, don't compress.
 - `artifacts/` is gitignored. Nothing you need to keep goes there.

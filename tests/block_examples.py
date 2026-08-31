@@ -85,8 +85,8 @@ EXAMPLES: dict[BlockType, dict[str, Any]] = {
             },
         ],
         "edges": [
-            {"from_id": "n1", "to_id": "n2"},
-            {"from_id": "n2", "to_id": "n3"},
+            {"from_id": "n1", "to_id": "n2", "label": None},
+            {"from_id": "n2", "to_id": "n3", "label": None},
         ],
         "positions": [],
         "traversal": [],

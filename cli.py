@@ -8,6 +8,7 @@ the same as ``tests/test_graph_pipeline.py`` already does, with no wrapper neede
 
 import argparse
 import asyncio
+import logging
 import os
 import time
 import uuid
@@ -99,6 +100,16 @@ async def _run(topic: str, *, target_duration_ms: int, job_id: str) -> VideoJob:
 
 
 async def main() -> None:
+    # T18E: without this, core/graph/node_timing.py's per-node start/elapsed logging and
+    # adapters/azure/llm_provider.py's retry logging never reach the console -- Python's own
+    # "handler of last resort" only surfaces WARNING and above when nothing has configured
+    # logging, which is why a retry line showed up in a real render but node timing never did
+    # (confirmed live: neither run this task verified against showed a single "node ... started"
+    # line). This is the fix, not a new feature -- E5's own DoD promised visible timing.
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "topic",

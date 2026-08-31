@@ -9,6 +9,7 @@ from pathlib import Path
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from core.annotation_plan_schema import SceneAnnotations
 from core.block_schemas import block_schema_for
 from core.block_types import BlockType
 from core.graph import GraphContext, GraphState
@@ -32,14 +33,24 @@ MEASURED_MS = 21_000
 
 
 def a_skill_registry(
-    *, scene_authoring: str = "SCENE AUTHORING PACK", house_style: str = "HOUSE STYLE PACK"
+    *,
+    scene_authoring: str = "SCENE AUTHORING PACK",
+    house_style: str = "HOUSE STYLE PACK",
+    annotation_authoring: str = "ANNOTATION AUTHORING PACK",
 ) -> FakeSkillRegistry:
     return FakeSkillRegistry(
         [
             SkillPack(name="scene-authoring", version="1.0", content=scene_authoring),
             SkillPack(name="house-style", version="1.0", content=house_style),
+            SkillPack(name="annotation-authoring", version="1.0", content=annotation_authoring),
         ]
     )
+
+
+def no_annotations() -> SceneAnnotations:
+    """``author_scene`` always calls ``author_annotations`` once every block is filled -- queue
+    this after a test's block payloads to answer with none, the common case."""
+    return SceneAnnotations(annotations=[])
 
 
 def a_payload_for(block_type: BlockType):

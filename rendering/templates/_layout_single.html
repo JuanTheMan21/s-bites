@@ -94,7 +94,7 @@
       {{ blk.script(block.prefix, block.payload, block.entrance_start, block.item_starts, block.step_starts, duration_sec, compact=false) }}
       {% for annotation in block.annotations %}
       {% import "_annotation_" ~ annotation.annotation_type ~ ".html" as ann_tpl %}
-      {{ ann_tpl.script(annotation.prefix, annotation.caption, annotation.entrance_start, annotation.target_id, annotation.container_id) }}
+      {{ ann_tpl.script(annotation.prefix, annotation.caption, annotation.entrance_start, annotation.target_id, annotation.container_id, annotation.headline_id, "ls-captions") }}
       {% endfor %}
       {% endfor %}
 

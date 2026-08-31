@@ -11,22 +11,19 @@ Both segments share one visual intent and one measured duration, deliberately: t
 and ``synthesize_segment`` fan-outs are concurrent, so the order either fake's queue gets popped in
 is not guaranteed to match segment index -- identical entries make that irrelevant rather than
 flaky, the same reasoning ``tests/graph_pipeline_fixtures.py::slot_payloads`` already documents.
+``tests/graph_pipeline_live_fixtures.py`` builds the seeded LLM/skills this file consumes -- split
+out once the T18E annotations addition pushed this file over the 200-line ceiling.
 """
 
 from pathlib import Path
 
 import pytest
 
-from core.block_schemas import TitleSlots
-from core.block_types import BlockType, MotifName, SceneLayout
 from core.graph import GraphContext, build_graph
-from core.models import Importance, Tier, VideoJob, VisualIntent
-from core.outline_schema import Outline, SegmentPlan
-from core.scene_plan_schema import PlannedBlock, SegmentScenePlan, VideoScenePlan
-from core.scripting_schema import Narration
-from interfaces import SkillPack
+from core.models import Tier, VideoJob
 from mux.concat_segments import DEFAULT_TRANSITION_S
-from tests.fakes import FakeLLMProvider, FakeSkillRegistry, FakeStorage, FakeTTSProvider
+from tests.fakes import FakeStorage, FakeTTSProvider
+from tests.graph_pipeline_live_fixtures import seeded_llm, seeded_skills
 
 pytestmark = pytest.mark.local_live
 
@@ -54,53 +51,6 @@ FRAME_BUDGET = 80
 FPS = 24
 
 
-def _seeded_llm() -> FakeLLMProvider:
-    outline = Outline(
-        segments=[
-            SegmentPlan(
-                title="An aside",
-                summary="Barely matters.",
-                visual_intent=VisualIntent.TITLE_CARD,
-                importance=Importance.ASIDE,
-            ),
-            SegmentPlan(
-                title="The point",
-                summary="The whole reason for the video.",
-                visual_intent=VisualIntent.TITLE_CARD,
-                importance=Importance.CRITICAL,
-            ),
-        ]
-    )
-    narrations = [Narration(text="Narration one."), Narration(text="Narration two.")]
-    plan = VideoScenePlan(
-        motif=MotifName.TERMINAL,
-        segments=[
-            SegmentScenePlan(
-                segment_index=i,
-                layout=SceneLayout.SINGLE,
-                blocks=[PlannedBlock(block_type=BlockType.TITLE, role="Title", anchor_phrase=None)],
-                continues_previous=False,
-                annotations=[],
-            )
-            for i in range(2)
-        ],
-    )
-    slots = [
-        TitleSlots(headline="Headline 0", subtitle=None),
-        TitleSlots(headline="Headline 1", subtitle=None),
-    ]
-    return FakeLLMProvider([outline, *narrations, plan, *slots])
-
-
-def _seeded_skills() -> FakeSkillRegistry:
-    return FakeSkillRegistry(
-        [
-            SkillPack(name=name, version="1.0", content=f"{name} pack")
-            for name in ("outline", "scripting", "visual-plan", "house-style", "scene-authoring")
-        ]
-    )
-
-
 async def test_a_mixed_tier_job_renders_muxes_and_concats_to_one_playable_video(
     tmp_path: Path,
 ) -> None:
@@ -114,10 +64,10 @@ async def test_a_mixed_tier_job_renders_muxes_and_concats_to_one_playable_video(
 
     try:
         context = GraphContext(
-            llm=_seeded_llm(),
+            llm=seeded_llm(),
             tts=FakeTTSProvider(durations=[DURATION_MS, DURATION_MS]),
             storage=storage,
-            skills=_seeded_skills(),
+            skills=seeded_skills(),
             render=real_render,
             working_dir=tmp_path / "work",
             frame_budget=FRAME_BUDGET,

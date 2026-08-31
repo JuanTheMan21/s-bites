@@ -8,12 +8,38 @@
   itself (D103: the registry's own runtime doesn't fit this project's composition model).
 
   GRAPH mode's node positions are a one-time layout, never a tracked GSAP tween property, so they
-  are resolved in plain synchronous JS (authored payload.positions win, an evenly spaced circular
-  layout fills in the rest) rather than threaded through as a new macro parameter -- this keeps
-  markup()/script()'s signature identical to every other block partial's.
+  are resolved in plain synchronous JS (authored payload.positions win; a fallback fills in the
+  rest) rather than threaded through as a new macro parameter -- this keeps markup()/script()'s
+  signature identical to every other block partial's.
 
   GRAPH_DIAGRAM's traversal points share the same step_starts slot ARRAY_GRID's elimination steps
   use (rendering/block_timing.py resolves whichever field a block type actually has).
+
+  T18E (D121/D122's real-render findings, t18d_catalog.md):
+  - Edge endpoints, and the traveler's hop targets, are now the visible MARKER CIRCLE's own
+    measured centre, not the node div's CSS centre -- `.blk-graph-node-free`'s
+    translate(-50%, -50%) centres the whole marker+label+caption stack, so the circle sits
+    40-50px off the div's true centre by a different amount per node (label length varies); every
+    edge used to draw straight through label text. Measured with getBoundingClientRect() against
+    the canvas element's own rect, the same normalize-then-scale technique
+    _annotations.html::hfAnnotationOffset already established, applied here as a ratio (canvas
+    scale cancels out of a same-viewport ratio, so no #root normalization is needed for this one).
+  - Each edge now gates on BOTH its endpoints (`max(fromStart, toStart) + 0.3`), not just node 0's
+    start -- previously every edge drew at the same instant regardless of which nodes it joined.
+  - Arrowheads, via one <marker> per diagram, on GRAPH edges, CHAIN rail segments, and (see
+    _block_sequence_diagram.html) SEQUENCE_DIAGRAM's own message lines.
+  - The FALLBACK layout (no authored position) is aspect-ratio-aware: SPLIT_HORIZONTAL's compact
+    canvas (1600x400, short and wide) got the same circular formula SINGLE's 1600x700 canvas
+    uses, which packs nodes into a vertically-compressed band and produced two confirmed
+    overlapping node pairs in one real render (t18d_catalog.md's Layout section) while SINGLE
+    stayed clean across every frame sampled -- a real isolation result, not a guess. `compact`
+    canvases now lay nodes out on the wide axis (one or two rows) instead of a circle. This is
+    the bounded slice of decisionlog D121's analysis item 7 T18E takes on; a real layered/
+    rank-based layout algorithm stays deferred.
+  - `edges` may now carry an optional `label` (a distance, cost, or condition) -- rendered as an
+    absolutely-positioned div at the edge's midpoint, not SVG <text>, because
+    preserveAspectRatio="none" would stretch text non-uniformly the same way it stretches the
+    traveler's circle (accepted there; not accepted for legibility of a number).
 #}
 
 {% macro markup(prefix, payload, compact=false) %}
@@ -23,11 +49,16 @@
   {% if payload.layout == "chain" %}
   <div id="{{ prefix }}-rail" class="blk-graph-rail" style="height: {{ '220px' if compact else '340px' }};">
     <svg viewBox="0 0 1600 340" preserveAspectRatio="none">
+      <defs>
+        <marker id="{{ prefix }}-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" class="blk-graph-arrowhead"></path>
+        </marker>
+      </defs>
       {% for node in payload.nodes %}
       {% if not loop.last %}
       {% set x1 = (loop.index0 / (n - 1) * 1600) if n > 1 else 800 %}
       {% set x2 = ((loop.index0 + 1) / (n - 1) * 1600) if n > 1 else 800 %}
-      <line id="{{ prefix }}-seg-{{ loop.index0 }}" class="blk-graph-line" x1="{{ x1 }}" y1="36" x2="{{ x2 }}" y2="36"></line>
+      <line id="{{ prefix }}-seg-{{ loop.index0 }}" class="blk-graph-line" marker-end="url(#{{ prefix }}-arrow)" x1="{{ x1 }}" y1="36" x2="{{ x2 }}" y2="36"></line>
       {% endif %}
       {% endfor %}
     </svg>
@@ -45,8 +76,13 @@
   {% else %}
   <div id="{{ prefix }}-canvas" class="blk-graph-canvas" style="height: {{ '220px' if compact else '620px' }};">
     <svg id="{{ prefix }}-svg" viewBox="0 0 1600 {{ 400 if compact else 700 }}" preserveAspectRatio="none">
+      <defs>
+        <marker id="{{ prefix }}-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" class="blk-graph-arrowhead"></path>
+        </marker>
+      </defs>
       {% for edge in payload.edges %}
-      <line id="{{ prefix }}-edge-{{ loop.index0 }}" class="blk-graph-line" x1="0" y1="0" x2="0" y2="0"></line>
+      <line id="{{ prefix }}-edge-{{ loop.index0 }}" class="blk-graph-line" marker-end="url(#{{ prefix }}-arrow)" x1="0" y1="0" x2="0" y2="0"></line>
       {% endfor %}
       <circle id="{{ prefix }}-traveler" class="blk-graph-traveler" r="14" cx="0" cy="0"></circle>
     </svg>
@@ -58,6 +94,11 @@
       <div class="blk-graph-caption">{{ node.caption }}</div>
       {% endif %}
     </div>
+    {% endfor %}
+    {% for edge in payload.edges %}
+    {% if edge.label %}
+    <div class="blk-graph-edge-label" id="{{ prefix }}-edge-label-{{ loop.index0 }}">{{ edge.label }}</div>
+    {% endif %}
     {% endfor %}
   </div>
   {% endif %}
@@ -75,7 +116,21 @@
   .blk-graph-canvas { position: relative; width: 100%; margin-top: {{ "40px" if compact else "70px" }}; }
   .blk-graph-rail svg, .blk-graph-canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
   .blk-graph-line { stroke: var(--accent-secondary); stroke-width: 4; stroke-linecap: round; fill: none; }
+  .blk-graph-arrowhead { fill: var(--accent-secondary); }
   .blk-graph-traveler { fill: var(--accent-primary); stroke: none; }
+  .blk-graph-edge-label {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--bg);
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: {{ "14px" if compact else "18px" }};
+    color: var(--accent-secondary);
+    white-space: nowrap;
+    opacity: 0;
+    will-change: opacity;
+  }
   .blk-graph-node {
     position: absolute;
     display: flex;
@@ -144,11 +199,12 @@
     });
   })();
   {% else %}
-  // GRAPH mode: resolve every node's (x, y) once -- authored positions win, an evenly spaced
-  // circular fallback fills the rest -- in the SAME 1600 x {{ 400 if compact else 700 }} virtual
-  // space the SVG's own viewBox uses, so a node div's CSS left/top percentage and an edge line's
-  // viewBox coordinates always agree (preserveAspectRatio="none" stretches the viewBox to fill
-  // the container exactly, so viewBox units and percent-of-container are the same fraction).
+  // GRAPH mode: resolve every node's (x, y) fraction once -- authored positions win; the
+  // fallback for the rest depends on `compact` (T18E) -- SPLIT_HORIZONTAL's short-wide canvas
+  // lays nodes out on the wide axis instead of a circle, which packed nodes into a
+  // vertically-compressed band and produced confirmed overlapping node pairs (t18d_catalog.md's
+  // Layout section; SINGLE stayed clean across every frame sampled). This is the bounded slice of
+  // D121's analysis item 7 T18E takes on -- a real layered/rank-based layout stays deferred.
   (function () {
     var VBW = 1600, VBH = {{ 400 if compact else 700 }};
     var nodeIds = [{% for node in payload.nodes %}"{{ node.id }}"{{ "," if not loop.last }}{% endfor %}];
@@ -157,34 +213,86 @@
     authored["{{ pos.node_id }}"] = [{{ pos.x }}, {{ pos.y }}];
     {% endfor %}
     var n = nodeIds.length;
-    var positions = nodeIds.map(function (id, i) {
-      if (authored[id]) return authored[id];
+
+    {% if compact %}
+    function fallbackPos(i) {
+      var rows = n <= 4 ? 1 : 2;
+      var perRow = Math.ceil(n / rows);
+      var row = Math.floor(i / perRow);
+      var colsInRow = Math.min(perRow, n - row * perRow);
+      var col = i - row * perRow;
+      var x = colsInRow > 1 ? 0.1 + (col / (colsInRow - 1)) * 0.8 : 0.5;
+      var y = rows > 1 ? 0.25 + (row / (rows - 1)) * 0.5 : 0.5;
+      return [x, y];
+    }
+    {% else %}
+    function fallbackPos(i) {
       var angle = (2 * Math.PI * i) / Math.max(1, n);
       return [0.5 + 0.4 * Math.cos(angle), 0.5 + 0.4 * Math.sin(angle)];
+    }
+    {% endif %}
+
+    var positions = nodeIds.map(function (id, i) { return authored[id] || fallbackPos(i); });
+
+    var canvas = document.getElementById("{{ prefix }}-canvas");
+    var els = document.querySelectorAll("#{{ prefix }}-canvas .blk-graph-node-free");
+    els.forEach(function (el, i) {
+      el.style.left = (positions[i][0] * 100) + "%";
+      el.style.top = (positions[i][1] * 100) + "%";
     });
 
-    var els = document.querySelectorAll("#{{ prefix }}-canvas .blk-graph-node-free");
+    // Measure each node's own visible marker circle, not the div it sits inside -- the div's CSS
+    // centre and the circle's real centre disagree by however tall the label/caption are (T18E,
+    // D121/D122 -- the root cause of edges "pointing at nothing"). A ratio of two rects measured
+    // in the same viewport, so no #root scale normalization is needed here (it cancels out).
+    var canvasRect = canvas.getBoundingClientRect();
     var byId = {};
     els.forEach(function (el, i) {
-      var pos = positions[i];
-      el.style.left = (pos[0] * 100) + "%";
-      el.style.top = (pos[1] * 100) + "%";
-      byId[nodeIds[i]] = { el: el, x: pos[0] * VBW, y: pos[1] * VBH };
+      var m = el.querySelector(".blk-graph-marker").getBoundingClientRect();
+      byId[nodeIds[i]] = {
+        el: el,
+        x: ((m.left + m.width / 2 - canvasRect.left) / canvasRect.width) * VBW,
+        y: ((m.top + m.height / 2 - canvasRect.top) / canvasRect.height) * VBH,
+        rx: (m.width / 2 / canvasRect.width) * VBW,
+        ry: (m.height / 2 / canvasRect.height) * VBH,
+      };
     });
 
     var edges = [
       {% for edge in payload.edges %}
-      { from: "{{ edge.from_id }}", to: "{{ edge.to_id }}" }{{ "," if not loop.last }}
+      {
+        from: "{{ edge.from_id }}",
+        to: "{{ edge.to_id }}",
+        hasLabel: {{ "true" if edge.label else "false" }},
+      }{{ "," if not loop.last }}
       {% endfor %}
     ];
     var lines = document.querySelectorAll("#{{ prefix }}-svg .blk-graph-line");
-    edges.forEach(function (edge, i) {
+    var geom = edges.map(function (edge, i) {
       var a = byId[edge.from], b = byId[edge.to], line = lines[i];
-      if (!a || !b || !line) return;
+      // "{{ prefix }}-edge-label-" + i matches the markup's own loop.index0 -- the edge's OVERALL
+      // position among every edge, labelled or not -- never a separate labelled-only counter,
+      // which would drift as soon as an earlier edge in the array had no label.
+      var labelEl = edge.hasLabel ? document.getElementById("{{ prefix }}-edge-label-" + i) : null;
+      if (!a || !b || !line) return null;
+      // Pull the endpoint back off the destination node's own measured radius so the arrowhead
+      // lands just outside the marker circle, not hidden inside it.
+      var dx = b.x - a.x, dy = b.y - a.y;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var pullback = (b.rx + b.ry) / 2;
+      var ex = b.x - (dx / len) * pullback, ey = b.y - (dy / len) * pullback;
       line.setAttribute("x1", a.x);
       line.setAttribute("y1", a.y);
-      line.setAttribute("x2", b.x);
-      line.setAttribute("y2", b.y);
+      line.setAttribute("x2", ex);
+      line.setAttribute("y2", ey);
+      if (labelEl) {
+        labelEl.style.left = (((a.x + b.x) / 2 / VBW) * 100) + "%";
+        labelEl.style.top = (((a.y + b.y) / 2 / VBH) * 100) + "%";
+      }
+      var fromIdx = nodeIds.indexOf(edge.from), toIdx = nodeIds.indexOf(edge.to);
+      var fromStart = fromIdx >= 0 ? {{ prefix }}_nodeStarts[fromIdx] : {{ prefix }}_nodeStarts[0];
+      var toStart = toIdx >= 0 ? {{ prefix }}_nodeStarts[toIdx] : {{ prefix }}_nodeStarts[0];
+      return { line: line, labelEl: labelEl, start: Math.max(fromStart, toStart) + 0.3 };
     });
 
     els.forEach(function (el, i) {
@@ -195,12 +303,17 @@
         {{ prefix }}_nodeStarts[i],
       );
     });
-    lines.forEach(function (line, i) {
-      var len = line.getTotalLength();
-      line.style.strokeDasharray = String(len);
-      line.style.strokeDashoffset = String(len);
-      var start = {{ prefix }}_nodeStarts[0] + 0.3;
-      tl.to(line, { strokeDashoffset: 0, duration: 0.4, ease: "power2.out" }, start);
+    // Each edge gates on BOTH its endpoints having appeared (T18E) -- previously every edge drew
+    // at node 0's own start regardless of which nodes it actually connected.
+    geom.forEach(function (g) {
+      if (!g) return;
+      var len = g.line.getTotalLength();
+      g.line.style.strokeDasharray = String(len);
+      g.line.style.strokeDashoffset = String(len);
+      tl.to(g.line, { strokeDashoffset: 0, duration: 0.4, ease: "power2.out" }, g.start);
+      if (g.labelEl) {
+        tl.to(g.labelEl, { opacity: 1, duration: 0.3, ease: "power2.out" }, g.start + 0.35);
+      }
     });
 
     // Traversal: the traveler dot hops node-to-node, straight-line (no MotionPathPlugin), one

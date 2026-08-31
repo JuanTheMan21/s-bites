@@ -11,6 +11,7 @@ scene authoring (so every segment's plan exists before any block's content is fi
 
 from langgraph.runtime import Runtime
 
+from core.block_triggers import missed_block_opportunities
 from core.block_types import ALLOWED_BLOCKS, BlockType, MotifName, SceneLayout
 from core.graph.context import GraphContext
 from core.graph.nodes.skill_prompt import load_step_prompt
@@ -18,7 +19,7 @@ from core.graph.nodes.structured_retry import generate_with_bounded_retries
 from core.graph.state import GraphState
 from core.models import Segment
 from core.scene_plan_schema import SegmentScenePlan, VideoScenePlan
-from core.scene_schemas import ComposedAnnotation, ComposedBlock, ComposedScene
+from core.scene_schemas import ComposedBlock, ComposedScene
 from interfaces import LLMProvider, SkillRegistry
 
 VISUAL_PLAN_PACK = "visual-plan"
@@ -28,17 +29,6 @@ VISUAL_PLAN_PACK = "visual-plan"
 _BLOCK_GUIDANCE = "\n".join(
     f"- {intent.value}: usually {', '.join(sorted(b.value for b in blocks))}"
     for intent, blocks in ALLOWED_BLOCKS.items()
-)
-
-# T18C: annotations are a separate, cross-cutting overlay concept, not a BlockType -- they don't
-# come from ALLOWED_BLOCKS, so their own guidance is a fixed prompt block rather than a table
-# built from an enum mapping.
-_ANNOTATION_GUIDANCE = (
-    "Use sparingly -- at most one or two annotations per scene, only where the narration is "
-    "genuinely pointing something out (a specific mistake, a completed step, something to "
-    "notice). Most scenes should have none at all. target_block_index must name a block THIS "
-    "segment's own plan includes, and for a SPLIT_HORIZONTAL scene must stay within the same "
-    "panel the annotation is about -- never a block in the other panel."
 )
 
 
@@ -87,22 +77,38 @@ def _build_prompt(step: str, segments: list[Segment]) -> str:
         )
     lines.append("## Typical blocks per outline intent (a hint, not a rule)")
     lines.append(_BLOCK_GUIDANCE)
-    lines.append("")
-    lines.append("## Annotations")
-    lines.append(_ANNOTATION_GUIDANCE)
     return "\n".join(lines)
 
 
 async def plan_video_visuals(
-    llm: LLMProvider, skills: SkillRegistry, segments: list[Segment]
+    llm: LLMProvider, skills: SkillRegistry, segments: list[Segment], *, appendix: str | None = None
 ) -> VideoScenePlan:
     """One call, every segment's scene shape at once. ``segments`` should be in index order --
-    the prompt presents them that way so the model can reason about sequence and repetition."""
+    the prompt presents them that way so the model can reason about sequence and repetition.
+    ``appendix`` (T18E), when given, is a corrective note appended after the base prompt -- the
+    re-ask ``plan_visuals`` makes when ``missed_block_opportunities`` finds something."""
     step_prompt = await load_step_prompt(skills, VISUAL_PLAN_PACK)
     prompt = _build_prompt(step_prompt.step, segments)
+    if appendix:
+        prompt = f"{prompt}\n\n{appendix}"
     return await generate_with_bounded_retries(
         llm, prompt, VideoScenePlan, system=step_prompt.house_style
     )
+
+
+def _reask_appendix(missed: dict[int, BlockType], segments: list[Segment]) -> str:
+    by_index = {s.index: s for s in segments}
+    lines = [
+        "## Revise",
+        "These segments' own narration clearly calls for a block type the plan above never uses "
+        "anywhere in the video. Keep everything else about your plan; for each segment named "
+        "below, make that block type its primary block:",
+    ]
+    lines.extend(
+        f"- Segment {index} ({by_index[index].title}): use `{block_type.value}`."
+        for index, block_type in missed.items()
+    )
+    return "\n".join(lines)
 
 
 async def plan_visuals(state: GraphState, runtime: Runtime[GraphContext]) -> dict:
@@ -111,15 +117,26 @@ async def plan_visuals(state: GraphState, runtime: Runtime[GraphContext]) -> dic
     fills each block's content next.
 
     Registered with ``build_transient_retry_policy()`` alone in ``pipeline.py``, never
-    ``build_retry_policies()`` -- this node makes exactly one ``LLMProvider`` call, already
-    isolated via ``generate_with_bounded_retries`` (D73's pattern, same as ``plan_segments`` and
-    ``author_scene``).
+    ``build_retry_policies()`` -- this node makes one or two ``LLMProvider`` calls (see below),
+    each isolated via ``generate_with_bounded_retries`` (D73's pattern, same as ``plan_segments``
+    and ``author_scene``).
+
+    T18E: if the first plan leaves a segment's own narration clearly calling for a block type used
+    nowhere in the video (``core/block_triggers.py`` -- T18D's real-render matrix found TIMELINE
+    rendered zero times across six topics, D121/D122), this makes exactly ONE bounded re-ask with
+    a corrective appendix. The second plan is taken as final even if it still misses -- no third
+    call, and no deterministic override of the model's own choice.
     """
     context = runtime.context
     segments = state["segments"]
     ordered = sorted(segments.values(), key=lambda s: s.index)
 
     plan = await plan_video_visuals(context.llm, context.skills, ordered)
+    missed = missed_block_opportunities(ordered, plan)
+    if missed:
+        appendix = _reask_appendix(missed, ordered)
+        plan = await plan_video_visuals(context.llm, context.skills, ordered, appendix=appendix)
+
     by_index: dict[int, SegmentScenePlan] = {p.segment_index: p for p in plan.segments}
 
     updated: dict[int, Segment] = {}
@@ -141,16 +158,6 @@ async def plan_visuals(state: GraphState, runtime: Runtime[GraphContext]) -> dic
                         for b in segment_plan.blocks
                     ],
                     continues_previous=segment_plan.continues_previous,
-                    annotations=[
-                        ComposedAnnotation(
-                            annotation_type=a.annotation_type,
-                            target_block_index=a.target_block_index,
-                            target_item_index=a.target_item_index,
-                            anchor_phrase=a.anchor_phrase,
-                            caption=a.caption,
-                        )
-                        for a in segment_plan.annotations
-                    ],
                 )
         updated[segment.index] = segment.model_copy(update={"scene": scene.model_dump()})
 

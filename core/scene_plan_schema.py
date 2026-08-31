@@ -16,40 +16,8 @@ sets -- ``StrictSchema`` for this one, defaults and no-repair-loop plumbing for 
 
 from pydantic import Field
 
-from core.block_types import AnnotationType, BlockType, MotifName, SceneLayout
+from core.block_types import BlockType, MotifName, SceneLayout
 from core.strict_schema import StrictSchema
-
-
-class PlannedAnnotation(StrictSchema):
-    """One small overlay mark on an already-planned block -- not yet resolved to a beat.
-
-    Not a ``PlannedBlock``: an annotation targets a specific element inside another block
-    (``target_block_index``, optionally ``target_item_index``) rather than filling its own
-    layout region -- see ``core/scene_schemas.py::ComposedAnnotation`` for the filled shape and
-    ``rendering/annotations.py`` for how a target resolves to a real element id."""
-
-    annotation_type: AnnotationType = Field(
-        description="CURSOR points at something. CHECK marks something correct or complete. "
-        "WARNING flags something as a problem."
-    )
-    target_block_index: int = Field(
-        description="Which block in this segment's blocks list (0-based) this annotation "
-        "attaches to."
-    )
-    target_item_index: int | None = Field(
-        description="Which numbered sub-element of the target block this points at -- e.g. the "
-        "third array_grid cell, the second code_diff line, the first graph_diagram node -- "
-        "0-based, or null to attach to the block as a whole rather than one of its items."
-    )
-    anchor_phrase: str | None = Field(
-        description="A short phrase copied VERBATIM from this segment's narration, marking the "
-        "moment this annotation should appear. Null to appear once the target block has "
-        "settled."
-    )
-    caption: str | None = Field(
-        description="A short label shown beside the annotation, e.g. 'off by one' for a "
-        "warning -- or null, which is normal for cursor/check."
-    )
 
 
 class PlannedBlock(StrictSchema):
@@ -85,13 +53,6 @@ class SegmentScenePlan(StrictSchema):
         "segment's visual rather than a cold, unrelated composition -- e.g. the same diagram "
         "carrying on, or the same array still in view. False for most segments; true only "
         "where the narration itself is picking up where the last segment left off."
-    )
-    annotations: list[PlannedAnnotation] = Field(
-        description="Zero or more small overlay marks on this scene's blocks. Sparingly -- at "
-        "most one or two per scene, only where the narration is genuinely pointing something "
-        "out. A target_block_index must point at a block within THIS same list, and for a "
-        "SPLIT_HORIZONTAL scene must stay within the same panel the annotation is about -- "
-        "never a block in the other panel."
     )
 
 

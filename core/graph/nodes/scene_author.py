@@ -9,14 +9,24 @@ Per D2 the LLM never writes HTML -- it fills a small structured payload and a ha
 Jinja block partial (``rendering/templates/_block_*.html``) turns that into markup.
 ``core.block_schemas.block_schema_for`` is the whole indirection: it turns "this block is a
 code_panel" into the class handed to ``generate``.
+
+T18E: once every block is filled, this node also authors the scene's annotations (``core/graph/
+nodes/annotation_author.py``) -- moved here from ``plan_visuals``, which had to ask for a real
+``target_item_index`` before any block had content to index into, and could only ever get ``null``
+back (D121/D122). The per-block ``fill_block`` calls run concurrently (``asyncio.gather``), not
+one at a time -- they are fully independent, and the Azure adapter's own semaphore already bounds
+real concurrency regardless of caller pattern (D121 reopens the prior sequential-comprehension
+choice).
 """
 
+import asyncio
 from typing import Any
 
 from langgraph.runtime import Runtime
 
 from core.block_schemas import block_schema_for
 from core.graph.context import GraphContext
+from core.graph.nodes.annotation_author import author_annotations
 from core.graph.nodes.skill_prompt import load_step_prompt
 from core.graph.nodes.structured_retry import generate_with_bounded_retries
 from core.graph.state import SegmentTask
@@ -76,6 +86,8 @@ async def author_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
     isolates its own ``StructuredOutputError`` retries per call, and a node-level policy that
     also matched that error would let an exhausted local retry re-trigger a whole-node redo
     (D73) -- redoing every other block's already-filled content along with it.
+    ``author_annotations`` (called after every block is filled) isolates its own budget the same
+    way.
 
     Raises:
         ValueError: the segment has no measured duration, or no scene plan. Unreachable while
@@ -98,21 +110,26 @@ async def author_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
         )
 
     scene = ComposedScene.model_validate(segment.scene)
-    filled_blocks = [
-        block.model_copy(
-            update={
-                "payload": await fill_block(
-                    runtime.context.llm,
-                    runtime.context.skills,
-                    segment,
-                    block,
-                    duration_ms=segment.duration_ms,
-                )
-            }
+    payloads = await asyncio.gather(
+        *(
+            fill_block(
+                runtime.context.llm,
+                runtime.context.skills,
+                segment,
+                block,
+                duration_ms=segment.duration_ms,
+            )
+            for block in scene.blocks
         )
-        for block in scene.blocks
+    )
+    filled_blocks = [
+        block.model_copy(update={"payload": payload})
+        for block, payload in zip(scene.blocks, payloads, strict=True)
     ]
-    filled_scene = scene.model_copy(update={"blocks": filled_blocks})
+    annotations = await author_annotations(
+        runtime.context.llm, runtime.context.skills, segment, filled_blocks
+    )
+    filled_scene = scene.model_copy(update={"blocks": filled_blocks, "annotations": annotations})
     return {
         "segments": {segment.index: segment.model_copy(update={"scene": filled_scene.model_dump()})}
     }

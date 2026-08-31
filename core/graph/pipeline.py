@@ -19,6 +19,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from core.graph.context import GraphContext
+from core.graph.node_timing import timed
 from core.graph.nodes import (
     assign_tiers,
     author_scene,
@@ -78,44 +79,58 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> CompiledStat
     without one, LangGraph keeps no state between ``ainvoke`` calls at all."""
     builder = StateGraph(GraphState, context_schema=GraphContext)
 
+    # Every node callable is wrapped with timed(...) (T18E, D121/D122) -- a plain start/elapsed
+    # log line, no new GraphState field. functools.wraps keeps LangGraph's own Runtime-injection
+    # signature inspection working through the wrapper (core/graph/node_timing.py's docstring).
+
     # Not build_retry_policies(): plan_segments isolates its own StructuredOutputError retries
     # internally (core/graph/nodes/structured_retry.py) -- attaching the bounded policy here too
     # would let an exhausted local retry re-trigger a whole-node retry for the same error.
-    builder.add_node("plan_segments", plan_segments, retry_policy=build_transient_retry_policy())
+    builder.add_node(
+        "plan_segments",
+        timed("plan_segments", plan_segments),
+        retry_policy=build_transient_retry_policy(),
+    )
     builder.add_node(
         "synthesize_segment",
-        synthesize_segment,
+        timed("synthesize_segment", synthesize_segment),
         input_schema=SegmentTask,
         retry_policy=build_retry_policies(),
     )
     # No retry policy: assign_tiers reaches nothing outside the process, so there is no transient
     # failure for one to absorb. Its only error is an unmeasured segment, which a retry cannot fix.
-    builder.add_node("assign_tiers", assign_tiers)
+    builder.add_node("assign_tiers", timed("assign_tiers", assign_tiers))
     # Transient-only, for the same reason plan_segments is -- plan_visuals's one LLM call carries
     # its own StructuredOutputError budget (D73), via generate_with_bounded_retries.
-    builder.add_node("plan_visuals", plan_visuals, retry_policy=build_transient_retry_policy())
+    builder.add_node(
+        "plan_visuals",
+        timed("plan_visuals", plan_visuals),
+        retry_policy=build_transient_retry_policy(),
+    )
     # Transient-only, for the same reason plan_segments is -- author_scene's LLM calls each carry
     # their own StructuredOutputError budget (D73).
     builder.add_node(
         "author_scene",
-        author_scene,
+        timed("author_scene", author_scene),
         input_schema=SegmentTask,
         retry_policy=build_transient_retry_policy(),
     )
     # No policy: purely structural, returns {} unconditionally, cannot fail (see its docstring).
-    builder.add_node("collect_scenes", _collect_scenes)
+    builder.add_node("collect_scenes", timed("collect_scenes", _collect_scenes))
     # Transient-only: render_scene makes no LLMProvider call, so there is no StructuredOutputError
     # to isolate -- only RenderFailed (retryable) and CompositionInvalid (our own gate, matches
     # neither policy, propagates immediately).
     builder.add_node(
         "render_scene",
-        render_scene,
+        timed("render_scene", render_scene),
         input_schema=SegmentTask,
         retry_policy=build_transient_retry_policy(),
     )
     # finalize now does real I/O (concat + Storage.put_file) that can raise RenderFailed, where it
     # previously did none -- transient-only, same reasoning as render_scene.
-    builder.add_node("finalize", finalize, retry_policy=build_transient_retry_policy())
+    builder.add_node(
+        "finalize", timed("finalize", finalize), retry_policy=build_transient_retry_policy()
+    )
 
     builder.add_edge(START, "plan_segments")
     builder.add_conditional_edges("plan_segments", _fan_out_to_segments, ["synthesize_segment"])

@@ -22,6 +22,7 @@ strict ``json_schema`` on api-version ``2024-10-21``.
 """
 
 import asyncio
+import logging
 
 import openai
 from openai import AsyncAzureOpenAI
@@ -30,6 +31,8 @@ from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exp
 from adapters.azure.openai_errors import translate
 from interfaces import AdapterError, LLMProvider, StructuredOutputError
 from interfaces.llm_provider import T
+
+logger = logging.getLogger(__name__)
 
 # What is worth trying again, and nothing else. A 400, a 401 and a 404 all reproduce exactly.
 RETRYABLE = (
@@ -86,6 +89,7 @@ class AzureOpenAILLMProvider(LLMProvider):
             wait=self._wait,
             retry=_is_retryable,
             reraise=True,  # surface the vendor exception so translate() can classify it
+            before_sleep=_log_before_sleep,
         )
         async with self._semaphore:
             try:
@@ -153,6 +157,21 @@ class AzureOpenAILLMProvider(LLMProvider):
 def _is_retryable(state: RetryCallState) -> bool:
     exc = state.outcome.exception() if state.outcome else None
     return isinstance(exc, RETRYABLE)
+
+
+def _log_before_sleep(state: RetryCallState) -> None:
+    """T18E, D121/D122: a ~216s silent gap between two LLM calls in one T18D render was almost
+    certainly retry/backoff stacking, and nothing logged enough to say so for certain. This is
+    the log line that would have -- attempt number, what failed, and how long the computed
+    backoff (``_wait``, floored by any ``Retry-After`` header) is about to sleep for."""
+    exc = state.outcome.exception() if state.outcome else None
+    sleep_s = state.next_action.sleep if state.next_action else 0.0
+    logger.warning(
+        "llm call retry: attempt %d failed with %s, sleeping %.2fs before the next attempt",
+        state.attempt_number,
+        type(exc).__name__ if exc else "unknown error",
+        sleep_s,
+    )
 
 
 def _retry_after_s(state: RetryCallState) -> float:

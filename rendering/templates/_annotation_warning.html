@@ -34,11 +34,16 @@
 </style>
 {% endmacro %}
 
-{% macro script(prefix, caption, entrance_start, target_id, container_id) %}
+{% macro script(prefix, caption, entrance_start, target_id, container_id, headline_id, caption_layer_id) %}
   (function () {
     var el = document.getElementById("{{ prefix }}-anno");
-    var off = hfAnnotationOffset("{{ target_id }}", "{{ container_id }}");
-    tl.set(el, { x: off.dx + off.w / 2 - 24, y: off.dy - 46, scale: 0, opacity: 0, rotate: -8, transformOrigin: "50% 100%" }, 0);
+    {#- T18E: hfAnnotationPlace replaces the fixed "y: off.dy - 46" -- see _annotation_check.html's
+       identical comment. #}
+    var pos = hfAnnotationPlace(
+      "{{ target_id }}", "{{ container_id }}", "{{ prefix }}-anno",
+      "{{ headline_id }}", "{{ caption_layer_id }}", ["above", "below"],
+    );
+    tl.set(el, { x: pos.x, y: pos.y, scale: 0, opacity: 0, rotate: -8, transformOrigin: "50% 100%" }, 0);
     tl.to(el, { scale: 1, opacity: 1, duration: 0.25, ease: "power3.out" }, {{ entrance_start }});
     tl.to(el, { rotate: 8, duration: 0.08, ease: "power1.inOut", yoyo: true, repeat: 3 }, {{ entrance_start + 0.25 }});
     tl.set(el, { rotate: 0 }, {{ entrance_start + 0.57 }});

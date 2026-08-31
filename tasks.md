@@ -463,7 +463,7 @@ but waiting on a document-ingestion path that doesn't exist yet (T29's scope, it
 scheduled last per the original requirement).
 **Depends:** T18B — met.
 
-### T18D — Systematic real-render bug catalog for the block library · `todo`
+### T18D — Systematic real-render bug catalog for the block library · `done`
 **Scoped during a post-T18C-checkpoint verification render, by the user's own direct critique of
 the real output** (decisionlog D120). The checkpoint's own single verification render (D119) found
 and fixed one real bug, but watching the actual video turned up several more the toolchain-only
@@ -508,16 +508,113 @@ merely might invite it.
 check` (which caught none of D120's real problems: wrong timing, wrong pacing, and layout overlap
 are all things the checker's structural/contrast/lint passes don't evaluate).
 
+**What actually shipped:** exactly the six-topic matrix D120 specified, plus a pre-flight Blob
+skill-registry sync (the same drift D107 fixed once before had recurred). All six real renders
+watched via targeted frame extraction cross-referenced against each segment's own authored timing
+arrays — not just eyeballing frames. Findings written up in `t18d_catalog.md`, not summarized into
+this file — see decisionlog D121 for the short version. The catalog's headline finding is new,
+not one of D120's three seeded items: `rendering/block_timing.py`'s per-item anchor fallback
+(`_ITEM_FIELDS`: `graph_diagram.nodes`, `text_panel.items`, `code_diff.lines`) is index-only and
+ignores sibling timing, producing collapsed/scrambled/duplicate reveals in 9 of ~20 timing arrays
+sampled — likely the closer-to-the-surface shared root cause this entry's own T18E note already
+speculated about. All three of D120's seeded findings were confirmed and refined (not just
+re-confirmed): title-card staleness has a second, distinct cause; `GRAPH_DIAGRAM` overlap is
+confirmed `SPLIT_HORIZONTAL`-specific and clean in `SINGLE` (a real isolation result, not a
+guess); annotation coverage is capped at one-per-scene by design (`visual-plan` guidance), not
+accident. Two new text-collision bugs found. No code changed — this task's own DoD explicitly
+forbade fixing anything found (D120).
+
+**Immediately after this checkpoint, in the same session:** the user watched all six videos
+directly and gave further critique the catalog didn't cover (repetitive/generic visuals across
+topics, `GRAPH_DIAGRAM` reading as structurally meaningless, annotations feeling random, and a
+render-speed regression vs. T18A). An independent Opus-model analysis (fresh context, no access
+to this catalog's conclusions) traced each to a specific cause — see D121. That analysis plus the
+user's own scope choice produced T18E's real scope below, replacing this entry's old placeholder.
+
 **Depends:** T18C — met.
 
-### T18E — Comprehensive fix pass for T18D's block-library bug catalog · `todo`
-**Not yet scoped beyond "address T18D's catalog"** — real scope gets written once that catalog
-exists. One working hypothesis worth testing before assuming N independent fixes are needed:
-several of D120's findings (item-anchor-timing reliability across `graph_diagram`/
-`sequence_diagram`/`timeline`, and possibly pacing/density judgment across any low-motion block)
-may share root causes closer to the surface than they first look, meaning this task may turn out
-smaller and more structural than "fix each bug separately" implies.
-**Depends:** T18D.
+### T18E — Fix pass: annotations, GRAPH_DIAGRAM edges, timing/retry visibility, block-choice
+forcing, edge labels, annotation placement, targeted parallelization · `done`
+**Scoped in the session that closed T18D** (decisionlog D121), from `t18d_catalog.md` plus an
+independent Opus-model analysis of the user's own fresh critique of all six T18D videos plus a
+follow-up request to parallelize the pipeline. Full reasoning and evidence: D121. Seven sub-parts,
+all in scope for one session by the user's own choice (two larger redesigns the analysis also
+surfaced were explicitly deferred — see below).
+
+- **E1 — Annotations authored after block content exists, not before.** The real bug: `plan_
+  visuals` asks for `target_item_index`/`anchor_phrase` before any block has content, so it
+  answers `null` every time (15/15 across the T18D matrix) and every annotation lands on the
+  block's centroid, not a real item. Move annotation authoring into `author_scene`, after blocks
+  are filled; make both fields required; `rendering/annotations.py` drops an annotation whose
+  phrase doesn't resolve instead of falling back to a guessed time.
+- **E2 — GRAPH_DIAGRAM edge anchoring/gating + arrowheads (also SEQUENCE_DIAGRAM).** Edge
+  endpoints are computed from the node div's center, not the visible marker circle (lines run
+  through label text); every edge draws at node-0's start regardless of which nodes it actually
+  connects; no arrowheads anywhere. All three are template-only fixes in `_block_graph_diagram.
+  html`, reusing `_annotations.html`'s existing viewport-normalization technique rather than
+  inventing new math.
+- **E3 — GraphEdge labels/weights.** `GraphEdge` has no way to carry a distance/cost/condition,
+  so `GRAPH_DIAGRAM` can't honestly depict Dijkstra, DP transitions, or state machines — the
+  topics it was broadened for.
+- **E4 — Deterministic block-choice forcing.** 3 of 6 T18D topics never got the block type they
+  were chosen to stress (`TIMELINE` rendered zero times across the whole matrix). A small trigger-
+  vocabulary scan plus one bounded re-ask (capped per video) when narration clearly calls for a
+  block the plan didn't choose.
+- **E5 — Per-stage timing + retry visibility.** A ~216s silent gap between two LLM calls in one
+  T18D render, almost certainly retry/backoff stacking, with nothing logging it. Per-node timing
+  wrapped at `core/graph/pipeline.py`'s `add_node` calls; a `before_sleep` retry-logging callback
+  on the Azure LLM adapter's existing `AsyncRetrying`. Plain logging, not new `GraphState` fields.
+- **E6 — Container-aware annotation placement.** Two real text-collision bugs (a CHECK caption
+  over a block's headline; the caption band over a dense block's last line) both come from each
+  annotation partial computing its own offset with no awareness of the container. One shared
+  `hfAnnotationPlace` helper, sides-then-clamp, replacing three ad hoc offset calculations.
+- **E7 — Parallelize two needlessly-sequential LLM call sites.** `author_scene`'s per-block
+  `fill_block` calls run in a plain list comprehension (sequential despite being fully
+  independent) — switch to `asyncio.gather`, safe because the Azure adapter's own semaphore
+  already bounds real concurrency regardless of caller pattern. `scripting.py::write_narration`'s
+  per-segment loop is sequential *by a documented prior decision* (D47: "no measured reason yet")
+  — reopened here explicitly, on the user's own instruction, for the same safety reason. This
+  task does **not** retune `AZURE_OPENAI_MAX_CONCURRENCY`, `RENDER_MAX_CONCURRENCY`, or
+  `FRAME_BUDGET` — those need a real measured run first (D16/D47/D69/D99's repeated lesson),
+  which E5 exists to make possible for a future task, not this one.
+
+**Explicitly deferred, not silently dropped** (the analysis's items 7-8, after E1-E6 land, not
+before): replacing `GRAPH_DIAGRAM`'s layout with a real layered/rank-based algorithm instead of
+authored coordinates + a circular fallback; payload-driven block *variants* as the structural
+answer to "every video looks the same" rather than a tenth fixed template.
+
+**DoD, per sub-part:** see D121 and the full plan for each part's specific verification (schema
+tests, `hyperframes check` fixtures, concurrency-timing tests) — in short, real re-renders of at
+least `array-grid`, `timeline`, and `graph-single`'s topics, watched frame-by-frame the same way
+T18D was, confirming each fix against the exact frames that showed it broken, plus `pytest`/
+`ruff`/boundary checks clean as always.
+
+**What shipped:** all seven sub-parts (E1-E7), plus a bounded slice of the analysis's item 7 the
+user asked to pull forward at plan time — an aspect-ratio-aware fallback layout for
+`GRAPH_DIAGRAM`'s compact `SPLIT_HORIZONTAL` canvas (E2.4), scoped narrowly since T18D's own
+isolation result said the confirmed node-overlap bug was wrong-shape-canvas, not general layout
+quality. One real bug (`_block_graph_diagram.html`'s edge-label id lookup) was found by this
+session's own `project-reviewer` review before any render and fixed pre-render. Verified against
+three real `RUNTIME_ENV=azure` renders (`t18e-array-grid`, `t18e-timeline`, `t18e-graph-single`,
+T18D's own topics for direct comparison) — full detail and evidence: decisionlog D122.
+
+**Three real findings from those renders are recorded, not fixed — the user's own explicit
+choice, offered directly rather than assumed.** Whoever scopes the next task on this block
+library should read D122's full account before assuming any of these three are already covered:
+1. **Inter-annotation collision** — two `CHECK` annotations targeting adjacent lines in the same
+   block can still land with overlapping rings/captions. E6's `hfAnnotationPlace` keeps one
+   annotation clear of the block's headline and the caption band; it has no idea a second
+   annotation exists.
+2. **E4's trigger vocabulary has a real blind spot** — a narration that signals chronology
+   entirely through domain-specific version numbers ("HTTP 1.0... HTTP 1.1... HTTP/2...
+   HTTP/3...") rather than generic timeline vocabulary never trips `missed_block_opportunities`,
+   so `TIMELINE` still went unused on exactly the topic chosen to force it.
+3. **E2.4's fallback layout, E3's edge labels, and E1's annotations were each verified in
+   isolation, not together** — a dense compact-canvas `GRAPH_DIAGRAM` (5 nodes, no authored
+   positions, two edge labels, one annotation) keeps its nodes separated (E2.4 holds) but lets
+   edge labels, node captions, and the annotation's own caption collide with each other.
+
+**Depends:** T18D — met.
 
 ### T18F — Vision critique/revision loop, full validation render, and rendering/pipeline speed · `todo`
 **Renamed from T18D** (this checkpoint's own T18D/T18E now cover the bug-catalog/fix-pass split

@@ -37,18 +37,22 @@ class ComposedBlock(BaseModel):
 
 
 class ComposedAnnotation(BaseModel):
-    """One overlay mark on a scene, targeting an element inside one of its blocks.
+    """One overlay mark on a scene, targeting a real, numbered item inside one of its blocks.
 
-    Never filled by its own LLM call the way a ``ComposedBlock``'s payload is -- ``caption`` is
-    already produced by the single ``plan_visuals`` call, so ``author_scene``/``fill_block`` are
-    untouched by this type entirely (see ``core/graph/nodes/visual_plan.py``)."""
+    T18E: filled by its own LLM call, but only after every block's content already exists
+    (``core/graph/nodes/annotation_author.py``, run from ``author_scene`` once ``fill_block`` has
+    filled every block) -- moved out of ``plan_visuals`` because asking for ``target_item_index``
+    before any block had content meant the model could only ever answer ``null`` (D121/D122).
+    ``target_item_index`` and ``anchor_phrase`` are therefore required, not nullable: an
+    annotation this pipeline produces always names a real item and a real narration moment, or it
+    is dropped (``rendering/annotations.py``) rather than kept with a guessed placement."""
 
     model_config = ConfigDict(extra="forbid")
 
     annotation_type: AnnotationType
     target_block_index: int
-    target_item_index: int | None
-    anchor_phrase: str | None
+    target_item_index: int
+    anchor_phrase: str
     caption: str | None
 
 

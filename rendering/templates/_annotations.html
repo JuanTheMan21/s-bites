@@ -38,4 +38,51 @@
       h: t.height / scale,
     };
   }
+
+  {#- T18E, D121/D122: two real text collisions -- a CHECK caption printed over its own block's
+     headline, and a caption band printed over a dense SEQUENCE_DIAGRAM's last message -- both
+     came from each annotation partial computing its own fixed offset with no idea what container
+     it was in. hfAnnotationPlace replaces that ad hoc math: it measures the annotation element
+     itself (already in the DOM, pre-transform -- same "nothing has played yet" guarantee
+     hfAnnotationOffset relies on), tries the caller's preferred sides against the target in
+     order, and takes the first whose full box stays inside the container's own USABLE box --
+     below headlineId's bottom edge, above captionLayerId's top edge -- clamping into that box as
+     a last resort rather than ever landing outside it. #}
+  function hfAnnotationPlace(targetId, containerId, annoId, headlineId, captionLayerId, sides) {
+    var off = hfAnnotationOffset(targetId, containerId);
+    var anno = document.getElementById(annoId);
+    var container = document.getElementById(containerId);
+    if (!anno || !container) return { x: off.dx, y: off.dy };
+    var root = document.getElementById("root");
+    var scale = root ? root.getBoundingClientRect().width / 1920 : 1;
+    var a = anno.getBoundingClientRect();
+    var annoW = a.width / scale, annoH = a.height / scale;
+    var c = container.getBoundingClientRect();
+
+    var top = 0, bottom = c.height / scale;
+    var headline = headlineId && document.getElementById(headlineId);
+    if (headline) top = Math.max(top, (headline.getBoundingClientRect().bottom - c.top) / scale);
+    var captionLayer = captionLayerId && document.getElementById(captionLayerId);
+    if (captionLayer) {
+      bottom = Math.min(bottom, (captionLayer.getBoundingClientRect().top - c.top) / scale);
+    }
+
+    var GAP = 12;
+    var candidates = {
+      // "tip": the annotation wrap's own top-left corner (not its centre) lands exactly on the
+      // target's centre -- CURSOR's own design, a glyph whose tip does the pointing.
+      tip: { x: off.dx + off.w / 2, y: off.dy + off.h / 2 },
+      center: { x: off.dx + off.w / 2 - annoW / 2, y: off.dy + off.h / 2 - annoH / 2 },
+      above: { x: off.dx + off.w / 2 - annoW / 2, y: off.dy - annoH - GAP },
+      below: { x: off.dx + off.w / 2 - annoW / 2, y: off.dy + off.h + GAP },
+    };
+    var order = sides && sides.length ? sides : ["above", "below", "center"];
+    for (var i = 0; i < order.length; i++) {
+      var pos = candidates[order[i]];
+      if (pos.y >= top && pos.y + annoH <= bottom) return pos;
+    }
+    var fallback = candidates[order[0]];
+    fallback.y = Math.min(Math.max(fallback.y, top), Math.max(top, bottom - annoH));
+    return fallback;
+  }
 {% endmacro %}
