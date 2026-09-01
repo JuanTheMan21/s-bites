@@ -645,10 +645,92 @@ validation-render item below, not a separate obligation.
 
 **Depends:** T18C — met. (Not on T18D/T18E structurally, but scoping it before T18E's fixes land
 would be premature — the validation render item above exists to show off a working block library.)
+**Note added by T18G's own checkpoint:** T18G's own F9 ran one real ~7-minute validation render
+(not the 2-3-topic sweep this task still calls for) — it informs this task's own validation-render
+item but does not close it. Read D123 before scoping this task's remaining three items.
 
 ---
 
-## Iteration 4 — FastAPI backend
+### T18G — Item-anchored timing, real GRAPH_DIAGRAM layout, duration-aware title, annotation collision avoidance, ICON_PANEL · `done`
+**Scoped fresh in its own planning session**, from the user's own direct list of complaints against
+T18E's shipped output ("5th iteration on just video generation"): opening segment too long,
+diagrams overlapping/open-ended, no per-topic visual freshness, animation/annotations appearing at
+random times or in random places, cursor/dot movement through a graph not timed to narration,
+captions interacting with video content, and a genuine full 7-minute render. Research (two parallel
+Explore agents plus direct reading of the timing/annotation/layout code) traced these to real, cited
+causes — mostly D121's own headline finding (the item-anchor "index-only" fallback, explicitly left
+out of T18E's scope) and D121's two explicitly-deferred analysis items (7: a real `GRAPH_DIAGRAM`
+layout algorithm; 8: payload-driven block variety) — plus D122's three findings E1-E7 recorded but
+did not fix, plus the still-open "structural title card" finding (D120) and a still-open
+caption/content-overlap gap flagged since T18C. Full reasoning and the two explicit scope
+decisions (both big deferred items included, at the user's own choice after being warned of the
+cost; the new block scoped to abstract/generated graphics rather than real photo/logo sourcing,
+also the user's own choice after being warned that the latter needs a whole new interfaces/adapter
+pair): D123.
+
+**What shipped, seven sub-parts plus a real validation render, all in one session:**
+- **F1** — the headline fix. `graph_diagram.nodes`, `text_panel.items`, `code_diff.lines` each
+  gained an authored `anchor_phrase` (`core/block_schemas_graph.py`, the new `TextPanelItem` in
+  `core/block_schemas.py`, `core/block_schemas_diff.py`), and `rendering/block_timing.py
+  ::resolve_item_starts` now resolves it exactly the way `resolve_step_starts` always has (unified
+  into one shared `_resolve_anchor_phrases` helper) — the same fix D119 already proved for
+  `sequence_diagram`/`timeline`, finally extended to the three block types T18E's E1 left out.
+  `rendering/anchors.py::derive_item_anchors` (the old display-text-matching path) is gone.
+- **F2** — the full build of D121's analysis item 7. `_block_graph_diagram.html`'s circular/
+  row-packed fallback is replaced by a real layered/rank-based layout (`computeLayeredLayout`: a
+  DFS cycle-breaking pass, longest-path ranking over the resulting DAG, two-pass barycenter
+  cross-axis ordering) — pure, deterministic, seek-safe client-side JS, verified live against a
+  diamond and a cyclic topology in both layouts (no pytest path exists to JS embedded in a
+  template).
+- **F3** — the title card (D120's "structural title card" finding, still open after T18E).
+  `TitleSlots` gained `key_terms` (0-4, each its own `anchor_phrase`); `_block_title.html` stages
+  them across the segment's real duration and adds one continuous ambient tween (D89's rule: a
+  genuine tracked property, never a manual DOM write) so a segment with none still isn't visually
+  dead for 20+ seconds.
+- **F4** — closes D122 finding 1. `_annotations.html::hfAnnotationPlace` gained a shared
+  per-container collision registry (`window.__hfPlacedRects`) and a vertical nudge-search before
+  falling back to "in-bounds only" — `_block_graph_diagram.html` also registers its own edge-label
+  boxes into the same registry, so an annotation on a dense canvas avoids them too.
+- **F5** — closes D122 finding 2. `core/block_triggers.py` gained `_looks_chronological`, a
+  regex-based version-number detector, as a second signal for `BlockType.TIMELINE` independent of
+  the phrase-vocabulary scan (which the exact "HTTP 1.0... HTTP/3..." blind spot never hit).
+- **F6** — `runtime_skills/annotation-authoring/1.1.md`: concrete CURSOR/CHECK/WARNING
+  right/wrong examples, the only real lever available for symbol-choice appropriateness since
+  nothing structural can enforce it.
+- **F7** — `_block_sequence_diagram.html` and vertical `_block_array_grid.html` now shrink their
+  own row/cell height to fit a computed max canvas height (with a floor, added at review) instead
+  of growing unbounded into the caption band — the caption/content-overlap gap T18C's own scope
+  notes flagged and left unchecked.
+- **New block: `ICON_PANEL`** — a labelled set of icon+label chips (16 hand-authored inline-SVG
+  icons, `core/block_types.py::IconName`), the user's own choice of "abstract/generated graphics"
+  over real photo/logo sourcing, built end to end via `/newblock`'s own checklist
+  (`core/block_schemas_icon.py`, `rendering/templates/_block_icon_panel.html`,
+  `runtime_skills/visual-plan/1.3.md`'s new block-choice row).
+
+**One real full ~7-minute `RUNTIME_ENV=azure` render** ("how HTTPS keeps your connection private"),
+watched frame by frame — and that watching caught three more bugs no synthetic test had, all fixed
+and re-verified against reproductions of the exact scenes that showed them broken: bottom-rank
+`GRAPH_DIAGRAM` node captions reaching the caption band (the layered layout's coordinate mapping
+now reserves real bottom margin); `marker-end` arrowheads rendering at their destination before the
+line/node itself had appeared (an SVG marker is not hidden by `stroke-dashoffset` — both CHAIN and
+GRAPH mode lines now gate opacity too); and single-candidate annotation placements (CURSOR's own
+`["tip"]`) never actually benefiting from collision avoidance, since the old fallback accepted the
+first in-bounds candidate regardless of overlap. `project-reviewer`'s own close-out pass found one
+more, fixed the same session: the new shrink-to-fit height formulas had no floor against a
+badly-oversized LLM output.
+
+**Known residual, recorded not fixed, the user's own implicit acceptance (not offered as a choice
+this time — flagged here for whoever next touches annotation placement):** CURSOR's `"tip"` targets
+a `GRAPH_DIAGRAM` node's whole div (marker+label+caption stack), so on a captioned node it can land
+on the label text rather than the marker circle — a narrower, pre-existing target-precision issue,
+not a collision-avoidance regression.
+
+**Explicitly not this task, both per the user's own scope choice at planning time:** a real
+photo/logo image-sourcing pipeline (would need a new `interfaces/`+adapter pair, iteration-5.5
+scale); the general payload-driven block-*variants* system (D121's analysis item 8 proper, beyond
+adding one new block type — `ICON_PANEL` helps variety but doesn't build the general mechanism).
+
+**Depends:** T18E — met.
 
 ### T19 — API skeleton · `todo`
 Job submission and the runner that drives the graph, reusing the pydantic models from T4 as request

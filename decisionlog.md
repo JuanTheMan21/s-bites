@@ -2533,3 +2533,103 @@ docstring mention of `adapters/azure/llm_provider.py`, verified by AST-level imp
 not a real import). No `.py` file over 200 lines.
 
 **Depends:** T18D -- met.
+
+## 2026-09-01/02 · T18G
+
+### D123 -- T18G scoped and built in one session: both of D121's deferred analysis items pulled
+forward at the user's own explicit choice, ICON_PANEL scoped to abstract graphics not real photos,
+one real 7-minute render found three more bugs, checkpoint's own review found a fourth
+
+**Scoping decision, made explicit before any code was written, not assumed.** The user's own
+comprehensive complaint list (5th iteration on video generation: opening segment too long, diagrams
+overlapping/open-ended, no per-topic visual freshness, animation/annotations appearing at random
+times or places, cursor movement not timed to narration, captions interacting with content, and a
+genuine full 7-minute render) mapped almost entirely onto D121's own two explicitly-deferred
+analysis items (7: a real `GRAPH_DIAGRAM` layout algorithm; 8: payload-driven block variety) plus
+D122's three recorded-not-fixed findings plus two still-open older findings (D120's title-card
+staleness, T18C's caption/content-overlap gap). Given the size, the planning session asked the user
+directly rather than assuming: whether to include both big deferred items in one session (risking
+the same "verified in isolation, not together" failure D122 itself recorded once already), and
+separately, whether "images" meant real photo/logo sourcing or abstract/generated graphics.
+
+**Rejected: deferring the two big items again**, which is what was recommended (matching the
+project's own established pattern -- T18D/T18E's split existed for exactly this reason). **The user
+chose to include both anyway**, explicitly, after the size/risk tradeoff was stated -- not a case of
+the recommendation being ignored without acknowledgement; the concern was raised, the user
+reaffirmed the full scope, and the session proceeded under that instruction per the project's own
+standing policy for exactly this situation.
+
+**Rejected: real photo/logo image sourcing** (a new `interfaces/ImageProvider`-shaped contract plus
+local and Azure adapters plus config wiring plus parity tests -- architecturally the same scale as
+T29/T30, not a template). **The user chose abstract/generated graphics** once shown the real cost
+difference -- `ICON_PANEL` ships as a template-only `BlockType` addition (16 hand-authored inline
+SVG icons), no new interface, no new adapter, matching `/newblock`'s existing checklist exactly.
+
+**Reasoning the scoping session used to justify attempting both big items in one sitting anyway,
+despite recommending against it:** the two items are structurally independent (a layout algorithm
+inside one existing template's script macro; a new block type following an existing, well-worn
+registration checklist), so the actual risk was integration-testing gaps, not code conflicts --
+mitigated by treating the closing full render as load-bearing verification, not a formality.
+
+**What that render actually found, which is the real vindication (or refutation) of the "attempt
+both, verify hard" bet.** One real `RUNTIME_ENV=azure` ~7-minute render, watched frame by frame
+(not sampled), found three real bugs no offline test or earlier live-toolchain check had caught:
+1. The new layered layout's coordinate mapping used the same max-fraction range for whichever axis
+   ended up as the canvas's Y axis as for the X axis -- fine for node markers themselves (E2.4's own
+   verification target), wrong once a bottom-rank node's caption text (which extends downward from
+   its own point, never accounted for by node-center placement alone) is added to the picture.
+   Fixed by tightening the Y-mapped axis's max fraction to 0.62 (from 0.82), asymmetric with the
+   X-mapped axis's fuller range, since only Y risks the caption band.
+2. An SVG `marker-end` arrowhead is positioned at a path's endpoint geometry and is NOT hidden by
+   `stroke-dasharray`/`stroke-dashoffset` -- confirmed live as "an arrowhead pointing at a node that
+   hasn't appeared yet," on an edge whose *line* correctly read as not-yet-drawn. This bug predates
+   T18G (T18E's own E2 added the arrowheads) but was only ever exercised by a real GRAPH-mode
+   diagram where an edge's own reveal time trails its destination node's -- neither T18E's nor
+   T18G's own earlier live tests happened to construct that exact timing relationship. Fixed by
+   gating the line's own `opacity` at t=0 alongside the dash offset, in both CHAIN and GRAPH mode.
+3. `hfAnnotationPlace`'s two-pass fallback (T18G's own F4, built this same session) had a real gap:
+   a candidate list with only one entry (CURSOR's own `["tip"]`, unchanged since T18C) never
+   actually benefited from collision avoidance -- Pass 1 fails once (no alternative to try), Pass 2
+   ("in-bounds is enough") accepted the *same* overlapping position right back. A CHECK and a CURSOR
+   on the same `GRAPH_DIAGRAM` node visibly collided in the real render. Fixed with a vertical
+   nudge-search (offsets of increasing magnitude, both directions) tried per candidate before moving
+   to the next side or giving up -- confirmed live afterward: the second-placed annotation moved
+   to a genuinely clear position instead of stacking.
+
+Each of the three was re-verified against a hand-built reproduction of the exact scene shape that
+showed it broken (not just re-running the same full render a second time, which would have cost
+another ~13 minutes and ~$0.10 for marginal new information once the specific failure was already
+isolated).
+
+**A fourth finding came from `project-reviewer`'s own close-out pass, not from watching anything:**
+the two shrink-to-fit height formulas F7 added (`_block_sequence_diagram.html`'s `row_h`,
+`_block_array_grid.html`'s vertical `v_cell_h`) had no floor -- a badly-oversized LLM item count
+(unenforceable at the schema level, `core/strict_schema.py`'s own documented limit) could shrink the
+computed height to zero or negative, which a browser silently ignores on an inline style, reverting
+to the pre-F7 unbounded-growth bug rather than degrading gracefully. Fixed with a `max(computed,
+floor)` clamp before the existing `min(base, ...)`. The review's own residual note, recorded not
+chased further (diminishing returns against an already-narrow exposure): the floor stops a single
+row from collapsing, but total content height can still exceed the caption-band budget once item
+count is far enough past the advisory schema range that `floor * count` alone exceeds it.
+
+**Known residual, not fixed, flagged rather than silently left implicit:** CURSOR's `"tip"` position
+targets a `GRAPH_DIAGRAM` node's whole div (marker+label+caption stack) -- fine for a node whose
+label is short and centered, but on a captioned node the div's geometric center can land on the
+label text rather than the marker circle. This is a distinct, narrower issue from the collision-
+avoidance bug above (which is genuinely fixed) -- it is about *which point* a single annotation
+targets, not about two annotations fighting over one point. Left for whoever next touches annotation
+placement; the fix would need `_ANNOTATION_TARGET_SUFFIX` to vary by annotation type as well as
+block type, not just block type, which is a real (if small) structural change, not a one-line one.
+
+**Verification, full account:** `pytest` -- 653 passed, 1 skipped offline; `ruff check`/`format`
+clean except the same pre-existing, untouched `.claude/skills/python-pro/SKILL.md` drift T18E's own
+checkpoint already carried forward. Both boundary greps empty. No `.py` file over 200 lines. Two
+`project-reviewer` passes (mid-build against the working diff, and a final pass against the actual
+committed commit `4f10ae7`) both came back clean modulo the one floor-clamp finding, which was fixed
+between the two passes and confirmed present and correct by the second. Real-toolchain verification:
+targeted `hyperframes check` live sweeps for every new/changed block combination (GRAPH_DIAGRAM
+diamond/cycle topologies in both layouts, TITLE with/without key_terms, ICON_PANEL at all three
+tiers, dense SEQUENCE_DIAGRAM/ARRAY_GRID at the guidance's own stated maximums, the two-annotation
+collision reproduction), plus the one full real render described above.
+
+**Depends:** T18E -- met.
