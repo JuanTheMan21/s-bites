@@ -195,16 +195,161 @@
       seg.style.strokeDasharray = String(len);
       seg.style.strokeDashoffset = String(len);
       var start = {{ prefix }}_nodeStarts[i] + 0.3;
-      tl.to(seg, { strokeDashoffset: 0, duration: SEG_DUR, ease: "power2.out" }, start);
+      // T18G: an SVG marker-end arrowhead is positioned at the path's own endpoint geometry and
+      // is NOT hidden by strokeDasharray/strokeDashoffset -- the line's stroke reads as "not
+      // drawn yet" but its arrowhead was fully visible from t=0 regardless, pointing at a node
+      // that (in GRAPH mode especially) may not have appeared yet. Confirmed in a real render.
+      // The line's own opacity, unconditionally set at t=0 (D106 item 4's rule), now gates the
+      // arrowhead along with the stroke.
+      tl.set(seg, { opacity: 0 }, 0);
+      tl.to(seg, { opacity: 1, strokeDashoffset: 0, duration: SEG_DUR, ease: "power2.out" }, start);
     });
   })();
   {% else %}
-  // GRAPH mode: resolve every node's (x, y) fraction once -- authored positions win; the
-  // fallback for the rest depends on `compact` (T18E) -- SPLIT_HORIZONTAL's short-wide canvas
-  // lays nodes out on the wide axis instead of a circle, which packed nodes into a
-  // vertically-compressed band and produced confirmed overlapping node pairs (t18d_catalog.md's
-  // Layout section; SINGLE stayed clean across every frame sampled). This is the bounded slice of
-  // D121's analysis item 7 T18E takes on -- a real layered/rank-based layout stays deferred.
+  // GRAPH mode: resolve every node's (x, y) fraction once -- authored positions win; unauthored
+  // nodes fall back to a real layered/rank-based layout (T18G, the full build of D121's analysis
+  // item 7 -- T18E only shipped a bounded aspect-ratio-aware row/circle fallback, E2.4).
+  //
+  // computeLayeredLayout is deterministic given only node ids and edges (no DOM dependency, so
+  // it stays seek-safe): (1) break cycles via a DFS pass classifying back-edges, excluded from
+  // ranking only, never from drawing; (2) longest-path rank each node over the resulting DAG,
+  // so a node's rank is one more than its deepest predecessor's; (3) order nodes within a rank
+  // by the barycenter of their already-placed neighbors in the adjacent rank, two sweeps (down
+  // then up), the standard bounded heuristic for reducing edge crossings; (4) map rank -> the
+  // canvas's primary axis (x when compact/short-wide, y when SINGLE/taller -- E2.4's own
+  // aspect-ratio-awareness principle, kept) and order-within-rank -> the cross axis, both
+  // normalized into the same [0,1] fraction convention authored positions already use.
+  function computeLayeredLayout(nodeIds, edges, rankAxisIsX) {
+    var n = nodeIds.length;
+    var idx = {};
+    nodeIds.forEach(function (id, i) { idx[id] = i; });
+
+    var succ = nodeIds.map(function () { return []; });
+    var pred = nodeIds.map(function () { return []; });
+    edges.forEach(function (e) {
+      var f = idx[e.from], t = idx[e.to];
+      if (f == null || t == null || f === t) return;
+      succ[f].push(t);
+      pred[t].push(f);
+    });
+
+    // 1. Cycle-breaking DFS: dagSucc excludes back edges (an ancestor still on the stack).
+    var UNSEEN = 0, ON_STACK = 1, DONE = 2;
+    var state = nodeIds.map(function () { return UNSEEN; });
+    var dagSucc = nodeIds.map(function () { return []; });
+    (function breakCycles() {
+      var stack = [];
+      function visit(u) {
+        state[u] = ON_STACK;
+        stack.push(u);
+        succ[u].forEach(function (v) {
+          if (state[v] === UNSEEN) {
+            dagSucc[u].push(v);
+            visit(v);
+          } else if (state[v] === DONE) {
+            dagSucc[u].push(v);
+          }
+          // state[v] === ON_STACK: a back edge, deliberately excluded from the DAG used for
+          // ranking (an edge into a node still being visited would make ranking cyclic).
+        });
+        stack.pop();
+        state[u] = DONE;
+      }
+      for (var i = 0; i < n; i++) {
+        if (state[i] === UNSEEN) visit(i);
+      }
+    })();
+    var dagPred = nodeIds.map(function () { return []; });
+    for (var u = 0; u < n; u++) {
+      dagSucc[u].forEach(function (v) { dagPred[v].push(u); });
+    }
+
+    // 2. Longest-path rank over the DAG, processed in topological (reverse post-order) order.
+    var rank = nodeIds.map(function () { return 0; });
+    var seen = nodeIds.map(function () { return false; });
+    var postOrder = [];
+    (function topoSort() {
+      function visit(u) {
+        seen[u] = true;
+        dagSucc[u].forEach(function (v) { if (!seen[v]) visit(v); });
+        postOrder.push(u);
+      }
+      for (var i = 0; i < n; i++) {
+        if (!seen[i]) visit(i);
+      }
+    })();
+    postOrder.reverse();
+    postOrder.forEach(function (u) {
+      dagPred[u].forEach(function (p) {
+        if (rank[p] + 1 > rank[u]) rank[u] = rank[p] + 1;
+      });
+    });
+
+    var maxRank = 0;
+    rank.forEach(function (r) { if (r > maxRank) maxRank = r; });
+    var byRank = [];
+    for (var r = 0; r <= maxRank; r++) byRank.push([]);
+    nodeIds.forEach(function (id, i) { byRank[rank[i]].push(i); });
+
+    // 3. Barycenter ordering within each rank, two passes (using the FULL edge set, both
+    // directions, so cross-rank/back edges still pull toward their real neighbors).
+    var posInRank = nodeIds.map(function () { return 0; });
+    function refreshPositions() {
+      byRank.forEach(function (members) {
+        members.forEach(function (u, i) { posInRank[u] = i; });
+      });
+    }
+    refreshPositions();
+    function sweep(downward) {
+      var ranks = [];
+      for (var r = 1; r <= maxRank; r++) ranks.push(downward ? r : maxRank - r);
+      ranks.forEach(function (r) {
+        var neighborRank = downward ? r - 1 : r + 1;
+        var scored = byRank[r].map(function (u) {
+          var neighbors = (downward ? pred[u] : succ[u]).filter(function (v) {
+            return rank[v] === neighborRank;
+          });
+          var bc = neighbors.length
+            ? neighbors.reduce(function (s, v) { return s + posInRank[v]; }, 0) / neighbors.length
+            : posInRank[u];
+          return { u: u, bc: bc };
+        });
+        scored.sort(function (a, b) { return a.bc - b.bc; });
+        byRank[r] = scored.map(function (s) { return s.u; });
+        refreshPositions();
+      });
+    }
+    sweep(true);
+    sweep(false);
+
+    // 4. Coordinate mapping: rank -> primary axis, order-within-rank -> cross axis. Whichever of
+    // the two ends up as the canvas's own Y axis gets a much smaller max fraction (0.62 instead
+    // of 0.82) -- a node's label+caption stack extends BELOW its own (x,y) point (the div's
+    // translate(-50%,-50%) centres the whole stack, but text only grows downward), so a
+    // deepest-rank/highest-index node placed too close to the canvas's own bottom edge pushes
+    // its caption into the caption band. Confirmed live, not hypothetical: a real T18G render's
+    // own diamond diagram (4 ranks, a captioned merge node) did exactly this. The X axis keeps
+    // its fuller range -- caption-band overlap is a Y-axis-only risk.
+    var Y_MIN_FRAC = 0.14, Y_MAX_FRAC = 0.62;
+    var X_MIN_FRAC = 0.14, X_MAX_FRAC = 0.82;
+    var positions = nodeIds.map(function () { return [0.5, 0.5]; });
+    byRank.forEach(function (members, r) {
+      var rankFrac = maxRank > 0 ? r / maxRank : 0.5;
+      var rankMin = rankAxisIsX ? X_MIN_FRAC : Y_MIN_FRAC;
+      var rankMax = rankAxisIsX ? X_MAX_FRAC : Y_MAX_FRAC;
+      var rankCoord = rankMin + rankFrac * (rankMax - rankMin);
+      var count = members.length;
+      members.forEach(function (u, i) {
+        var crossFrac = count > 1 ? i / (count - 1) : 0.5;
+        var crossMin = rankAxisIsX ? Y_MIN_FRAC : X_MIN_FRAC;
+        var crossMax = rankAxisIsX ? Y_MAX_FRAC : X_MAX_FRAC;
+        var crossCoord = crossMin + crossFrac * (crossMax - crossMin);
+        positions[u] = rankAxisIsX ? [rankCoord, crossCoord] : [crossCoord, rankCoord];
+      });
+    });
+    return positions;
+  }
+
   (function () {
     var VBW = 1600, VBH = {{ 400 if compact else 700 }};
     var nodeIds = [{% for node in payload.nodes %}"{{ node.id }}"{{ "," if not loop.last }}{% endfor %}];
@@ -212,27 +357,14 @@
     {% for pos in payload.positions %}
     authored["{{ pos.node_id }}"] = [{{ pos.x }}, {{ pos.y }}];
     {% endfor %}
-    var n = nodeIds.length;
+    var layoutEdges = [
+      {% for edge in payload.edges %}
+      { from: "{{ edge.from_id }}", to: "{{ edge.to_id }}" }{{ "," if not loop.last }}
+      {% endfor %}
+    ];
+    var layered = computeLayeredLayout(nodeIds, layoutEdges, {{ "true" if compact else "false" }});
 
-    {% if compact %}
-    function fallbackPos(i) {
-      var rows = n <= 4 ? 1 : 2;
-      var perRow = Math.ceil(n / rows);
-      var row = Math.floor(i / perRow);
-      var colsInRow = Math.min(perRow, n - row * perRow);
-      var col = i - row * perRow;
-      var x = colsInRow > 1 ? 0.1 + (col / (colsInRow - 1)) * 0.8 : 0.5;
-      var y = rows > 1 ? 0.25 + (row / (rows - 1)) * 0.5 : 0.5;
-      return [x, y];
-    }
-    {% else %}
-    function fallbackPos(i) {
-      var angle = (2 * Math.PI * i) / Math.max(1, n);
-      return [0.5 + 0.4 * Math.cos(angle), 0.5 + 0.4 * Math.sin(angle)];
-    }
-    {% endif %}
-
-    var positions = nodeIds.map(function (id, i) { return authored[id] || fallbackPos(i); });
+    var positions = nodeIds.map(function (id, i) { return authored[id] || layered[i]; });
 
     var canvas = document.getElementById("{{ prefix }}-canvas");
     var els = document.querySelectorAll("#{{ prefix }}-canvas .blk-graph-node-free");
@@ -295,6 +427,21 @@
       return { line: line, labelEl: labelEl, start: Math.max(fromStart, toStart) + 0.3 };
     });
 
+    // T18G: register each edge label's own box into the shared annotation-placement registry
+    // (_annotations.html) so an annotation targeting a node on this same canvas is placed clear
+    // of it -- part of D122 finding 3 (edge labels, node captions, and an annotation all
+    // colliding in a dense compact-canvas scene). The container id matches exactly what
+    // rendering/annotations.py::resolve_annotations computes for this block, so both sides agree
+    // on which registry bucket to use.
+    if (typeof hfRegisterPlacedRect === "function" && typeof hfAnnotationOffset === "function") {
+      var graphContainerId = {{ "true" if compact else "false" }} ? "{{ prefix }}-region" : "stage";
+      geom.forEach(function (g) {
+        if (!g || !g.labelEl) return;
+        var off = hfAnnotationOffset(g.labelEl.id, graphContainerId);
+        hfRegisterPlacedRect(graphContainerId, { x: off.dx, y: off.dy, w: off.w, h: off.h });
+      });
+    }
+
     els.forEach(function (el, i) {
       tl.fromTo(
         el,
@@ -310,7 +457,11 @@
       var len = g.line.getTotalLength();
       g.line.style.strokeDasharray = String(len);
       g.line.style.strokeDashoffset = String(len);
-      tl.to(g.line, { strokeDashoffset: 0, duration: 0.4, ease: "power2.out" }, g.start);
+      // T18G: the marker-end arrowhead sits at the line's own endpoint regardless of
+      // strokeDashoffset (an SVG marker is not part of the dash pattern) -- gate the line's own
+      // opacity too, or the arrowhead points at a node that hasn't appeared yet from t=0.
+      tl.set(g.line, { opacity: 0 }, 0);
+      tl.to(g.line, { opacity: 1, strokeDashoffset: 0, duration: 0.4, ease: "power2.out" }, g.start);
       if (g.labelEl) {
         tl.to(g.labelEl, { opacity: 1, duration: 0.3, ease: "power2.out" }, g.start + 0.35);
       }

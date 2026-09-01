@@ -1,0 +1,124 @@
+{#
+  BlockType.ICON_PANEL -- T18G, new. A labelled set of discrete concepts as icon + label chips,
+  the structural answer (per user choice: abstract/generated graphics, not real photo/logo
+  sourcing) to "each topic needs its own visual style" -- text_panel/stat_callout dominate a
+  content-agnostic block library (D121's Opus analysis: 31% of all content blocks across T18D's
+  matrix), and this gives a genuinely different visual treatment for a labelled-concept-set
+  narration shape rather than a tenth generic list.
+
+  Icons are a closed, hand-authored inline-SVG vocabulary (core.block_types.IconName) -- no
+  external icon font, no CDN, consistent with every other template's self-contained rendering.
+  Each chip reveals on its own narration-anchored beat (item_starts, the same unified mechanism
+  every other block's items use since T18G's anchor_phrase work).
+#}
+
+{% macro _icon_svg(name) %}
+{% if name == "lock" %}
+<rect x="7" y="14" width="18" height="14" rx="2"></rect><path d="M11 14 V9 a5 5 0 0 1 10 0 V14"></path>
+{% elif name == "key" %}
+<circle cx="10" cy="16" r="5"></circle><path d="M14 16 H27 M22 16 V21 M26 16 V20"></path>
+{% elif name == "shield" %}
+<path d="M16 5 L27 9 V16 C27 23 22 27 16 29 C10 27 5 23 5 16 V9 Z"></path>
+{% elif name == "check" %}
+<path d="M7 17 L14 24 L26 8"></path>
+{% elif name == "network" %}
+<circle cx="16" cy="7" r="3.5"></circle><circle cx="7" cy="25" r="3.5"></circle><circle cx="25" cy="25" r="3.5"></circle><path d="M16 10.5 L9 21.5 M16 10.5 L23 21.5"></path>
+{% elif name == "server" %}
+<rect x="6" y="6" width="20" height="8" rx="1.5"></rect><rect x="6" y="18" width="20" height="8" rx="1.5"></rect><circle cx="10" cy="10" r="1.3" fill="currentColor" stroke="none"></circle><circle cx="10" cy="22" r="1.3" fill="currentColor" stroke="none"></circle>
+{% elif name == "database" %}
+<ellipse cx="16" cy="8" rx="10" ry="4"></ellipse><path d="M6 8 V24 C6 26.2 10.5 28 16 28 C21.5 28 26 26.2 26 24 V8"></path><path d="M6 16 C6 18.2 10.5 20 16 20 C21.5 20 26 18.2 26 16"></path>
+{% elif name == "warning" %}
+<path d="M16 6 L28 26 H4 Z"></path><line x1="16" y1="14" x2="16" y2="19"></line><circle cx="16" cy="22.5" r="0.4" fill="currentColor" stroke="none"></circle>
+{% elif name == "arrow" %}
+<line x1="5" y1="16" x2="25" y2="16"></line><path d="M19 10 L25 16 L19 22"></path>
+{% elif name == "clock" %}
+<circle cx="16" cy="16" r="11"></circle><path d="M16 9 V16 L21 19"></path>
+{% elif name == "user" %}
+<circle cx="16" cy="11" r="5.5"></circle><path d="M5 28 C5 21 10 18 16 18 C22 18 27 21 27 28"></path>
+{% elif name == "globe" %}
+<circle cx="16" cy="16" r="11"></circle><ellipse cx="16" cy="16" rx="4.5" ry="11"></ellipse><line x1="5" y1="16" x2="27" y2="16"></line>
+{% elif name == "code" %}
+<path d="M11 9 L4 16 L11 23"></path><path d="M21 9 L28 16 L21 23"></path>
+{% elif name == "gear" %}
+<circle cx="16" cy="16" r="4.5"></circle><rect x="14" y="2.5" width="4" height="4.5" transform="rotate(0 16 16)"></rect><rect x="14" y="2.5" width="4" height="4.5" transform="rotate(45 16 16)"></rect><rect x="14" y="2.5" width="4" height="4.5" transform="rotate(90 16 16)"></rect><rect x="14" y="2.5" width="4" height="4.5" transform="rotate(135 16 16)"></rect><rect x="14" y="2.5" width="4" height="4.5" transform="rotate(180 16 16)"></rect><rect x="14" y="2.5" width="4" height="4.5" transform="rotate(225 16 16)"></rect><rect x="14" y="2.5" width="4" height="4.5" transform="rotate(270 16 16)"></rect><rect x="14" y="2.5" width="4" height="4.5" transform="rotate(315 16 16)"></rect>
+{% elif name == "chart" %}
+<line x1="6" y1="27" x2="26" y2="27"></line><rect x="8" y="18" width="4.5" height="9"></rect><rect x="14.5" y="12" width="4.5" height="15"></rect><rect x="21" y="6" width="4.5" height="21"></rect>
+{% elif name == "flag" %}
+<line x1="8" y1="4" x2="8" y2="28"></line><path d="M8 6 H25 L20 12 L25 18 H8"></path>
+{% endif %}
+{% endmacro %}
+
+{% macro markup(prefix, payload, compact=false) %}
+<div id="{{ prefix }}-wrap" class="blk-icon-wrap">
+  <h1 id="{{ prefix }}-headline" class="blk-icon-headline">{{ payload.headline }}</h1>
+  <div id="{{ prefix }}-grid" class="blk-icon-grid {{ 'blk-icon-grid-compact' if compact else '' }}">
+    {% for item in payload.items %}
+    <div class="blk-icon-chip" id="{{ prefix }}-chip-{{ loop.index0 }}">
+      <svg class="blk-icon-glyph" viewBox="0 0 32 32">{{ _icon_svg(item.icon.value) }}</svg>
+      <span class="blk-icon-label">{{ item.label }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+<style>
+  .blk-icon-wrap { width: 100%; display: flex; flex-direction: column; }
+  .blk-icon-headline {
+    font-weight: 700;
+    font-size: {{ "42px" if compact else "68px" }};
+    max-width: 100%;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-icon-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    margin-top: 64px;
+    width: 100%;
+  }
+  .blk-icon-grid-compact { margin-top: 32px; gap: 16px; }
+  .blk-icon-chip {
+    flex: 0 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    width: 220px;
+    opacity: 0;
+    will-change: opacity, transform;
+  }
+  .blk-icon-grid-compact .blk-icon-chip { width: 140px; }
+  .blk-icon-glyph {
+    width: 72px;
+    height: 72px;
+    fill: none;
+    stroke: var(--accent-primary);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .blk-icon-grid-compact .blk-icon-glyph { width: 48px; height: 48px; }
+  .blk-icon-label {
+    margin-top: 16px;
+    font-weight: 600;
+    font-size: {{ "18px" if compact else "24px" }};
+    line-height: 1.3;
+  }
+</style>
+{% endmacro %}
+
+{% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+  tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
+
+  const {{ prefix }}_chipStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+  {{ prefix }}_chipStarts.forEach(function (t, i) {
+    var chip = document.getElementById("{{ prefix }}-chip-" + i);
+    if (!chip) return;
+    tl.fromTo(
+      chip,
+      { scale: 0.7, opacity: 0, y: 16 },
+      { scale: 1, opacity: 1, y: 0, duration: 0.4, ease: "back.out(1.8)" },
+      t,
+    );
+  });
+{% endmacro %}

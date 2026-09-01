@@ -28,8 +28,9 @@ from core.models import VisualIntent
 
 
 class BlockType(StrEnum):
-    """What a block *is*. Nine as of T18C -- ``DIAGRAM_CHAIN`` retired in favor of the more
-    general ``GRAPH_DIAGRAM``; ``CODE_DIFF``/``SEQUENCE_DIAGRAM``/``TIMELINE`` new."""
+    """What a block *is*. Ten as of T18G -- ``ICON_PANEL`` is new, an abstract/generated-graphics
+    block (inline SVG icon + label chips) for topic-appropriate visual variety, deliberately NOT
+    a real photo/logo block (that needs a whole new interfaces/adapter pair, out of scope here)."""
 
     TITLE = "title"
     TEXT_PANEL = "text_panel"
@@ -40,6 +41,7 @@ class BlockType(StrEnum):
     CODE_DIFF = "code_diff"
     SEQUENCE_DIAGRAM = "sequence_diagram"
     TIMELINE = "timeline"
+    ICON_PANEL = "icon_panel"
 
 
 class SceneLayout(StrEnum):
@@ -107,6 +109,30 @@ class CodeDiffOp(StrEnum):
     REMOVE = "remove"
 
 
+class IconName(StrEnum):
+    """``ICON_PANEL``'s closed icon vocabulary -- inline SVG paths hand-authored in
+    ``rendering/templates/_block_icon_panel.html``, not a free-text choice, so every value here
+    is guaranteed to have a real glyph to render. Generic enough to span most explainer topics
+    (security, systems, data, general concepts) without needing a per-topic icon set."""
+
+    LOCK = "lock"
+    KEY = "key"
+    SHIELD = "shield"
+    CHECK = "check"
+    NETWORK = "network"
+    SERVER = "server"
+    DATABASE = "database"
+    WARNING = "warning"
+    ARROW = "arrow"
+    CLOCK = "clock"
+    USER = "user"
+    GLOBE = "globe"
+    CODE = "code"
+    GEAR = "gear"
+    CHART = "chart"
+    FLAG = "flag"
+
+
 class AnnotationType(StrEnum):
     """What a cross-cutting overlay annotation is. Not a ``BlockType`` -- an annotation targets
     an element inside an already-planned block rather than filling its own layout region."""
@@ -131,6 +157,7 @@ ALLOWED_BLOCKS: dict[VisualIntent, frozenset[BlockType]] = {
             BlockType.ARRAY_GRID,
             BlockType.GRAPH_DIAGRAM,
             BlockType.TIMELINE,
+            BlockType.ICON_PANEL,
         }
     ),
     VisualIntent.COMPARISON: frozenset({BlockType.TEXT_PANEL, BlockType.CODE_DIFF}),
@@ -140,6 +167,7 @@ ALLOWED_BLOCKS: dict[VisualIntent, frozenset[BlockType]] = {
             BlockType.ARRAY_GRID,
             BlockType.SEQUENCE_DIAGRAM,
             BlockType.TIMELINE,
+            BlockType.ICON_PANEL,
         }
     ),
     VisualIntent.CODE_WALKTHROUGH: frozenset({BlockType.CODE_PANEL, BlockType.CODE_DIFF}),

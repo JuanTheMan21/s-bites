@@ -110,7 +110,10 @@ def slot_payloads(segment_count: int) -> list[TitleSlots]:
     """One fill-call payload per segment's one planned block -- interchangeable, since every
     segment plans exactly one TITLE block (see ``scene_plan``'s docstring for why that matters
     under concurrent fan-out)."""
-    return [TitleSlots(headline=f"Headline {i}", subtitle=None) for i in range(segment_count)]
+    return [
+        TitleSlots(headline=f"Headline {i}", subtitle=None, key_terms=[])
+        for i in range(segment_count)
+    ]
 
 
 def _annotation_payloads(segment_count: int) -> list[SceneAnnotations]:

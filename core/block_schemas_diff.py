@@ -24,6 +24,11 @@ class CodeDiffLine(StrictSchema):
         description="The line's own source text, without a leading +/-/space -- the template "
         "supplies that marker from op."
     )
+    anchor_phrase: str = Field(
+        description="A short phrase copied VERBATIM from this segment's narration, marking the "
+        "moment this line should reveal -- not the line's own source text, which is code, not "
+        "narration, and will not match it."
+    )
 
 
 class CodeDiffSlots(StrictSchema):

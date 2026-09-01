@@ -25,6 +25,7 @@ _ITEM_FIELD: dict[str, str] = {
     "sequence_diagram": "messages",
     "timeline": "events",
     "text_panel": "items",
+    "icon_panel": "items",
 }
 
 

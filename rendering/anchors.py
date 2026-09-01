@@ -6,12 +6,16 @@ unrelated to the narration. T18B spends that measurement on the visuals too: a b
 or one array cell's elimination, can now land on the exact word that describes it rather than an
 arbitrary beat.
 
-Pure and testable, no I/O: given a segment's ``word_marks`` and a phrase or a list of item
-strings, find where in the audio that text is actually said. Degradation is mandatory, not
-optional -- ``SynthesisResult.words`` "may be empty" is an explicit contract term, and a phrase
-may simply not match (paraphrased narration, a word the LLM's plan quoted loosely). Every caller
-must treat ``None`` as "no anchor found, fall back to your own default timing" rather than as an
-error.
+Pure and testable, no I/O: given a segment's ``word_marks`` and a phrase, find where in the audio
+that text is actually said. Degradation is mandatory, not optional -- ``SynthesisResult.words``
+"may be empty" is an explicit contract term, and a phrase may simply not match (paraphrased
+narration, a word the LLM's plan quoted loosely). Every caller must treat ``None`` as "no anchor
+found, fall back to your own default timing" rather than as an error.
+
+T18G: every per-item/per-step anchor in the block library is now an LLM-authored ``anchor_phrase``
+resolved through ``resolve_anchor`` -- ``rendering/block_timing.py`` used to also derive an
+anchor from an item's own short *display text* for block types with no such field, which this
+module previously supported via a since-removed ``derive_item_anchors`` helper.
 """
 
 import re
@@ -51,14 +55,3 @@ def resolve_anchor(word_marks: list[WordMark], phrase: str | None) -> int | None
         ):
             return word_marks[start].offset_ms
     return None
-
-
-def derive_item_anchors(word_marks: list[WordMark], items: list[str]) -> list[int | None]:
-    """One anchor per item in ``items``, matched against ``word_marks`` independently.
-
-    For a list already on screen (bullets, chain node labels, array cell contents) this needs no
-    LLM call and no schema field -- an item's own text is already the thing being said, so its
-    anchor is just where that text occurs in the narration. Returns one entry per ``items``
-    element, in the same order, each possibly ``None``.
-    """
-    return [resolve_anchor(word_marks, item) for item in items]

@@ -22,9 +22,19 @@ GRAPH_DIAGRAM_GRAPH_MODE: dict = {
     "headline": "A small service graph",
     "layout": "graph",
     "nodes": [
-        {"id": "a", "label": "Gateway", "caption": None},
-        {"id": "b", "label": "Auth", "caption": None},
-        {"id": "c", "label": "Orders", "caption": None},
+        {
+            "id": "a",
+            "label": "Gateway",
+            "caption": None,
+            "anchor_phrase": "starts at the gateway",
+        },
+        {"id": "b", "label": "Auth", "caption": None, "anchor_phrase": "checks auth first"},
+        {
+            "id": "c",
+            "label": "Orders",
+            "caption": None,
+            "anchor_phrase": "reaches the order service",
+        },
     ],
     "edges": [
         # The UNLABELLED edge comes first, deliberately -- a labelled-only counter (rather than
@@ -126,16 +136,18 @@ def test_graph_diagram_edge_labels_render_only_when_authored(tmp_path: Path) -> 
 
 
 def test_graph_diagram_fallback_layout_is_aspect_ratio_aware(tmp_path: Path) -> None:
-    """T18E, E2.4 (the bounded slice of D121's analysis item 7): SPLIT_HORIZONTAL's compact
-    canvas lays unauthored nodes out on the wide axis instead of the circular formula SINGLE's
-    canvas uses -- the confirmed, SPLIT_HORIZONTAL-specific node-overlap bug's real fix
-    (t18d_catalog.md's Layout section)."""
+    """T18G (the full build of D121's analysis item 7 -- T18E's E2.4 only shipped a bounded
+    circle/row-packed fallback): unauthored nodes now go through a real rank-based layered
+    layout, called with `rankAxisIsX` true for a SPLIT_HORIZONTAL compact canvas and false for
+    SINGLE -- the aspect-ratio-awareness principle E2.4 established, carried into the real
+    algorithm rather than lost when the circle/row formulas were replaced."""
     single_segment = _a_composed_segment(BlockType.GRAPH_DIAGRAM, GRAPH_DIAGRAM_GRAPH_MODE)
     split_segment = _a_split_composed_segment(BlockType.GRAPH_DIAGRAM, GRAPH_DIAGRAM_GRAPH_MODE)
 
     single_html = compose_scene(single_segment, tmp_path / "single").read_text(encoding="utf-8")
     split_html = compose_scene(split_segment, tmp_path / "split").read_text(encoding="utf-8")
 
-    assert "Math.cos(angle)" in single_html
-    assert "Math.cos(angle)" not in split_html
-    assert "rows = n <= 4 ? 1 : 2" in split_html
+    assert "function computeLayeredLayout(" in single_html
+    assert "function computeLayeredLayout(" in split_html
+    assert "computeLayeredLayout(nodeIds, layoutEdges, false)" in single_html
+    assert "computeLayeredLayout(nodeIds, layoutEdges, true)" in split_html

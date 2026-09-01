@@ -8,14 +8,28 @@
   are horizontal arrows, one per row, drawn via the same getTotalLength()/strokeDasharray
   stroke-draw technique the rail segments already use -- a direct, explicit reuse, not a new
   technique. This is the block most likely to grow tall and reach the caption band -- the
-  runtime skill pack caps actors/messages accordingly.
+  runtime skill pack caps actors/messages accordingly, AND (T18G, F7) row_h itself shrinks below
+  its normal value once message count would otherwise push the area's own height past a safe
+  budget -- a structural cap, not just a prompt-level one, since a prompt cap is only ever
+  advisory (a real render, t18d-sequence-oauth, printed a caption directly over this block's own
+  last message even while the message count stayed inside the skill pack's stated range).
+  markup() and script() recompute this identically from the same inputs (payload, compact) rather
+  than sharing Jinja scope across separate macros, so both sides always agree.
 #}
 
 {% macro markup(prefix, payload, compact=false) %}
 {% set n = payload.actors | length %}
 {% set m = payload.messages | length %}
-{% set row_h = 60 if compact else 90 %}
+{% set base_row_h = 60 if compact else 90 %}
 {% set header_h = 70 if compact else 100 %}
+{% set cap_h = 300 if compact else 560 %}
+{#- Floor, not just a min against base_row_h: a badly-oversized message count (the prompt's
+   "six to eight at most" is advisory only -- strict-mode schemas cannot enforce list length,
+   core/strict_schema.py) could otherwise shrink row_h to zero or negative, which a browser
+   ignores on an inline height -- silently reverting to the pre-T18G unbounded-growth bug this
+   fix exists to close, rather than degrading gracefully. #}
+{% set row_h_floor = 18 if compact else 24 %}
+{% set row_h = ([base_row_h, [((cap_h - header_h - 20) / m), row_h_floor] | max] | min) if m > 0 else base_row_h %}
 {% set vb_h = header_h + (m * row_h) + 20 %}
 <div id="{{ prefix }}-wrap" class="blk-seq-wrap">
   <h1 id="{{ prefix }}-headline" class="blk-seq-headline">{{ payload.headline }}</h1>
@@ -90,11 +104,22 @@
 {% endmacro %}
 
 {% macro script(prefix, payload, entrance_start, item_starts, step_starts, duration_sec, compact=false) %}
+{% set m = payload.messages | length %}
+{% set base_row_h = 60 if compact else 90 %}
+{% set header_h = 70 if compact else 100 %}
+{% set cap_h = 300 if compact else 560 %}
+{#- Floor, not just a min against base_row_h: a badly-oversized message count (the prompt's
+   "six to eight at most" is advisory only -- strict-mode schemas cannot enforce list length,
+   core/strict_schema.py) could otherwise shrink row_h to zero or negative, which a browser
+   ignores on an inline height -- silently reverting to the pre-T18G unbounded-growth bug this
+   fix exists to close, rather than degrading gracefully. #}
+{% set row_h_floor = 18 if compact else 24 %}
+{% set row_h = ([base_row_h, [((cap_h - header_h - 20) / m), row_h_floor] | max] | min) if m > 0 else base_row_h %}
   tl.fromTo("#{{ prefix }}-headline", { opacity: 0, y: -24 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, {{ entrance_start }});
 
   const {{ prefix }}_actorIds = [{% for actor in payload.actors %}"{{ actor.id }}"{{ "," if not loop.last }}{% endfor %}];
-  const {{ prefix }}_headerH = {{ 70 if compact else 100 }};
-  const {{ prefix }}_rowH = {{ 60 if compact else 90 }};
+  const {{ prefix }}_headerH = {{ header_h }};
+  const {{ prefix }}_rowH = {{ row_h }};
   const {{ prefix }}_n = {{ prefix }}_actorIds.length;
 
   document.querySelectorAll("#{{ prefix }}-area .blk-seq-lane-header").forEach((el, i) => {

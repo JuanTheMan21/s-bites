@@ -6,13 +6,39 @@ got the block type they were chosen to stress, and TIMELINE rendered zero times 
 matrix (``t18d_catalog.md``). ``core/graph/nodes/visual_plan.py`` uses this to decide whether a
 single bounded re-ask is worth making.
 
+T18G, D122 finding 2: the vocabulary scan alone has a real, confirmed blind spot -- a narration
+that signals chronology entirely through domain-specific version numbers ("HTTP 1.0... HTTP
+1.1... HTTP/2... HTTP/3...") never hits ``TRIGGER_VOCABULARY[BlockType.TIMELINE]``'s generic
+words, however many of them there are, because none of those words are actually used.
+``_looks_chronological`` is a second, independent signal for TIMELINE specifically: three or
+more distinct version/sequence-like tokens ("1.0", "v2", "3/4") is itself evidence of a
+chronological progression, regardless of vocabulary.
+
 Pure -- stdlib and ``core.block_types``/``core.models``/``core.scene_plan_schema`` only, no I/O,
 so this is safe to import and unit-test the same way ``core/tier_resolver.py`` is.
 """
 
+import re
+
 from core.block_types import BlockType
 from core.models import Segment
 from core.scene_plan_schema import VideoScenePlan
+
+# A version-like token, three shapes: a dotted number ("1.0", "3.2.1"); a bare number directly
+# after a slash with no space ("HTTP/2", "HTTP/3" -- the exact real-render shape D122 found,
+# where the leading word is not itself a digit so a plain \d+(?:[./]\d+)+ pattern never matches);
+# or a "v"-prefixed number ("v2", "v1.5").
+_VERSION_TOKEN = re.compile(r"\d+\.\d+(?:\.\d+)?|(?<=/)\d+(?:\.\d+)?|\bv\d+(?:\.\d+)?\b")
+_MIN_VERSION_TOKENS = 3
+
+
+def _looks_chronological(text: str) -> bool:
+    """Three or more DISTINCT version-like tokens is itself a chronology signal, independent of
+    ``TRIGGER_VOCABULARY`` -- the exact blind spot D122 recorded: "HTTP 1.0... HTTP 1.1...
+    HTTP/2... HTTP/3..." never uses a generic timeline word, but the version progression alone
+    is unmistakably chronological to a human reader."""
+    return len(set(_VERSION_TOKEN.findall(text))) >= _MIN_VERSION_TOKENS
+
 
 # A block type absent here has no distinctive narration vocabulary worth scanning for -- title,
 # stat_callout, code_panel, text_panel, and graph_diagram all earn their place from structure or
@@ -72,6 +98,9 @@ def missed_block_opportunities(
         if segment.index == 0 or segment.index not in planned_indices or not segment.narration:
             continue
         text = segment.narration.lower()
+        if BlockType.TIMELINE not in used and _looks_chronological(text):
+            missed[segment.index] = BlockType.TIMELINE
+            continue
         for block_type, vocabulary in TRIGGER_VOCABULARY.items():
             if block_type in used:
                 continue

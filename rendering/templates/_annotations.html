@@ -20,6 +20,17 @@
   real rendered width gives the exact scale factor in one line -- dividing every measured delta by
   it converts viewport pixels back into the local CSS-pixel space tl.set(...)/GSAP's x/y transform
   actually operate in, regardless of what the browser is doing outside this document.
+
+  T18G: hfAnnotationPlace now avoids more than its own target's headline/caption-band bounds -- a
+  shared, per-container registry (window.__hfPlacedRects) of every box already placed in that same
+  container, so a second CHECK annotation on an adjacent item doesn't land on the first one's ring
+  and caption (D122 finding 1), and a GRAPH_DIAGRAM's own edge labels (registered directly by
+  _block_graph_diagram.html, via the same hfAnnotationOffset this file already exposes) don't
+  collide with an annotation on the same canvas (part of D122 finding 3). Best-effort, not a
+  guarantee: a candidate is accepted the moment it clears every already-registered rect, so
+  placement order matters and an extremely dense scene can still exhaust every candidate -- the
+  existing clamp-into-bounds fallback is the last resort, unchanged, and can still overlap in that
+  case.
 #}
 
 {% macro annotation_offset_script() %}
@@ -39,6 +50,19 @@
     };
   }
 
+  // T18G: a shared, per-container registry of already-placed boxes (container-local units, the
+  // same space hfAnnotationOffset returns) -- hfAnnotationPlace checks a candidate against it
+  // before accepting, and hfRegisterPlacedRect lets a non-annotation element (an edge label) join
+  // the same registry so annotations avoid it too.
+  window.__hfPlacedRects = window.__hfPlacedRects || {};
+  function hfRegisterPlacedRect(containerId, rect) {
+    var list = window.__hfPlacedRects[containerId] || (window.__hfPlacedRects[containerId] = []);
+    list.push(rect);
+  }
+  function hfRectsOverlap(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
   {#- T18E, D121/D122: two real text collisions -- a CHECK caption printed over its own block's
      headline, and a caption band printed over a dense SEQUENCE_DIAGRAM's last message -- both
      came from each annotation partial computing its own fixed offset with no idea what container
@@ -46,8 +70,11 @@
      itself (already in the DOM, pre-transform -- same "nothing has played yet" guarantee
      hfAnnotationOffset relies on), tries the caller's preferred sides against the target in
      order, and takes the first whose full box stays inside the container's own USABLE box --
-     below headlineId's bottom edge, above captionLayerId's top edge -- clamping into that box as
-     a last resort rather than ever landing outside it. #}
+     below headlineId's bottom edge, above captionLayerId's top edge, and (T18G) clear of every
+     rect already registered for this container -- clamping into that box as a last resort rather
+     than ever landing outside it (which can still overlap a registered rect, in an extremely
+     dense scene; this is best-effort, not a guarantee). The chosen box is itself registered on
+     the way out, so the NEXT annotation in this container avoids it in turn. #}
   function hfAnnotationPlace(targetId, containerId, annoId, headlineId, captionLayerId, sides) {
     var off = hfAnnotationOffset(targetId, containerId);
     var anno = document.getElementById(annoId);
@@ -67,6 +94,18 @@
       bottom = Math.min(bottom, (captionLayer.getBoundingClientRect().top - c.top) / scale);
     }
 
+    var placed = window.__hfPlacedRects[containerId] || [];
+    function inBounds(pos) {
+      return pos.y >= top && pos.y + annoH <= bottom;
+    }
+    function clearOfPlaced(pos) {
+      var box = { x: pos.x, y: pos.y, w: annoW, h: annoH };
+      for (var j = 0; j < placed.length; j++) {
+        if (hfRectsOverlap(box, placed[j])) return false;
+      }
+      return true;
+    }
+
     var GAP = 12;
     var candidates = {
       // "tip": the annotation wrap's own top-left corner (not its centre) lands exactly on the
@@ -77,12 +116,44 @@
       below: { x: off.dx + off.w / 2 - annoW / 2, y: off.dy + off.h + GAP },
     };
     var order = sides && sides.length ? sides : ["above", "below", "center"];
+
+    // T18G: a small vertical nudge search around each candidate BEFORE moving to the next side
+    // -- confirmed live that without this, a caller with only one candidate side (CURSOR's own
+    // ["tip"]) never actually benefited from collision avoidance at all: its one candidate fails
+    // clearOfPlaced, the old Pass 2 fell straight through to "in-bounds is enough" and accepted
+    // the SAME overlapping position anyway. Two annotations on the same graph node (a CHECK and
+    // a CURSOR) visibly collided in a real render before this fix.
+    function nudged(pos) {
+      var step = (annoH + GAP) * 0.65;
+      var offsets = [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6];
+      for (var s = 0; s < offsets.length; s++) {
+        var cand = { x: pos.x, y: pos.y + offsets[s] * step };
+        if (inBounds(cand) && clearOfPlaced(cand)) return cand;
+      }
+      return null;
+    }
+
+    // Pass 1: each candidate side, nudged vertically until one is both in-bounds and clear.
     for (var i = 0; i < order.length; i++) {
-      var pos = candidates[order[i]];
-      if (pos.y >= top && pos.y + annoH <= bottom) return pos;
+      var found = nudged(candidates[order[i]]);
+      if (found) {
+        hfRegisterPlacedRect(containerId, { x: found.x, y: found.y, w: annoW, h: annoH });
+        return found;
+      }
+    }
+    // Pass 2: nothing was ever clear of every placed rect anywhere in bounds -- accept the first
+    // in-bounds candidate (may still overlap; an extremely dense scene can exhaust every option,
+    // and landing inside the frame overlapping something is better than landing outside it).
+    for (var k = 0; k < order.length; k++) {
+      var pos2 = candidates[order[k]];
+      if (inBounds(pos2)) {
+        hfRegisterPlacedRect(containerId, { x: pos2.x, y: pos2.y, w: annoW, h: annoH });
+        return pos2;
+      }
     }
     var fallback = candidates[order[0]];
     fallback.y = Math.min(Math.max(fallback.y, top), Math.max(top, bottom - annoH));
+    hfRegisterPlacedRect(containerId, { x: fallback.x, y: fallback.y, w: annoW, h: annoH });
     return fallback;
   }
 {% endmacro %}

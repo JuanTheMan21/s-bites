@@ -55,18 +55,19 @@ def shipped() -> SkillRegistry:
     return DiskSkillRegistry(SKILLS_ROOT)
 
 
-# scene-authoring is at 1.4 (T18E: graph_diagram edges may carry a weight/cost/condition label).
-# visual-plan is at 1.2 (T18E: annotations moved out to their own step, so this pack no longer
-# plans them). annotation-authoring is new at T18E, so it starts at 1.0. Every other pack is
-# still at its original 1.0. Keyed per-pack rather than one constant so a future version bump
-# anywhere only has to update this map, not the reasoning around it.
+# scene-authoring is at 1.5 (T18G: anchor_phrase on graph_diagram nodes/text_panel items/
+# code_diff lines, title key_terms, icon_panel guidance). visual-plan is at 1.3 (T18G: icon_panel
+# added to the block-choice table, plus a push against defaulting to text_panel/stat_callout).
+# annotation-authoring is at 1.1 (T18G: adds CURSOR/CHECK/WARNING choice examples). Every other
+# pack is still at its original 1.0. Keyed per-pack rather than one constant so a future version
+# bump anywhere only has to update this map, not the reasoning around it.
 LATEST_VERSION = {
-    "annotation-authoring": "1.0",
+    "annotation-authoring": "1.1",
     "house-style": "1.0",
     "outline": "1.0",
-    "scene-authoring": "1.4",
+    "scene-authoring": "1.5",
     "scripting": "1.0",
-    "visual-plan": "1.2",
+    "visual-plan": "1.3",
 }
 
 

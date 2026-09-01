@@ -86,3 +86,37 @@ def test_a_segment_missing_from_the_plan_is_skipped() -> None:
     missed = missed_block_opportunities([segment], plan)
 
     assert missed == {}
+
+
+def test_version_number_chronology_is_flagged_even_with_no_timeline_vocabulary() -> None:
+    """T18G, D122 finding 2: the real render's own blind spot -- a narration that signals
+    chronology entirely through domain-specific version numbers, never a generic timeline word,
+    still went undetected before this fix. None of TRIGGER_VOCABULARY[TIMELINE]'s words appear
+    here at all."""
+    segment = a_segment(1).model_copy(
+        update={
+            "narration": (
+                "HTTP 1.0 makes one request per connection. HTTP 1.1 keeps the connection "
+                "open. HTTP/2 multiplexes several requests at once. HTTP/3 moves the "
+                "transport itself onto UDP."
+            )
+        }
+    )
+    plan = _plan(blocks={0: BlockType.TITLE, 1: BlockType.TEXT_PANEL})
+
+    missed = missed_block_opportunities([segment], plan)
+
+    assert missed == {1: BlockType.TIMELINE}
+
+
+def test_a_single_version_number_mentioned_in_passing_is_not_enough() -> None:
+    """One version number is not itself a chronology signal -- the scan requires at least three
+    distinct ones, the same false-positive guard _MIN_HITS gives the vocabulary scan."""
+    segment = a_segment(1).model_copy(
+        update={"narration": "The server responds with an HTTP/2 request for the resource."}
+    )
+    plan = _plan(blocks={0: BlockType.TITLE, 1: BlockType.TEXT_PANEL})
+
+    missed = missed_block_opportunities([segment], plan)
+
+    assert missed == {}

@@ -1,8 +1,19 @@
 {#
-  BlockType.TITLE -- a direct lift of the pre-T18B title_card.html: centered headline, a flat
-  underline as the one accent mark, optional subtitle below. Always SINGLE, always alone
-  (segment 0's forced title card, or a genuine mid-video pivot plan_visuals chose).
+  BlockType.TITLE -- centered headline, a flat underline as the one accent mark, optional
+  subtitle below. Always SINGLE, always alone (segment 0's forced title card, or a genuine
+  mid-video pivot plan_visuals chose).
   Rule composed: spring-pop-entrance (headline).
+
+  T18G (D120/D121's "structural title card" finding): segment 0 is tiered like any other segment
+  and keeps its real measured duration_sec (often 20s+), but this block's entire pre-T18G
+  animation was three one-shot tweens totaling ~1.25s -- nothing scheduled after left the frame
+  pixel-static for the rest of a long segment. Two additions, both driven by data that already
+  degrades cleanly to a single static Tier-0 frame:
+  - `key_terms` chips stagger in on their own narration-anchored beat (item_starts, same
+    mechanism every other block's items use since T18G's anchor_phrase unification).
+  - One continuous ambient tween (the underline's own glow, a genuine tracked GSAP property, per
+    D89's rule against manual onUpdate DOM writes for idle motion) runs for the full
+    duration_sec, so a segment with zero key_terms still isn't visually dead for its whole span.
 #}
 
 {% macro markup(prefix, payload, compact=false) %}
@@ -11,6 +22,13 @@
   <span id="{{ prefix }}-underline" class="blk-title-underline"></span>
   {% if payload.subtitle %}
   <p id="{{ prefix }}-subtitle" class="blk-title-subtitle">{{ payload.subtitle }}</p>
+  {% endif %}
+  {% if payload.key_terms %}
+  <div id="{{ prefix }}-terms" class="blk-title-terms">
+    {% for term in payload.key_terms %}
+    <span class="blk-title-term" id="{{ prefix }}-term-{{ loop.index0 }}">{{ term.text }}</span>
+    {% endfor %}
+  </div>
   {% endif %}
 </div>
 <style>
@@ -36,7 +54,7 @@
     background: var(--accent-primary);
     transform-origin: center;
     display: block;
-    will-change: transform;
+    will-change: transform, box-shadow;
   }
   .blk-title-subtitle {
     margin-top: 40px;
@@ -44,6 +62,24 @@
     font-size: 36px;
     color: var(--fg-muted);
     max-width: 80%;
+    will-change: opacity, transform;
+  }
+  .blk-title-terms {
+    margin-top: 56px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 16px;
+    max-width: 90%;
+  }
+  .blk-title-term {
+    padding: 10px 24px;
+    border: 2px solid var(--accent-secondary);
+    border-radius: 999px;
+    font-family: "JetBrains Mono", "Courier New", monospace;
+    font-size: 22px;
+    color: var(--accent-secondary);
+    opacity: 0;
     will-change: opacity, transform;
   }
 </style>
@@ -70,4 +106,30 @@
     {{ entrance_start + 0.75 }},
   );
   {% endif %}
+
+  const {{ prefix }}_termStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
+  {{ prefix }}_termStarts.forEach(function (t, i) {
+    var term = document.getElementById("{{ prefix }}-term-" + i);
+    if (!term) return;
+    tl.fromTo(
+      term,
+      { opacity: 0, y: 14, scale: 0.9 },
+      { opacity: 1, y: 0, scale: 1, duration: 0.4, ease: "power3.out" },
+      t,
+    );
+  });
+
+  // Ambient idle motion, a real tracked property tween (D89) so it survives a seek -- keeps the
+  // card visually alive for the rest of its own measured duration even when key_terms is empty.
+  tl.to(
+    "#{{ prefix }}-underline",
+    {
+      boxShadow: "0 0 24px 4px var(--accent-primary)",
+      duration: Math.max(1.5, ({{ duration_sec }} - {{ entrance_start }} - 1.5) / 2),
+      ease: "sine.inOut",
+      yoyo: true,
+      repeat: -1,
+    },
+    {{ entrance_start }} + 1.05,
+  );
 {% endmacro %}

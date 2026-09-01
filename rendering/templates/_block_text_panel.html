@@ -20,7 +20,7 @@
       {% if not compact %}
       <span class="blk-text-marker voice-data" id="{{ prefix }}-marker-{{ loop.index0 }}">{{ "%02d" | format(loop.index) }}</span>
       {% endif %}
-      <span class="blk-text-copy">{{ item }}</span>
+      <span class="blk-text-copy">{{ item.text }}</span>
     </li>
     {% endfor %}
   </ul>

@@ -26,6 +26,11 @@ class GraphNode(StrictSchema):
         description="A short clarifying line under the label, or null if the label is clear "
         "on its own."
     )
+    anchor_phrase: str = Field(
+        description="A short phrase copied VERBATIM from this segment's narration, marking the "
+        "moment this node should first appear -- not the node's own label, which is often too "
+        "short and generic to match a unique point in the narration reliably."
+    )
 
 
 class GraphEdge(StrictSchema):

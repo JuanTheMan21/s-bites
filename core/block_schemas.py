@@ -26,18 +26,53 @@ from pydantic import Field
 from core.block_schemas_array import ArrayGridSlots
 from core.block_schemas_diff import CodeDiffSlots
 from core.block_schemas_graph import GraphDiagramSlots
+from core.block_schemas_icon import IconPanelSlots
 from core.block_schemas_sequence import SequenceDiagramSlots, TimelineSlots
 from core.block_types import BlockType
 from core.strict_schema import StrictSchema
 
 
+class TitleKeyTerm(StrictSchema):
+    """One term or short phrase worth calling out while a title card is still on screen."""
+
+    text: str = Field(description="The term or short phrase itself, a few words at most.")
+    anchor_phrase: str = Field(
+        description="A short phrase copied VERBATIM from this segment's narration, marking the "
+        "moment this term should appear."
+    )
+
+
 class TitleSlots(StrictSchema):
-    """Opening card or section boundary: a statement and an optional qualifier."""
+    """Opening card or section boundary: a statement and an optional qualifier.
+
+    T18G: segment 0's title card is forced onto Tier.ANIMATED like any importance-appropriate
+    segment and keeps whatever duration its real narration measures at (often 20s+), but its own
+    markup only ever had a ~1.25s one-shot entrance -- nothing scheduled after left it pixel-static
+    for the rest of a long segment (D120/D121's "structural title card" finding).
+    `key_terms` gives the block real, narration-anchored content to reveal across that duration
+    instead of capping or shortening it.
+    """
 
     headline: str = Field(description="The title. A short phrase, ideally under eight words.")
     subtitle: str | None = Field(
         description="A supporting line, or null if the headline stands alone. Null is a normal "
         "answer here -- do not invent a subtitle to fill the field."
+    )
+    key_terms: list[TitleKeyTerm] = Field(
+        description="Zero to four short terms or phrases from this segment's own narration, "
+        "worth calling out while the card is still on screen -- empty is a normal answer for a "
+        "short or purely introductory segment. Never pad this list to fill time."
+    )
+
+
+class TextPanelItem(StrictSchema):
+    """One point in a text panel's list."""
+
+    text: str = Field(description="The point itself, one short sentence.")
+    anchor_phrase: str = Field(
+        description="A short phrase copied VERBATIM from this segment's narration, marking the "
+        "moment this point should reveal -- not `text` itself, which is often a paraphrase or "
+        "summary rather than the narration's own words."
     )
 
 
@@ -49,10 +84,10 @@ class TextPanelSlots(StrictSchema):
         description="What these points are about. A short phrase -- the list's own headline "
         "when alone, or this side's label ('Unsafe', 'Safe') when paired with another panel."
     )
-    items: list[str] = Field(
-        description="Two to five short points, one short sentence each. When this block is one "
-        "side of a comparison, match the other side's item count and keep item *n* addressing "
-        "the same dimension as the other panel's item *n*."
+    items: list[TextPanelItem] = Field(
+        description="Two to five short points. When this block is one side of a comparison, "
+        "match the other side's item count and keep item *n* addressing the same dimension as "
+        "the other panel's item *n*."
     )
 
 
@@ -119,6 +154,7 @@ BLOCK_SCHEMAS: dict[BlockType, type[StrictSchema]] = {
     BlockType.CODE_DIFF: CodeDiffSlots,
     BlockType.SEQUENCE_DIAGRAM: SequenceDiagramSlots,
     BlockType.TIMELINE: TimelineSlots,
+    BlockType.ICON_PANEL: IconPanelSlots,
 }
 
 

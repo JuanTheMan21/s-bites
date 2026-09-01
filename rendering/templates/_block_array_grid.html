@@ -13,11 +13,28 @@
 {% macro markup(prefix, payload, compact=false) %}
 {% set n = payload.cells | length %}
 {% set vertical = payload.orientation == "vertical" %}
+{#- T18G, F7: a vertical column's height grows with cell count against a class-level fixed
+   per-cell height that never shrinks -- unlike the horizontal row (a fixed number of cells
+   sharing a fixed-width flex track, which cannot itself grow tall), a long vertical array can
+   push past the caption band. Cell height is computed per-instance (an inline style, not the
+   shared .blk-array-cell-vertical class -- two ARRAY_GRID blocks in the same SPLIT_HORIZONTAL
+   scene would otherwise fight over one shared class rule) and shrinks below its normal value
+   once cell count would otherwise exceed a safe column-height budget. #}
+{% set v_base_h = 56 if compact else 76 %}
+{% set v_gap = 6 if compact else 10 %}
+{% set v_cap_h = 300 if compact else 560 %}
+{#- Floor, not just a min against v_base_h: cells has no enforceable max length (strict-mode
+   schemas can't express one, core/strict_schema.py) -- a badly-oversized cell count could
+   otherwise shrink to zero/negative, which a browser ignores on an inline height, silently
+   reverting to the pre-T18G unbounded-growth bug rather than degrading gracefully. #}
+{% set v_cell_h_floor = 18 if compact else 24 %}
+{% set v_cell_h = ([v_base_h, [((v_cap_h - (n - 1) * v_gap) / n), v_cell_h_floor] | max] | min) if (vertical and n > 0) else v_base_h %}
 <div id="{{ prefix }}-wrap" class="blk-array-wrap">
   <h1 id="{{ prefix }}-headline" class="blk-array-headline">{{ payload.headline }}</h1>
   <div id="{{ prefix }}-row" class="blk-array-row {{ 'blk-array-row-vertical' if vertical else '' }}">
     {% for cell in payload.cells %}
-    <div class="blk-array-cell {{ 'blk-array-cell-vertical' if vertical else '' }}" id="{{ prefix }}-cell-{{ loop.index0 }}">
+    <div class="blk-array-cell {{ 'blk-array-cell-vertical' if vertical else '' }}" id="{{ prefix }}-cell-{{ loop.index0 }}"
+      {%- if vertical %} style="height: {{ v_cell_h }}px;"{% endif %}>
       {#- data-layout-allow-occlusion: the strike is DESIGNED to cross the value once eliminated
          -- hyperframes check's text_occluded finding is correct that the strike overlaps the
          text, and wrong that it is a legibility bug; a strikethrough crossing its own text is

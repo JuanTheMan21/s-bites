@@ -8,25 +8,43 @@ the schema it consumes are exercised with identical input.
 
 Realistic rather than minimal, on purpose. A payload of ``{"headline": "x"}`` proves the schema
 parses; one with three real items shows whether the block still reads at 1080p.
+
+T18G: the T18C-onward block types moved to ``tests/block_examples_extra.py`` once this file
+crossed the 200-line ceiling -- ``EXAMPLES`` merges both, so nothing importing ``EXAMPLES`` needs
+to know or care where a given block type's fixture actually lives.
 """
 
 from typing import Any
 
 from core.block_types import BlockType
+from tests.block_examples_extra import EXTRA_EXAMPLES
 
-# One believable payload per block type. These double as the fixtures the block partials render
-# against, so they are realistic rather than minimal.
-EXAMPLES: dict[BlockType, dict[str, Any]] = {
+# One believable payload per block type, T18A/T18B's original six. These double as the fixtures
+# the block partials render against, so they are realistic rather than minimal.
+_CORE_EXAMPLES: dict[BlockType, dict[str, Any]] = {
     BlockType.TITLE: {
         "headline": "SQL Injection",
         "subtitle": "How one quote breaks a query",
+        "key_terms": [
+            {"text": "Untrusted input", "anchor_phrase": "untrusted input"},
+            {"text": "Query injection", "anchor_phrase": "breaks the query"},
+        ],
     },
     BlockType.TEXT_PANEL: {
         "headline": "Why it works",
         "items": [
-            "Untrusted input reaches the query text.",
-            "The parser cannot tell data from code.",
-            "The database executes whatever it parsed.",
+            {
+                "text": "Untrusted input reaches the query text.",
+                "anchor_phrase": "untrusted input reaches the query",
+            },
+            {
+                "text": "The parser cannot tell data from code.",
+                "anchor_phrase": "the parser cannot tell data from code",
+            },
+            {
+                "text": "The database executes whatever it parsed.",
+                "anchor_phrase": "the database executes whatever it parsed",
+            },
         ],
     },
     BlockType.STAT_CALLOUT: {
@@ -51,93 +69,9 @@ EXAMPLES: dict[BlockType, dict[str, Any]] = {
         "highlight_lines": [2],
         "caption": "The value is spliced into the query before the parser ever runs.",
     },
-    BlockType.ARRAY_GRID: {
-        "headline": "Searching a sorted list",
-        "orientation": "horizontal",
-        "cells": ["2", "5", "8", "12", "16", "23", "38", "56", "72", "91"],
-        "steps": [
-            {
-                "op": "narrow",
-                "anchor_phrase": "check the middle",
-                "remaining_start": 0,
-                "remaining_end": 5,
-                "end_operation": "none",
-            },
-            {
-                "op": "narrow",
-                "anchor_phrase": "narrow again",
-                "remaining_start": 3,
-                "remaining_end": 5,
-                "end_operation": "none",
-            },
-        ],
-    },
-    BlockType.GRAPH_DIAGRAM: {
-        "headline": "The attack path",
-        "layout": "chain",
-        "nodes": [
-            {"id": "n1", "label": "Form input", "caption": "An apostrophe and a comment marker"},
-            {"id": "n2", "label": "String concatenation", "caption": None},
-            {
-                "id": "n3",
-                "label": "Database executes",
-                "caption": "Now running the attacker's clause",
-            },
-        ],
-        "edges": [
-            {"from_id": "n1", "to_id": "n2", "label": None},
-            {"from_id": "n2", "to_id": "n3", "label": None},
-        ],
-        "positions": [],
-        "traversal": [],
-    },
-    BlockType.CODE_DIFF: {
-        "headline": "Parameterizing the query",
-        "language": "python",
-        "lines": [
-            {"op": "context", "text": "name = request.args['name']"},
-            {
-                "op": "remove",
-                "text": 'query = "SELECT * FROM users WHERE name = \'" + name + "\'"',
-            },
-            {"op": "add", "text": 'query = "SELECT * FROM users WHERE name = %s"'},
-            {"op": "add", "text": "cursor.execute(query, (name,))"},
-        ],
-        "caption": "The driver escapes the value instead of the app splicing it in.",
-    },
-    BlockType.SEQUENCE_DIAGRAM: {
-        "headline": "A parameterized query round trip",
-        "actors": [
-            {"id": "app", "label": "App"},
-            {"id": "db", "label": "Database"},
-        ],
-        "messages": [
-            {
-                "anchor_phrase": "sends the query and the value separately",
-                "from_id": "app",
-                "to_id": "db",
-                "label": "query + params",
-            },
-            {
-                "anchor_phrase": "the database returns the matching rows",
-                "from_id": "db",
-                "to_id": "app",
-                "label": "rows",
-            },
-        ],
-    },
-    BlockType.TIMELINE: {
-        "headline": "How the fix landed",
-        "events": [
-            {
-                "anchor_phrase": "the bug was first reported",
-                "label": "Reported",
-                "date_label": "Day 1",
-            },
-            {"anchor_phrase": "a patch went out", "label": "Patched", "date_label": "Day 3"},
-        ],
-    },
 }
+
+EXAMPLES: dict[BlockType, dict[str, Any]] = {**_CORE_EXAMPLES, **EXTRA_EXAMPLES}
 
 # A second stat_callout payload, exercising the T18A count-up path EXAMPLES's own entry
 # deliberately leaves null. Not part of EXAMPLES because that dict is one fixture per block type,

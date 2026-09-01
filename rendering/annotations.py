@@ -41,6 +41,7 @@ _ANNOTATION_TARGET_SUFFIX: dict[str, str] = {
     "sequence_diagram": "msg",
     "timeline": "event",
     "text_panel": "row",
+    "icon_panel": "chip",
 }
 
 
