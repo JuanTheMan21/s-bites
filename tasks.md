@@ -797,12 +797,13 @@ showcase video was not produced.**
 
 **Depends:** T18G — met.
 
-### T18I — Close the remaining geometry gaps T18H's gate found but did not fix, land a genuine
-full 7-minute render · `todo`
+### T18I — Close the remaining geometry gaps T18H's gate found but did not fix, give the pipeline a
+real failure story, land a genuine full 7-minute render · `todo`
 **Scoped by the user directly at T18H's own checkpoint**, after watching four consecutive
 find-fix-reproduce cycles in one session (D124) and asking to stop chasing a fifth live rather than
-keep going. This task picks up exactly where T18H's own gate left off — not new bug-hunting, but
-finishing what the gate already found:
+keep going. Two distinct halves, both explicit user asks at the same checkpoint, folded into one
+task rather than split — read both before starting, since the closing render (last bullet) is
+meant to exercise both:
 
 - **`SceneLayout.SINGLE` stacking multiple large blocks with no combined-height constraint.**
   Confirmed live: a full `GRAPH_DIAGRAM` (headline + 620px canvas) stacked above a `TEXT_PANEL` in
@@ -828,11 +829,37 @@ finishing what the gate already found:
   symptom of the placement bug above (a badly-placed annotation reads as "wrong," which can look
   like "random," even when its timing is correct) rather than a separate timing defect — confirm
   which it actually is before assuming new timing work is needed.
+
+**Second half: what happens when `validate_geometry` (or `lint`) catches something in production**,
+folded in at the user's own explicit request after they asked directly what T18H's gate actually
+does when it fires on a real job, and were told plainly it currently has no answer beyond a crash.
+Three concrete gaps, all real today, none touched by T18H:
+- **No retry.** A geometry failure never gets a second attempt with adjusted content, even though
+  every one of T18H's own four real-render bugs (D124) turned out to be a one-shot content problem
+  (a bad authored position, a caption that happened to be too long) that a re-author with feedback
+  about what failed could plausibly fix. Needs a real design: what triggers a retry (which finding
+  codes are worth retrying vs. not), how many attempts, whether the retry re-calls
+  `author_scene`/`plan_visuals` with the specific failure as feedback or just re-rolls the same
+  prompt, and where this sits relative to D2's "no repair loop" stance (D2 was about schema/logic
+  errors lint catches instantly and deterministically; a geometry finding tied to specific
+  LLM-authored content is a different kind of failure, and this task should say explicitly whether
+  that distinction justifies reopening D2 for this one path, not silently override it).
+- **No per-segment isolation.** One bad segment currently kills the entire `VideoJob` run
+  (`core/graph/nodes/render_scene.py`'s own exception propagates through the graph), rather than
+  falling back to something safe (a simpler tier, a swapped block type, or a plain title-card
+  substitute) so the other 14 segments still ship. Needs a real fallback strategy per segment, not
+  just "catch and skip" (a silently missing segment is its own kind of broken video).
+- **No user-facing signal beyond a crash.** Nothing today surfaces which segment failed, on which
+  finding, to whoever is waiting on the job. At minimum this needs the failure to reach
+  `VideoJob`'s own status/error surface (however T19's API skeleton ends up exposing job state) with
+  enough detail to be actionable (segment index, finding code, not just "the job failed").
 - **A genuine full ~7-minute `RUNTIME_ENV=azure` render, completed, as this task's own closing
   proof** — the same bar D104 originally set, approximated but not landed exactly by T18F's/T18G's
-  own renders, and not landed at all by T18H (no closing render completed this session). Should
-  land only after the two fixes above, on a topic chosen to exercise both (a graph-diagram-heavy
-  segment reachable via an edge-parallel annotation, plus at least one multi-block SINGLE scene).
+  own renders, and not landed at all by T18H (no closing render completed this session). Should land
+  only after every fix above, on a topic chosen to exercise all of them: a graph-diagram-heavy
+  segment reachable via an edge-parallel annotation, at least one multi-block SINGLE scene, and
+  (deliberately, to prove the resilience half works) content likely enough to trip `validate_geometry`
+  at least once so the retry/fallback/signal path is exercised for real, not just unit-tested.
 
 **Depends:** T18H — met.
 

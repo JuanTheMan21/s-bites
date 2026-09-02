@@ -91,11 +91,15 @@ explicitly not swept under the rug: T18I's own DoD requires landing one.
 project's standing pattern (every T18-series checkpoint lands there first). Ask before pushing.
 
 **Done:** T1-T18, T18A-T18H.
-**Next:** T18I — close the multi-block-stacking capacity gap, add parallel-to-a-line annotation
-placement, re-verify (not re-assume) whether "random" annotation timing is a real separate defect
-or a symptom of bad placement, land a genuine full 7-minute render as the closing proof. Full scope
-in `tasks.md`'s T18I entry — read it before starting; it is not a re-scoping exercise, it is
-finishing exactly what T18H's own gate already found.
+**Next:** T18I, two halves, both folded in at the user's own explicit request. Geometry half: close
+the multi-block-stacking capacity gap, add parallel-to-a-line annotation placement, re-verify (not
+re-assume) whether "random" annotation timing is a real separate defect or a symptom of bad
+placement. Resilience half, added after the user asked directly what happens today when
+`validate_geometry` fires in production (answer given plainly: a crash, nothing else) — no retry,
+no per-segment fallback, no user-facing failure signal beyond that crash, all three real gaps, none
+touched by T18H. Both halves close with one genuine full 7-minute render that exercises them
+together. Full scope in `tasks.md`'s T18I entry — read it before starting; it is not a re-scoping
+exercise, it is finishing exactly what T18H's own gate already found plus what it still can't do.
 
 ## What T18H produced
 
