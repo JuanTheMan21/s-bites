@@ -648,6 +648,13 @@ would be premature — the validation render item above exists to show off a wor
 **Note added by T18G's own checkpoint:** T18G's own F9 ran one real ~7-minute validation render
 (not the 2-3-topic sweep this task still calls for) — it informs this task's own validation-render
 item but does not close it. Read D123 before scoping this task's remaining three items.
+**Note added by T18H's own checkpoint:** T18H attempted a third real render (a code/list-heavy
+topic, deliberately not another graph-heavy one) specifically to prove the new `validate_geometry`
+gate runs clean end-to-end — it did not complete: the gate itself worked exactly as intended,
+catching four distinct real geometry bugs across four attempts (D124), but a fifth, different-in-
+kind capacity bug (`SceneLayout.SINGLE` stacking multiple large blocks) was found and deferred to
+T18I rather than fixed live. This task's own validation-render item is therefore still open, now
+also blocking on T18I's own closing render rather than T18G's.
 
 ---
 
@@ -731,6 +738,103 @@ scale); the general payload-driven block-*variants* system (D121's analysis item
 adding one new block type — `ICON_PANEL` helps variety but doesn't build the general mechanism).
 
 **Depends:** T18E — met.
+
+### T18H — Geometric correctness as a hard, automatic gate on every real render · `done`
+**Scoped fresh in its own planning session**, from the user's own direct reaction to watching
+`t18g-showcase-git`: "three sessions worth of trying to fix it, and this is what I get, I need a
+solid fix that I am sure will work... a validator agent?" Diagnosed, not assumed: the tool that
+would catch this deterministically (`hyperframes check`) already existed in this project's own
+toolchain since T18A, proven directly by running it against the exact broken composition from the
+prior night's render (5 `layout` errors, `content_overlap`, pinpointing the exact overlapping
+text) — but `render_segment.py` never called it, only the cheap static `lint`. Full reasoning,
+the two review findings, and the layout-algorithm fix's own iteration history: D124.
+
+**What shipped:**
+- `interfaces/render_backend.py::RenderBackend.validate_geometry` — a second, equally-fatal gate,
+  same string contract as `lint`, implemented in `adapters/local/render_backend.py` (wraps
+  `hyperframes_check.check`, folds `layout` + `runtime` finding categories, shares the class's own
+  concurrency semaphore) and stubbed in `adapters/azure/render_backend.py` (T35). Wired into
+  `rendering/render_segment.py` right after `lint`, before tier dispatch.
+- `--at-transitions`/`--frame-check`/`--contrast` all measured off by default for this call (~15s
+  vs. ~56s per real segment for the same result on the one composition measured) — a decision, not
+  a guess.
+- Two bugs fixed as the gate's own opening proof (already root-caused from T18G's prior render):
+  `_block_graph_diagram.html::computeLayeredLayout`'s same-rank node crowding in a compact canvas;
+  CURSOR annotations on `GRAPH_DIAGRAM` nodes now target the marker's own id, not the whole node
+  div, via `rendering/annotations.py::_ANNOTATION_TARGET_SUFFIX_OVERRIDE`.
+- `project-reviewer` found two real gaps in the gate itself before the first checkpoint attempt,
+  both fixed: `validate_geometry` was reading only `layout` findings (a browser-check crash reports
+  under `runtime` instead, and would have silently passed as "no findings"); `validate_geometry`
+  was not sharing the adapter's own concurrency semaphore.
+- **Four more real bugs, found by the gate's own closing render, not by the plan** — every one of
+  them a genuine pre-existing or newly-introduced geometry defect the gate was specifically built
+  to catch, each independently reproduced and fixed: `CODE_PANEL`/`CODE_DIFF`'s trailing caption
+  now drops rather than overflows the caption band (`_annotations.html::hfDropIfPastCaptionBand`);
+  an unsafe LLM-authored `GRAPH_DIAGRAM` position now discards the whole authored set for that
+  diagram in favor of the algorithm's own (already-proven-safe) fallback, not a per-node clamp (a
+  clamp was tried first and confirmed live to trade one collision for a different one);
+  `Y_MIN_FRAC` widened further (0.08) plus a node-vs-node caption collision check
+  (`hfRectsOverlap`) for the adjacent-rank case the widening alone didn't fully close; `TEXT_PANEL`
+  shrinks its own item `gap` by the real measured overflow when its list would reach the band.
+  Full account, including the exact iteration order and what didn't work the first time: D124.
+
+**Explicitly not this task:** T18F's vision critique/revision loop (semantic judgment — "is this
+the right symbol for this narration moment" — a different, harder problem pixels alone can't
+answer); contrast-check enforcement in the render path (stays test-sweep-only, a separate
+concern); any content-authoring feature beyond the bug fixes above.
+
+**Honest limits, stated plainly:** this closes a real, growing slice of the *geometric* correctness
+gap (overlap, positioning, caption-band collision) for every future render, automatically — the
+actual mechanism behind "a solid fix I'm sure will work." It does not validate semantic or temporal
+correctness (right symbol, right narrative moment) — that is `hyperframes check` never seeing
+narration intent, a different problem. It also does not close every geometric case: the closing
+render surfaced a fifth, different-in-kind bug (`SceneLayout.SINGLE` composing multiple large
+blocks stacked with no combined-height constraint, 42 `canvas_overflow` findings) that the user
+explicitly asked to defer rather than have this session chase a fifth live fix-and-reproduce cycle
+in one night — carried into T18I below, along with an annotation-placement gap (parallel-to-a-line
+positioning) the user named directly. **No closing real render completed this session — the
+showcase video was not produced.**
+
+**Depends:** T18G — met.
+
+### T18I — Close the remaining geometry gaps T18H's gate found but did not fix, land a genuine
+full 7-minute render · `todo`
+**Scoped by the user directly at T18H's own checkpoint**, after watching four consecutive
+find-fix-reproduce cycles in one session (D124) and asking to stop chasing a fifth live rather than
+keep going. This task picks up exactly where T18H's own gate left off — not new bug-hunting, but
+finishing what the gate already found:
+
+- **`SceneLayout.SINGLE` stacking multiple large blocks with no combined-height constraint.**
+  Confirmed live: a full `GRAPH_DIAGRAM` (headline + 620px canvas) stacked above a `TEXT_PANEL` in
+  one SINGLE-layout scene produced 42 `canvas_overflow` findings — a capacity problem (too much
+  content for the available height), not a positioning one, so none of T18H's four fixes touch it.
+  Needs its own real design: whether `_layout_single.html` should reserve/measure a shared height
+  budget across however many blocks a scene stacks (an F7-style shrink, generalized across blocks
+  rather than within one), whether `plan_visuals`/`author_scene` should be constrained from
+  stacking two large blocks together at all, or both.
+- **The user's own explicit requirement, verbatim:** annotation placement "must appear parallel to
+  a line if that's required, not above or below or on top of it," when the target it marks is
+  itself a line/edge (a `GRAPH_DIAGRAM` edge, a `SEQUENCE_DIAGRAM` message arrow) rather than a
+  point. `_annotations.html::hfAnnotationPlace`'s candidate set today is `tip`/`center`/`above`/
+  `below` only — no parallel-to-a-line option exists, so an annotation on a line-shaped target is
+  currently placed the same way as one on a point-shaped target regardless of whether that reads
+  correctly. Needs a new candidate geometry (offset perpendicular to the line's own angle, not a
+  fixed above/below), and a way for a caller to signal "my target is a line" vs. "my target is a
+  point."
+- **Re-verify (not re-litigate) that annotations appear at the correct time, not "randomly"** — the
+  user's own words at T18H's own checkpoint conversation. `resolve_annotations`
+  (`rendering/annotations.py`) already resolves every annotation's `entrance_start` from a real
+  `anchor_phrase` match against measured word timing (D121/D122, T18E), so "random timing" may be a
+  symptom of the placement bug above (a badly-placed annotation reads as "wrong," which can look
+  like "random," even when its timing is correct) rather than a separate timing defect — confirm
+  which it actually is before assuming new timing work is needed.
+- **A genuine full ~7-minute `RUNTIME_ENV=azure` render, completed, as this task's own closing
+  proof** — the same bar D104 originally set, approximated but not landed exactly by T18F's/T18G's
+  own renders, and not landed at all by T18H (no closing render completed this session). Should
+  land only after the two fixes above, on a topic chosen to exercise both (a graph-diagram-heavy
+  segment reachable via an edge-parallel annotation, plus at least one multi-block SINGLE scene).
+
+**Depends:** T18H — met.
 
 ### T19 — API skeleton · `todo`
 Job submission and the runner that drives the graph, reusing the pydantic models from T4 as request

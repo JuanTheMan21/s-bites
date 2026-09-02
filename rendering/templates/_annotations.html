@@ -50,6 +50,29 @@
     };
   }
 
+  // T18H: a block's own trailing caption paragraph (CODE_PANEL, CODE_DIFF) has no per-item height
+  // to shrink the way SEQUENCE_DIAGRAM/ARRAY_GRID's own rows do (F7) -- a single paragraph's total
+  // height depends on how many code lines precede it AND how long its own text happens to wrap,
+  // neither derivable from a fixed Jinja constant the way a repeated row's height is. Confirmed
+  // live: a real render's own caption (a long sentence, after a 10-line code panel) landed exactly
+  // at the caption band's own top edge (0.8574, `_captions.html`'s own documented fraction).
+  // Dropping an element that would land there -- never animating it in -- is the same "colliding
+  // is worse than missing" call T18E's annotation-dropping logic already makes
+  // (core/scene_schemas.py::ComposedAnnotation's own docstring), applied to a plain block element
+  // via this file's existing scale-normalization technique rather than a new one.
+  var HF_CAPTION_BAND_TOP_FRAC = 0.8574;
+  function hfDropIfPastCaptionBand(elId) {
+    var el = document.getElementById(elId);
+    var root = document.getElementById("root");
+    if (!el || !root) return;
+    var rootRect = root.getBoundingClientRect();
+    var scale = rootRect.width / 1920;
+    var bottomFrac = (el.getBoundingClientRect().bottom - rootRect.top) / scale / 1080;
+    if (bottomFrac > HF_CAPTION_BAND_TOP_FRAC) {
+      el.style.display = "none";
+    }
+  }
+
   // T18G: a shared, per-container registry of already-placed boxes (container-local units, the
   // same space hfAnnotationOffset returns) -- hfAnnotationPlace checks a candidate against it
   // before accepting, and hfRegisterPlacedRect lets a non-annotation element (an edge label) join

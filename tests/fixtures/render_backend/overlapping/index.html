@@ -1,0 +1,50 @@
+<!doctype html>
+<!--
+  Known-geometry-bad fixture for adapters/local/render_backend.py::validate_geometry's tests --
+  two real text blocks positioned to overlap for the ENTIRE 3s duration, deliberately, with no
+  data-layout-allow-overlap. lint() has nothing to flag here (the schema/markup is fine); only a
+  real render plus hyperframes check's own layout audit can see two rendered boxes actually
+  intersecting -- this fixture exists to prove validate_geometry catches what lint structurally
+  cannot.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="./gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        margin: 0; width: 1920px; height: 1080px;
+        overflow: hidden; background: #0b1020;
+      }
+      body { font-family: "Segoe UI", Inter, sans-serif; color: #e8ecf8; }
+      .block { position: absolute; top: 400px; left: 400px; width: 600px; font-size: 44px; line-height: 1.5; }
+      #a { color: #4f8cff; }
+      #b { color: #ff6b6b; }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="3"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="scene" class="clip" data-start="0" data-duration="3" data-track-index="0">
+        <div class="block" id="a">First overlapping block of real text</div>
+        <div class="block" id="b">Second overlapping block of real text</div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo("#a", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 0);
+      tl.fromTo("#b", { opacity: 0 }, { opacity: 1, duration: 0.5 }, 0.1);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

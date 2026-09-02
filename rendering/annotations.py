@@ -14,6 +14,11 @@ T18E: every annotation now names a real, already-numbered item (``core/graph/nod
 annotation_author.py`` authors them only after block content exists, D121/D122) -- so this module
 no longer has a "whole block" fallback and drops an annotation outright rather than guessing at
 one, on every axis that can go wrong.
+
+T18H: the target id a block/annotation-type pair resolves to can now vary by ``annotation_type``,
+not just ``block_type`` -- see ``_ANNOTATION_TARGET_SUFFIX_OVERRIDE``'s own docstring for why
+(CURSOR's precise-point design needs a more specific target than CHECK/WARNING's whole-item one,
+on GRAPH_DIAGRAM nodes specifically).
 """
 
 from dataclasses import dataclass
@@ -44,6 +49,19 @@ _ANNOTATION_TARGET_SUFFIX: dict[str, str] = {
     "icon_panel": "chip",
 }
 
+# T18H: only where one specific (block_type, annotation_type) pair needs a MORE PRECISE target
+# than the block's own default suffix above -- every other pair falls through to it unchanged.
+# CURSOR's glyph tip lands on its target's own bounding-box CENTRE (hfAnnotationPlace's "tip"
+# candidate, _annotations.html), which is fine for a single compact element but wrong for
+# GRAPH_DIAGRAM's node div: a marker+label+(caption) stack whose bounding-box centre can fall in
+# label or caption text rather than the marker circle CURSOR is meant to point at -- confirmed in
+# a real render. The marker carries its own id (`_block_graph_diagram.html`) precisely so this can
+# target it directly; CHECK/WARNING keep targeting the whole node, since their captions are
+# designed to sit beside it, not on a single point.
+_ANNOTATION_TARGET_SUFFIX_OVERRIDE: dict[tuple[str, str], str] = {
+    ("graph_diagram", "cursor"): "node-marker",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class RenderableAnnotation:
@@ -62,12 +80,17 @@ class RenderableAnnotation:
     headline_id: str
 
 
-def _annotation_target_id(prefix: str, block_type: str, item_index: int) -> str:
+def _annotation_target_id(
+    prefix: str, block_type: str, annotation_type: str, item_index: int
+) -> str:
     # KeyError here is a real bug (the two maps this module and core.block_items keep in sync
     # have drifted), not a case to swallow -- resolve_annotations only reaches this once
     # item_count has already confirmed item_index is real, which is only possible when
     # block_type has a field in core.block_items, and therefore a suffix here too.
-    return f"{prefix}-{_ANNOTATION_TARGET_SUFFIX[block_type]}-{item_index}"
+    suffix = _ANNOTATION_TARGET_SUFFIX_OVERRIDE.get(
+        (block_type, annotation_type), _ANNOTATION_TARGET_SUFFIX[block_type]
+    )
+    return f"{prefix}-{suffix}-{item_index}"
 
 
 def resolve_annotations(
@@ -103,7 +126,10 @@ def resolve_annotations(
                 caption=annotation.caption,
                 entrance_start=anchor_ms / 1000,
                 target_id=_annotation_target_id(
-                    target.prefix, target.block_type, annotation.target_item_index
+                    target.prefix,
+                    target.block_type,
+                    annotation.annotation_type.value,
+                    annotation.target_item_index,
                 ),
                 container_id=container_id,
                 headline_id=f"{target.prefix}-headline",

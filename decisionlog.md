@@ -2633,3 +2633,187 @@ tiers, dense SEQUENCE_DIAGRAM/ARRAY_GRID at the guidance's own stated maximums, 
 collision reproduction), plus the one full real render described above.
 
 **Depends:** T18E -- met.
+
+## 2026-09-02 · T18H — Geometric correctness as a hard, automatic gate on every real render
+
+### D124 -- `validate_geometry`, a second fatal gate wired into `render_segment` right after `lint`,
+built and shipped in response to the user's own direct complaint after watching `t18g-showcase-git`:
+"three sessions worth of trying to fix it, and this is what I get, I need a solid fix that I am
+sure will work... a validator agent?"
+
+**Rejected:** an AI critique/revision loop (T18F's own scope) judging composed stills for
+correctness. Pure geometric overlap is directly measurable (bounding-box intersection); asking a
+vision model to eyeball it is strictly worse than computing it, which `hyperframes check` already
+does. Also rejected: "watch more real renders" as the verification strategy itself, which is the
+exact pattern (T18D catalog, T18E fix pass, T18G fix pass, all found by one human sampling one or
+two renders) that produced this complaint in the first place -- a fix that is still "watch harder"
+is not the fix the user asked for.
+
+**What shipped:** `interfaces/render_backend.py::RenderBackend` gained `validate_geometry
+(composition: Path) -> list[str]`, same `"[severity] code: message"` string contract `lint()`
+already returns. `adapters/local/render_backend.py` implements it by calling the CLI's own `check`
+subcommand (already in this project's toolchain since T18A as a manual/test-only diagnostic,
+`hyperframes_check.py`, never previously wired into the actual render path) and folding both its
+`layout` and `runtime` finding categories into the returned list. `adapters/azure/render_backend.py`
+(T35's stub) gets a matching signature-only `NotImplementedError`. `rendering/render_segment.py`
+calls it right after `lint` passes, before tier dispatch, raising the same `CompositionInvalid`
+lint already raises through -- no new failure mechanism, D2's "catch it at write time" stance applied
+a second time.
+
+**Sample-count/flag tuning was measured, not guessed** (D16/D99's own lesson about unmeasured
+constants that later turn out wrong): `--at-transitions` was timed against `t18g-showcase-git`'s own
+segment 2 (1025 lines, the real composition that showed the original bug) at ~56s per check call vs.
+~15s with it off, for the *same* `errorCount` on that composition -- a sustained crowding bug, not a
+brief transition-seam artifact, and every real-render bug this project has found so far has been
+sustained across many samples, not one. `validate_geometry` therefore runs with `at_transitions=
+False, frame_check=False, contrast=False` (contrast stays a separate, already-covered-elsewhere
+concern per the existing `test_render_segment_live.py` sweep). Reopen this if a future bug turns out
+to be a genuine one-frame transition artifact that plain midpoint sampling misses.
+
+**Two real bugs fixed as part of proving the gate works**, both already root-caused in T18G's own
+handoff "Known gaps" and confirmed via direct reproduction before and after each fix:
+1. `_block_graph_diagram.html::computeLayeredLayout`'s same-rank crowding in a compact canvas.
+   Final shape: the compact canvas's cross axis (Y, real CSS-known 220px) gets its own wider bounds
+   (`CROSS_Y_MIN_FRAC`/`CROSS_Y_MAX_FRAC`, 0.08-0.90) than the shared rank-axis-Y bounds (0.14-0.62,
+   which stay reserved for the non-compact/SINGLE caption-band margin they were built for) --
+   buying real spacing before ever resorting to the fallback below. A rank that still overflows
+   after that widening gets its excess promoted into staggered groups along the RANK axis, offset by
+   a real-px-derived fraction (`RANK_NODE_PX / RANK_AXIS_PX`) capped at `rankStep * 0.6` so an
+   overflow group can't intrude into the position legitimately reserved for the *next* rank's own
+   node. That cap exists because the first version of this fix did not have it, and was caught live:
+   an uncapped offset sized only to clear a same-rank sibling pushed a diamond topology's rank-1
+   node into a real collision with rank-2's own "Merge" node instead of fixing anything -- a
+   different overlap, not fewer of them. (A second, unrelated bug in the same edit -- a bare
+   `compact` referenced inside `computeLayeredLayout`, which only has `rankAxisIsX` in scope, threw
+   `ReferenceError: compact is not defined` at runtime, itself caught by `validate_geometry` surfacing
+   it as a `page_error`/`sweep_static` finding before this task's own live tests ever got to check
+   the layout logic proper -- the gate proving itself against its own author's mistake, immediately.)
+2. CURSOR's `"tip"` position on a `GRAPH_DIAGRAM` node used to target the whole node div
+   (marker+label+caption stack); a captioned node's div bounding-box centre can land in label/caption
+   text rather than the marker circle. Fixed: each marker now carries its own id
+   (`{prefix}-node-marker-{index}`), and `rendering/annotations.py` gained
+   `_ANNOTATION_TARGET_SUFFIX_OVERRIDE`, keyed by `(block_type, annotation_type)` rather than just
+   `block_type`, so CURSOR on `graph_diagram` resolves to the marker specifically while CHECK/WARNING
+   (whose captions are designed to sit beside the whole node, not on one point) resolve unchanged.
+
+**Two real findings from `project-reviewer`'s own pass, both fixed before checkpoint:**
+1. `validate_geometry` read only `payload["layout"]["findings"]` -- if the CLI's own browser check
+   never completes (a page crash, a JS exception mid-composition, a navigation timeout), it does not
+   raise or change the JSON's shape; it records the failure under `runtime` and still returns
+   `layout: {findings: [], ...}`, indistinguishable from a composition with no geometry problems at
+   all. Exactly the "tool didn't run" vs. "tool found nothing" conflation `hyperframes_cli.py::lint`
+   already guards against one function away, not carried over to this new sibling. Fixed by folding
+   `runtime` findings into the returned list alongside `layout`'s.
+2. `validate_geometry` did not share `PlaywrightHyperFramesRenderBackend`'s own concurrency
+   semaphore, unlike `capture`/`render` -- the class's own docstring says the semaphore exists
+   precisely so `hyperframes` subprocess work and browser-page work don't starve each other under
+   load, and `validate_geometry` (unlike the pre-existing, still-unguarded diagnostic `check()`
+   method, which is deliberately only ever called by hand/from tests) now runs once per segment on
+   every real job, fanned out with no graph-level concurrency cap of its own
+   (`core/graph/pipeline.py`'s `Send`-per-segment relies entirely on the adapter's semaphore).
+   Fixed by wrapping the `hyperframes_check.check()` call in `async with self._semaphore:`.
+
+**The closing render is where the gate proved itself for real -- and where this task's own scope
+had to stop.** A real `RUNTIME_ENV=azure` render ("how binary search works," chosen deliberately
+code/list-heavy per the user's own request, not another graph-heavy topic), doubling as the
+showcase video the user asked for in the same message, hit the gate on its very first attempt --
+and kept hitting it on every subsequent attempt, each time on a genuinely different bug, not the
+same one recurring:
+
+1. **`CODE_PANEL`/`CODE_DIFF`'s own trailing caption has no per-item height to shrink** the way
+   `SEQUENCE_DIAGRAM`/`ARRAY_GRID` do (F7) -- a single paragraph's height depends on word-wrap, not
+   a controllable row count. A real 10-line code panel plus a long caption pushed the caption's own
+   bottom edge exactly onto the caption band's top (0.8574, `_captions.html`'s own documented
+   fraction), colliding with a subtitle word. **Fixed:** `_annotations.html` gained
+   `hfDropIfPastCaptionBand(elId)` (real DOM measurement, same scale-normalization technique this
+   file already established), used by both templates to drop the caption -- never animate it in --
+   rather than leave it colliding, the same "colliding is worse than missing" call T18E's own
+   annotation-dropping logic already makes.
+2. **An LLM-authored `GRAPH_DIAGRAM` position bypassed every safety margin the fallback algorithm
+   respects.** `payload.positions` authored `y=0.92` for one node, well past `Y_MAX_FRAC=0.62`,
+   landing its label in the caption band. **Fixed, after a first attempt that made it worse:**
+   clamping just that one node's `(x,y)` into bounds was tried first, and confirmed live to trade
+   the caption-band collision for a *different* one (the clamped node now sat close enough to a
+   different, already-safe authored node to occlude it) -- an authored set can be internally
+   inconsistent with a per-node clamp in a way the layered algorithm, which reasons about every
+   node together, is not. The actual fix: if ANY node's authored position falls outside the safe
+   bounds, the WHOLE authored set for that diagram is discarded in favor of the fallback for every
+   node -- already verified collision-free across every topology this project's live tests cover. A
+   fully-authored-and-safe set still renders exactly as authored, unchanged.
+3. **Even the fallback algorithm, after 1 and 2, could still produce an adjacent-rank collision** --
+   a deepest-rank node's marker covering a shallower rank's own trailing caption, in a real 3-rank,
+   fully-captioned diagram. `rankStep` (purely a function of rank count) can be tighter than a
+   captioned non-compact node's real footprint. **Partially fixed** two ways: `Y_MIN_FRAC` lowered
+   0.14 -> 0.08 (reclaiming real but previously-unused headroom between the headline and the first
+   rank -- `Y_MAX_FRAC` stays at 0.62, the caption-band margin the deepest rank still needs, so this
+   never reopens finding 2's own bug); and, since the widening alone was not always enough, each
+   node's own optional caption is now checked against every OTHER node's essential content
+   (marker+label, via `hfRectsOverlap`, already built for edge-label collision in T18G) and hidden
+   if it would collide -- the same drop-rather-than-collide call as finding 1, applied to graph node
+   captions specifically.
+4. **`TEXT_PANEL`'s own item list reached the caption band too** -- a different problem from 1-3,
+   because every item here is essential narrated content, never droppable the way an optional
+   caption is. **Fixed:** the real measured overflow (not a Jinja guess -- text wrap makes a formula
+   unreliable here too, same reasoning as 1) is subtracted from the `gap` between items, spread
+   across the item count, floored at 8px so items can never collapse into each other.
+
+Each of the four was independently reproduced (a minimal scene matching the exact real content that
+broke, not just re-running the full job) both offline and against a real `hyperframes check`, before
+and after its fix, and pinned with a new live regression test:
+`tests/test_code_caption_band_live.py`, `tests/test_graph_diagram_authored_positions_live.py`
+(finding 2), plus new assertions folded into the existing graph-diagram live suite for findings 3-4
+via the same fixtures. The full `test_render_segment_live.py` sweep (every block type at every
+tier), `test_graph_diagram_layout_live.py`, `test_graph_diagram_edges.py`, and
+`test_render_backend_parity.py` all pass clean after every fix, run together, not just individually.
+
+**A fifth finding, genuinely different in kind, deliberately NOT fixed this task -- the user's own
+explicit call, made after watching this same repeated find-fix-reproduce cycle run four times in one
+night and asking to stop rather than continue chasing a fifth:** `SceneLayout.SINGLE` can compose
+MULTIPLE large blocks stacked vertically, not just one -- confirmed live, a full `GRAPH_DIAGRAM`
+(headline + 620px canvas) stacked above a `TEXT_PANEL` in one SINGLE-layout scene produced 42
+`canvas_overflow` findings, a different failure category from every overlap/occlusion finding above.
+None of findings 1-4's fixes touch this; it is a capacity problem (too much content for the
+available height), not a positioning one. **Explicitly deferred to the next task**, along with two
+items the user named directly: the still-open CURSOR-adjacent annotation issue (an annotation must
+be able to sit parallel to the line/edge it marks when that is the natural placement, not only
+above/below/on-point -- `hfAnnotationPlace`'s candidate set today is `tip`/`center`/`above`/`below`
+only, no parallel-to-a-line option) and a genuine full 7-minute render as that task's own closing
+proof, the same bar D104 originally set and T18F/T18G's own renders have approximated but not
+landed exactly. The next task must fix all of this, not just the multi-block-stacking case alone.
+
+**Verification, full account:** offline `pytest -q -m "not local_live"` -- all passing, one
+pre-existing unrelated skip, `ruff check .` clean, `ruff format --check .` clean except the same
+pre-existing `.claude/skills/python-pro/SKILL.md` drift carried forward since T18E. Both boundary
+greps empty (one pre-existing docstring-text hit in `node_timing.py`, not a real import). No `.py`
+file over 200 lines. `project-reviewer` ran twice against the full working diff. First pass, after
+the gate's own initial build: two real issues, both fixed (folded into the account above -- the
+`runtime`-findings fold-in and the missing semaphore share). Second pass, after all four
+real-render fixes above landed: two more real issues, both fixed --
+1. **A stale duplicate constant.** The authored-position safety check's own `__posYMin`/`__posYMax`
+   (a second copy of `Y_MIN_FRAC`/`Y_MAX_FRAC`, necessarily duplicated -- they live in a different
+   JS closure than `computeLayeredLayout`'s own copies) was never updated when `Y_MIN_FRAC` itself
+   was lowered from 0.14 to 0.08 earlier in the same edit. Concrete effect: a fully-authored, fully
+   safe position set containing a node at `y=0.10` (a value the fallback algorithm itself can now
+   legitimately produce) would have been wrongly flagged unsafe and the WHOLE authored set silently
+   discarded -- not a visual collision (the fallback is safe), but quiet, needless loss of authored
+   curation, contradicting this task's own stated "a fully-authored-and-safe set renders exactly as
+   authored, unchanged." Fixed by updating the stale `0.14` to `0.08`; re-verified live (a node
+   authored at `y=0.10` now renders at exactly that position, not the fallback's).
+2. **A duplicated magic constant across files**, flagged as a maintainability risk rather than a
+   bug: `_block_text_panel.html`'s own caption-band fraction was a third independent copy of the
+   same `0.8574` value `_annotations.html` had just introduced as `HF_CAPTION_BAND_TOP_FRAC`.
+   Fixed by referencing the shared constant directly (both files are inlined into the same
+   top-level `<script>` scope by either layout template, `annotation_offset_script()` always
+   emitted before any block's own `script()` runs) rather than redeclaring it a third time.
+
+Real-toolchain: the full `test_render_segment_live.py` sweep (every block type at every
+tier, `validate_geometry` now live in the path for all of them, zero false positives);
+`test_graph_diagram_layout_live.py`'s diamond/cycle suite (both layouts) plus a new `_FAN_OUT`
+regression fixture reproducing the exact 3-same-rank captioned-node shape of the original confirmed
+bug; `test_render_backend_parity.py`'s new `OVERLAPPING_COMPOSITION` fixture (two real, animated,
+schema-valid text blocks positioned to overlap for their whole duration -- proves `validate_geometry`
+catches what `lint` structurally cannot, the whole point of this task); the two new live files above
+for findings 1 and 2. No closing real render reached completion this session -- the showcase video
+is not delivered; see finding 5 and the next task.
+
+**Depends:** T18G -- met.

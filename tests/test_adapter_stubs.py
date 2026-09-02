@@ -58,3 +58,5 @@ async def test_container_apps_render_backend_raises_not_implemented_naming_itsel
         await backend.render(composition, Path(tmp_path) / "out.mp4", fps=24, duration_ms=1000)
     with pytest.raises(NotImplementedError, match="T35"):
         await backend.lint(composition)
+    with pytest.raises(NotImplementedError, match="T35"):
+        await backend.validate_geometry(composition)

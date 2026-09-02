@@ -40,7 +40,7 @@ CONTRACTS = {
     Storage: {"put_bytes", "put_file", "get_bytes", "get_file", "exists", "url"},
     SkillRegistry: {"load", "versions", "list_packs"},
     JobQueue: {"enqueue", "dequeue", "complete", "fail"},
-    RenderBackend: {"capture", "render", "lint"},
+    RenderBackend: {"capture", "render", "lint", "validate_geometry"},
 }
 
 # Everything a *backend* can do to us. Membership says only that the failure came from

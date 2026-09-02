@@ -75,6 +75,62 @@ def test_an_annotation_targets_its_real_element_id_and_the_right_container(tmp_p
     assert "right here" in html
 
 
+def test_a_cursor_annotation_on_a_graph_diagram_node_targets_its_marker_not_the_whole_node(
+    tmp_path: Path,
+) -> None:
+    """T18H: CURSOR's glyph tip lands on its target's own bounding-box centre
+    (``hfAnnotationPlace``'s "tip" candidate) -- for a GRAPH_DIAGRAM node (a marker+label+caption
+    stack), that used to be the whole node div, landing in label/caption text for a captioned
+    node (confirmed in a real render). CURSOR now targets the marker's own id specifically; CHECK
+    on the same node still targets the whole node, since its caption is designed to sit beside it,
+    not on a single point."""
+    graph_payload = EXAMPLES[BlockType.GRAPH_DIAGRAM]
+    word_marks = [
+        WordMark(text=word, offset_ms=i * 300, duration_ms=250)
+        for i, word in enumerate(
+            ["it", "gets", "concatenated", "straight", "into", "the", "query", "unsanitized"]
+        )
+    ]
+    scene = ComposedScene(
+        motif="terminal",
+        layout="single",
+        blocks=[
+            ComposedBlock(
+                block_type=BlockType.GRAPH_DIAGRAM,
+                role="role",
+                anchor_phrase=None,
+                payload=graph_payload,
+            )
+        ],
+        continues_previous=False,
+        annotations=[
+            ComposedAnnotation(
+                annotation_type="cursor",
+                target_block_index=0,
+                target_item_index=1,
+                anchor_phrase="concatenated straight into the query",
+                caption="right here",
+            ),
+            ComposedAnnotation(
+                annotation_type="check",
+                target_block_index=0,
+                target_item_index=1,
+                anchor_phrase="concatenated straight into the query",
+                caption="now vulnerable",
+            ),
+        ],
+    )
+    segment = a_segment(0, duration_ms=DURATION_MS).model_copy(
+        update={"scene": scene.model_dump(), "word_marks": word_marks}
+    )
+
+    dest = compose_scene(segment, tmp_path)
+    html = dest.read_text(encoding="utf-8")
+
+    assert '"b0-node-marker-1"' in html
+    assert '"b0-node-1"' in html
+
+
 def test_an_out_of_range_block_target_is_dropped_silently(tmp_path: Path) -> None:
     """Nothing in strict-mode structured output can be forced to stay in range -- the same
     defensive-default reasoning ``visual_plan.py::_fallback_scene`` applies to a segment plan's

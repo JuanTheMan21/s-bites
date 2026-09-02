@@ -42,8 +42,9 @@ class FakeRenderBackend(FailureInjector, RenderBackend):
     raises it.
     """
 
-    def __init__(self, findings: Sequence[str] = ()) -> None:
+    def __init__(self, findings: Sequence[str] = (), geometry_findings: Sequence[str] = ()) -> None:
         self.findings = list(findings)
+        self.geometry_findings = list(geometry_findings)
         self.captures: list[CaptureCall] = []
         self.renders: list[RenderCall] = []
 
@@ -71,3 +72,7 @@ class FakeRenderBackend(FailureInjector, RenderBackend):
     async def lint(self, composition: Path) -> list[str]:
         self._maybe_fail("lint")
         return list(self.findings)
+
+    async def validate_geometry(self, composition: Path) -> list[str]:
+        self._maybe_fail("validate_geometry")
+        return list(self.geometry_findings)

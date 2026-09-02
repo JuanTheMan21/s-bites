@@ -98,6 +98,34 @@
   tl.fromTo("#{{ prefix }}-underline", { scaleX: 0 }, { scaleX: 1, duration: 0.4, ease: "power2.out" }, {{ entrance_start + 0.45 }});
   {% endif %}
 
+  // T18H: a real render found this block's own item list -- gap:40px between an unbounded
+  // (LLM-authored) item count, each wrapping to however many lines its own text needs -- reaching
+  // the caption band, a subtitle word colliding with an item's own copy text. Unlike CODE_PANEL's
+  // optional trailing caption, every item here is essential narrated content, never dropped
+  // (T18E's own "wrong is worse than missing" reasoning cuts the other way for content the
+  // narration is actively pointing at) -- so this shrinks the decorative gap between items
+  // instead, by exactly the real measured overflow (real text wrap, not a Jinja guess, the same
+  // reason CODE_PANEL/CODE_DIFF's own caption check measures the live DOM rather than computing a
+  // formula), floored so it never collapses items into each other.
+  (function () {
+    var items = document.getElementById("{{ prefix }}-items");
+    var root = document.getElementById("root");
+    if (!items || !root) return;
+    var rootRect = root.getBoundingClientRect();
+    var scale = rootRect.width / 1920;
+    var bottomFrac = (items.getBoundingClientRect().bottom - rootRect.top) / scale / 1080;
+    // HF_CAPTION_BAND_TOP_FRAC: the shared constant _annotations.html::annotation_offset_script()
+    // declares (every layout imports it before any block's own script runs) -- referenced here
+    // rather than re-declared, so the caption-band geometry only ever needs updating in one place.
+    var n = {{ payload.items | length }};
+    if (bottomFrac > HF_CAPTION_BAND_TOP_FRAC && n > 1) {
+      var overflowPx = (bottomFrac - HF_CAPTION_BAND_TOP_FRAC) * 1080 * scale;
+      var currentGap = parseFloat(getComputedStyle(items).rowGap) || 0;
+      var GAP_FLOOR = 8;
+      items.style.gap = Math.max(GAP_FLOOR, currentGap - overflowPx / (n - 1) / scale) + "px";
+    }
+  })();
+
   // Each row lands on its own narration-anchored beat when one was found, or the old cascade
   // otherwise (rendering/compose.py already resolved both into item_starts).
   const {{ prefix }}_rowStarts = [{% for s in item_starts %}{{ s }}{{ "," if not loop.last }}{% endfor %}];
