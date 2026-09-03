@@ -1,10 +1,12 @@
 # Task Backlog
 
-37 tasks across 8 iterations (T36 added 2026-09-04, mid-Iteration-5, at explicit user request — see
-decisionlog.md D136). **One task per session** (though iterations have twice now been built as one
-combined session by explicit user choice — T19-T23 and T24-T28+T36, both recorded in
-decisionlog.md). Descriptions are deliberately high-level — detail is negotiated in plan mode at
-the start of each session, not pre-baked here.
+38 tasks across 8 iterations (T36 and T37 both added 2026-09-04, mid-Iteration-5 — T36 at explicit
+user request during the T24-T28 session, D136; T37 scoped as a follow-up once that session's real
+end-to-end use surfaced both a real backend bug and a visual-design rejection, D144). **One task
+per session** (though iterations have twice now been built as one combined session by explicit
+user choice — T19-T23 and T24-T28+T36, both recorded in decisionlog.md). Descriptions are
+deliberately high-level — detail is negotiated in plan mode at the start of each session, not
+pre-baked here.
 
 Status: `todo` · `in-progress` · `done` · `blocked`
 
@@ -745,6 +747,46 @@ calls — not a stubbed button. Full reasoning: decisionlog D136.
 real downloaded package and confirming `imsmanifest.xml` + `launch.html` + `video.mp4` (+
 `subtitles.srt` when present).
 **Depends:** T27 (needs a finished video) — met.
+
+### T37 — Frontend visual redesign · `todo` *(new task, added after T24-T28/T36's first real
+end-to-end use surfaced that the visual design doesn't match what the user actually wants)*
+The functional frontend (T24-T28, T36) works end to end against a real backend — verified via two
+real Azure renders — but the user rejected its current visual design after using it for real.
+Full context, in order of how much you need: `handoff.md` (read first, self-contained), then
+decisionlog.md D130-D144 (D144 specifically explains why this is its own gated task).
+
+**Requirements gathered directly from the user, verbatim intent preserved:**
+- **No forced dark theme.** The app must not switch to a dark palette off the system/browser's
+  `prefers-color-scheme` — light only, regardless of the visitor's OS setting.
+- **Restore and amplify real hover/motion — do not remove it.** An earlier reading of "no fun
+  elements" as a request to strip interactivity was **backwards** and the user corrected it
+  directly: they want *more* glow/lift/pop on interactive elements, not less. (The screen that
+  prompted the original complaint was a job stuck mid-render with almost nothing on it yet — not
+  representative of the app as a whole.)
+- **`skill-bites` branding** — already done (header wordmark, browser tab title); verify it stayed
+  that way, don't revert it.
+- **A wireframe first, before any real styling code changes** — this is the gate this task exists
+  to enforce. Use **both**: Claude's `design` skill for a clickable layout/IA mockup published as
+  an Artifact the user reacts to, **then** Impeccable's actual `craft`/`shape`/`critique` workflow
+  (already installed this repo — `.claude/skills/impeccable/`, `.impeccable/config.json`) to build
+  the real, approved visual system. The first attempt at this frontend (T24-T28) installed
+  Impeccable but never ran its real design workflow, and only ever read a prose summary of
+  https://nomu.store/ instead of actually looking at it — both contributed to the result reading
+  as generic. Do neither shortcut again: fetch nomu.store directly, and actually invoke
+  Impeccable's commands rather than reasoning about design tokens in isolation.
+- **Do not touch the structural work** T24-T28 + this session's Parts 1-3 already did: the one-page
+  Studio (`/` and `/jobs/:jobId` both render `StudioPage`, no navigation on submit), the live
+  progress SSE wiring, incremental segment persistence, submission error toasts. This task is the
+  visual layer on top of that, not a rebuild of it.
+- **Must not weaken CLAUDE.md's "frontend is structurally insulated from T18" invariant** (the
+  fifth invariant in "Invariants that break the product if violated") — the generic scene-tree
+  renderer and the `no-restricted-imports` seam are load-bearing; a visual redesign has no reason
+  to touch either, and must not.
+**DoD:** wireframe published and reviewed by the user, with explicit sign-off, before any
+component's real visual code changes; the approved direction then implemented for real; `pytest`,
+`web`'s `tsc -b --noEmit`/`eslint .`/`vitest run`/`npm run build` all still green; no regression in
+Parts 1-3's structural behaviour or the T18/frontend seam (CLAUDE.md invariant 5).
+**Depends:** T24-T28, T36 — met.
 
 ---
 

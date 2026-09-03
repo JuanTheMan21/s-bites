@@ -2840,3 +2840,117 @@ testing this session (D133, D134) caught two real integration bugs that unit/API
 missed entirely -- but it did not catch either of these two, which needed a reviewer reading the
 actual state-transition logic and the actual HTML-generation code, not just exercising the happy
 path. Both kinds of verification found real bugs the other did not.
+
+## 2026-09-04 · Post-T24-T28 fix pass (Parts 1-3) + T37 scoped
+
+Trying the shipped frontend for real (not fakes) immediately surfaced that the API could not
+complete a single job under `RUNTIME_ENV=azure` at all. This section is that fix pass, plus a
+live-UI review that concluded the visual design needs a real redo -- scoped as T37, gated behind
+a wireframe this time.
+
+### D139 -- `config_queue.py`'s `QUEUE_ENV` bridge, mirroring `config_render.py`'s `RENDER_ENV`
+bridge exactly, rather than extending `config.py` in place or building a new stub
+**Rejected:** inlining a `QUEUE_ENV` branch directly into `config.py::_job_queue`; building a real
+`ServiceBusJobQueue` now instead of bridging around it (T34's actual scope, not this session's).
+**Reasoning:** `POST /jobs` under `RUNTIME_ENV=azure` -- the project's real, primary config --
+500s immediately: `config.py` always resolved the job queue to `ServiceBusJobQueue`, a deliberate
+T34 stub whose every method raises `NotImplementedError`. `cli.py` never hit this because it
+drives the graph directly, never touching `JobQueue` at all -- the API never could. The exact fix
+already existed as a precedent: `config_render.py`'s `RENDER_ENV` bridge does the identical thing
+for `RenderBackend` (`ContainerAppsRenderBackend`, T35's identical stub). `config_queue.py`
+mirrors it structurally -- `queue_env(env)` defaults to `RUNTIME_ENV` when unset, `QUEUE_ENV=local`
+pairs the real `LocalJobQueue` with real Azure LLM/TTS/Storage. Kept out of `config.py` itself for
+the same reason `config_render.py` is its own file: `config.py` was already close to the 200-line
+ceiling, and this is a second stub-until-a-future-task bridge, not core resolution logic.
+Verified against two real Azure renders end to end, not just the new
+`test_queue_env_bridges_azure_to_the_real_local_job_queue` test.
+
+### D140 -- Submission failures surface as a toast (`submit-error.ts`), reusing the exact
+`useResumeJob(onConflict)` pattern rather than inventing a second error-handling shape
+**Rejected:** a generic error boundary; silently retrying.
+**Reasoning:** `PromptComposer.tsx` had zero error handling -- a failed `POST /jobs` (the D139 bug,
+before it was fixed, or any future failure) left a permanently-"queued" ghost job with no user
+feedback at all, since `job_store.save()` in `api/jobs.py::submit_job` runs before the failing
+`queue.enqueue()` call. `useSubmitJob` now takes an `onFailure` callback exactly like
+`useResumeJob` already does, and never re-throws -- every submit failure is retry-recoverable from
+the same form, so nothing should ever reach an error boundary. `describeSubmitError` gives the
+500/queue-stub case its own honest line rather than a generic "something went wrong."
+
+### D141 -- One page, two URLs: `/` and `/jobs/:jobId` both render `StudioPage`, so submitting a
+topic never navigates away from anything
+**Rejected:** keeping the composer and the live-progress view as separate routes and driving the
+"stay on this page" requirement with client-side state instead of the URL.
+**Reasoning:** explicit, direct user requirement: "the page where I actually write the prompt is
+where the loading thing needs to happen." A route param (not local state) stays the single source
+of truth -- `useParams` reflects the URL directly, so refresh and deep-linking are free rather
+than something to reimplement with `sessionStorage`. `LandingPage.tsx`/`JobDetailPage.tsx` were
+deleted; their bodies moved into `JobStage` (pure presentation, both entry points render it
+identically), `JobStageLoader` (the one place `useJobQuery` now lives), and `ComposerSection`
+(collapsible once a job exists, so it never competes with a live/finished result for page-top
+space but stays reachable without leaving the page). The URL still becomes `/jobs/:jobId` on
+submit (`navigate(..., {replace: true})`) -- `Copy Link`, refresh-mid-job, and the dashboard's
+whole reason for existing all depend on a real, shareable per-job URL; `replace` (not `push`) so
+Back exits the studio rather than un-submitting a still-running job. Verified live: submitting
+through the actual form changed the URL with zero navigation flash -- React reconciled by type and
+never remounted the composer, confirmed by screenshot (Copy Link, Collapse button, and the typed
+topic all still visible immediately after submit, live progress appearing directly beneath).
+
+### D142 -- The real story of the incremental-persistence fix: the first attempt looked correct
+and still didn't work, because segment progress lives in a state channel `job.segments` never
+reflects until the very end
+**Rejected (as the actual, first-attempt fix):** saving `snapshot.values["job"]` on every stage
+"end" event, unchanged.
+**Found by watching a real Azure render closely, not by reading code first**: the segment grid and
+tier badges never filled in during a live run -- they jumped straight from empty to fully
+populated the instant the job succeeded. `api/runner.py` originally called `job_store.save()`
+exactly twice per run (start, finish); adding more saves on every stage "end" *looked* like the
+fix and even produced far more save calls -- but every intermediate one still carried an empty
+`segments[]`. Root cause, confirmed by reading `core/graph/nodes/finalize.py` and
+`core/graph/state.py`: `state["job"].segments` (the pydantic list) is *only* ever populated by
+`finalize.py`, at the very end, via `ordered = [state["segments"][i] for i in
+sorted(state["segments"])]`. The graph's real, live progress lives in a *separate* state channel,
+`state["segments"]` (a `dict[int, Segment]` `core/graph/state.py::merge_segments` merges
+concurrent per-segment writes into) -- `state["job"]` never sees it until that one assembly step.
+The real fix (`api/runner.py::_assemble_preview`) replicates `finalize.py`'s own assembly at every
+intermediate save, combining `snapshot.values["job"]` with `snapshot.values["segments"]` the same
+way. Confirmed directly, not assumed: a recording-save script showed segments appearing at full
+length (unfilled) right after `plan_segments`, `duration_ms` filling in after `synthesize_segment`,
+`tier` after `assign_tiers` -- because `plan_segments` seeds every index up front in one shot
+(`core/graph/nodes/outline.py`: `{index: plan.to_segment(index) for index, plan in
+enumerate(outline.segments)}`), which is exactly the progressive-fill shape the frontend's segment
+grid and tier badges were built to show. Pinned by
+`tests/test_api_events.py::test_segment_data_appears_incrementally_not_only_after_the_job_finishes`,
+which intercepts `JobStore.save()` directly rather than racing a live SSE stream against a REST
+GET call -- confirmed empirically that race is genuinely non-deterministic against fakes (tried a
+0.5s artificial render delay first; the job still finished before the racing GET landed).
+
+### D143 -- `StageTicker`'s React key must be the event's position in the array, not
+`node-edge-timestamp`
+**Rejected:** the original `${event.node}-${event.edge}-${event.at}` key.
+**Found by checking the browser console for errors, not by reading the diff**: submitting a real
+job produced a wall of "two children with the same key" warnings the instant concurrent per-segment
+events fired. `T18B`'s own fan-out design means several segments' `synthesize_segment`/
+`author_scene`/`render_scene` start/end events regularly land in the same millisecond, so
+`event.at` (a `Date.now()` read) collides across them. Fixed by keying on the event's own position
+in the full `events` array -- globally unique per occurrence regardless of any data collision.
+
+### D144 -- The visual redesign (T37) is scoped as its own task, gated behind a wireframe, rather
+than continued in this same session
+**Rejected:** iterating on the existing visual system in place; skipping straight to a full
+Impeccable-driven rebuild without a wireframe checkpoint.
+**Reasoning:** live-testing the real app surfaced that the shipped visual design (D130's tokens,
+reasoned from first principles and a prose summary of nomu.store rather than an actual look at it,
+and never run through Impeccable's own `craft`/`shape` workflow despite installing the tool)
+doesn't match what the user wants. Explicit, corrected requirements, gathered directly: no forced
+dark theme regardless of system preference; hover/motion/"fun" elements should be *restored and
+amplified*, not removed (a direct correction of this session's own initial misreading of "no fun
+elements" as a request to strip interactivity -- the screen being judged was mid-render with
+almost nothing on it yet, not representative of the whole app); `skill-bites` branding (done,
+confirmed against the user's own Azure resource names, already literally `skill-bites`); a
+wireframe first, via **both** Claude's `design` skill (layout/IA sign-off) and Impeccable's actual
+workflow (the real visual system), informed by looking at nomu.store directly this time. Scoped as
+T37 rather than continued here because the user explicitly wants to try the working structural
+fixes first, in their own time, before any styling code changes -- and because a wireframe review
+is inherently a separate session boundary (the user reacts to a published artifact, not to more
+live-coding). Full context repeated in `handoff.md`, not only here, since a fresh session reads
+that first.

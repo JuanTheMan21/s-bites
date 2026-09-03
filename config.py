@@ -30,13 +30,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+import config_queue
 import config_render
-from adapters.azure.job_queue import ServiceBusJobQueue
 from adapters.azure.llm_provider import AzureOpenAILLMProvider
 from adapters.azure.skill_registry import BlobSkillRegistry
 from adapters.azure.storage import BlobStorage
 from adapters.azure.tts_provider import AzureSpeechTTS
-from adapters.local.job_queue import LocalJobQueue
 from adapters.local.skill_registry import DiskSkillRegistry
 from adapters.local.storage import DiskStorage
 from interfaces import JobQueue, LLMProvider, RenderBackend, SkillRegistry, Storage, TTSProvider
@@ -92,19 +91,10 @@ def _skill_registry(env: Mapping[str, str]) -> SkillRegistry:
     )
 
 
-def _job_queue(env: Mapping[str, str]) -> JobQueue:
-    if env.get("RUNTIME_ENV") == "local":
-        return LocalJobQueue()
-    # Stub until T34 (D25) -- an empty connection string is honest, since it is never dialed.
-    return ServiceBusJobQueue(
-        _env("AZURE_SERVICE_BUS_CONNECTION_STRING", env),
-        _env("AZURE_SERVICE_BUS_QUEUE", env, default="video-jobs"),
-    )
-
-
-# Render backend resolution lives in config_render.py (T18A) -- see that module's docstring for
-# why splitting it out still honors "config.py is the only module naming concrete adapter
-# classes" rather than quietly violating it.
+# Job queue resolution lives in config_queue.py (the QUEUE_ENV bridge) and render backend
+# resolution lives in config_render.py (T18A) -- see each module's own docstring for why splitting
+# them out still honors "config.py is the only module naming concrete adapter classes" rather than
+# quietly violating it.
 
 
 def _llm_provider(env: Mapping[str, str]) -> LLMProvider:
@@ -157,7 +147,7 @@ def build_adapters(env: Mapping[str, str] | None = None) -> Adapters:
         tts=_tts_provider(env),
         storage=_storage(env),
         skills=_skill_registry(env),
-        queue=_job_queue(env),
+        queue=config_queue.resolve(env),
         render=config_render.resolve(env),
     )
 

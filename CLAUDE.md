@@ -86,6 +86,29 @@ to route around the hook itself.
    duration before joining. Drift cannot accumulate.
 4. **Adapter parity.** Every interface's local and azure implementations must match in signature
    *and* semantics — return types, error behavior, units.
+5. **The frontend (`web/`) is structurally insulated from T18.** T18 is the open-ended, repeatedly
+   -revisited iteration on scene-authoring internals — layouts, block types, annotation overlays,
+   Jinja templates. None of it can force a `web/` change, by construction, not by discipline:
+   - `Segment.scene` is `dict[str, Any]` on the backend (`core/models.py`, D29's pattern) and is
+     rendered by a **generic, data-driven JSON tree** on the frontend
+     (`web/src/adapters/scene-adapter.ts` + `web/src/features/segments/SceneTree.tsx`) — never
+     per-block-type React components. A new block type, a restructured layout, or a field that
+     doesn't exist yet all render correctly with zero frontend changes; a decoupling test
+     (`scene-adapter.test.ts`) proves this against an entirely invented future scene shape.
+   - The frontend's own architectural seam (`web/src/{api,adapters,domain,features}/`) is
+     mechanically enforced by an ESLint rule (`web/eslint.config.js`'s `no-restricted-imports`),
+     not a convention — `features/`/`components/`/`routes/` cannot import the generated API client
+     directly, so a backend contract change surfaces as a `tsc` failure in exactly one file
+     (`adapters/job-adapter.ts`'s explicit-destructure mapping), never a silent break elsewhere.
+   - **What T18 *can* still affect, deliberately and narrowly:** `VisualIntent` labels
+     (`web/src/domain/intent-label.ts`) and tier copy (`web/src/domain/tier.ts`) are presentational
+     metadata the frontend owns, with a fallback for any value it doesn't recognize yet — a new
+     `VisualIntent` member renders as a title-cased label immediately, no frontend task required,
+     though a nicer label is a one-line optional follow-up.
+   - **A T18 session can treat this as a standing guarantee**: touching `rendering/`,
+     `core/block_types.py`, `core/scene_schemas.py`, or the block-authoring templates never
+     requires a corresponding `web/` change, and does not routinely need review from a
+     frontend-focused session. Full account: decisionlog.md D130-D131, D144.
 
 ## Build loop
 

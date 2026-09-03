@@ -23,6 +23,7 @@ from api.events import JobEventBus, summarize_node_event
 from api.job_store import JobStore
 from config import Adapters
 from core.graph import GraphContext, build_graph
+from core.graph.state import GraphState
 from core.models import JobStatus, VideoJob
 from interfaces import QueuedJob
 
@@ -33,6 +34,24 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
 
 WORKING_ROOT = Path("artifacts") / "_api_run"
+
+
+def _assemble_preview(values: GraphState) -> VideoJob:
+    """The same ``state["segments"]``-dict-to-list assembly ``core/graph/nodes/finalize.py
+    ::finalize`` does at the very end, applied mid-run: ``state["job"].segments`` is only ever
+    populated by ``finalize`` itself, so a snapshot taken before then always carries an empty
+    list there even though ``state["segments"]`` (the fan-out accumulator
+    ``core/graph/state.py::merge_segments`` merges concurrent writes into) already has real data.
+    ``plan_segments`` seeds every index up front, unfilled, so this is already the full-length
+    list by the very first "end" event -- later per-segment nodes fill individual entries in as
+    they converge on each index, rather than new cards appearing one at a time.
+    """
+    job = values["job"]
+    segments = values.get("segments") or {}
+    if not segments:
+        return job
+    ordered = [segments[i] for i in sorted(segments)]
+    return job.model_copy(update={"segments": ordered})
 
 
 class JobRunner:
@@ -119,6 +138,13 @@ class JobRunner:
                     stage = summarize_node_event(event)
                     if stage is not None:
                         await self._bus.publish(job.job_id, stage)
+                        # `job_store.save` otherwise only ever runs twice for a whole job -- once
+                        # here at the very start, once after the loop ends -- so a REST poll (or
+                        # the frontend's SSE-triggered refetch) saw an empty `segments[]` for the
+                        # entire run and only ever jumped straight to the finished state.
+                        if stage.get("stage") == "end":
+                            in_progress = await graph.aget_state(gconfig)
+                            await self._store.save(_assemble_preview(in_progress.values))
                 snapshot = await graph.aget_state(gconfig)
             finished: VideoJob = snapshot.values["job"]
             await self._store.save(finished)

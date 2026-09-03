@@ -17,7 +17,7 @@ export function useJobsQuery() {
   })
 }
 
-export function useSubmitJob() {
+export function useSubmitJob(onFailure: (error: unknown) => void) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: createJob,
@@ -28,6 +28,9 @@ export function useSubmitJob() {
         ...(existing ?? []),
       ])
     },
+    // Every submit failure is retry-recoverable from the same form -- unlike useResumeJob's 409
+    // case, nothing here should ever reach an error boundary, so this never re-throws.
+    onError: onFailure,
   })
 }
 

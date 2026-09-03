@@ -1,38 +1,41 @@
 import { AnimatePresence, m } from 'motion/react'
 import { useEffect, useState } from 'react'
 import { PHASE_LABEL, type PipelinePhase } from '@/domain/stage'
-import { PHASE_COPY } from './phase-copy'
+import { LONG_WAIT_COPY, PHASE_COPY } from './phase-copy'
 
 const ROTATE_MS = 3500
 const PIN_AFTER_MS = 90000
 
 /** The real stage label (`PHASE_LABEL`) is always rendered alongside the rotating line, never
- * replaced by it -- and past 90s in one phase the copy pins to a factual line, since playful
- * copy during a genuinely long wait reads as mockery rather than personality.
+ * replaced by it -- and past 90s in one phase the copy switches to `LONG_WAIT_COPY` (still
+ * rotating, just factual) rather than continuing to joke, since playful copy during a genuinely
+ * long wait reads as mockery rather than personality.
  *
  * The caller keys this component by `phase` (`LiveProgress.tsx`) so a phase change remounts it
  * fresh: every piece of state here -- including "when did this phase start" -- resets via a
  * lazy `useState` initializer, the one place React allows an impure `Date.now()` read, rather
  * than a reset-effect or a value computed during render. */
 export function PlayfulCaption({ phase }: { phase: PipelinePhase }) {
-  const lines = PHASE_COPY[phase]
   const [index, setIndex] = useState(0)
   const [pinned, setPinned] = useState(false)
   const [startedAt] = useState(() => Date.now())
 
+  const lines = pinned ? LONG_WAIT_COPY[phase] : PHASE_COPY[phase]
+
   useEffect(() => {
     const timer = setInterval(() => {
       const elapsed = Date.now() - startedAt
-      if (elapsed >= PIN_AFTER_MS) {
+      if (elapsed >= PIN_AFTER_MS && !pinned) {
         setPinned(true)
+        setIndex(0)
         return
       }
       setIndex((i) => (i + 1) % lines.length)
     }, ROTATE_MS)
     return () => clearInterval(timer)
-  }, [lines.length, startedAt])
+  }, [lines.length, startedAt, pinned])
 
-  const caption = pinned ? `Still ${PHASE_LABEL[phase].toLowerCase()}…` : lines[index]
+  const caption = lines[index]
 
   return (
     <div className="flex flex-col gap-0.5">

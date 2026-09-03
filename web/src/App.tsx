@@ -3,17 +3,16 @@ import { Button } from '@/components/Button'
 import { Toaster } from '@/components/Toaster'
 import { TooltipProvider } from '@/components/Tooltip'
 import { DashboardPage } from '@/routes/DashboardPage'
-import { JobDetailPage } from '@/routes/JobDetailPage'
-import { LandingPage } from '@/routes/LandingPage'
 import { LibraryPage } from '@/routes/LibraryPage'
 import { NotFoundPage } from '@/routes/NotFoundPage'
+import { StudioPage } from '@/routes/StudioPage'
 
 function AppShell() {
   return (
     <header className="border-b border-ink-300/20">
       <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
         <Link to="/" className="font-display text-lg text-ink-900">
-          s_bites
+          skill-bites
         </Link>
         <nav className="flex items-center gap-4">
           <Link to="/jobs" className="font-mono text-xs text-ink-500 hover:text-ink-900">
@@ -36,9 +35,9 @@ export default function App() {
     <TooltipProvider>
       <AppShell />
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<StudioPage />} />
         <Route path="/jobs" element={<DashboardPage />} />
-        <Route path="/jobs/:jobId" element={<JobDetailPage />} />
+        <Route path="/jobs/:jobId" element={<StudioPage />} />
         <Route path="/library" element={<LibraryPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

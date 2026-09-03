@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/Button'
 import { classNames } from '@/components/class-names'
+import { useToastStore } from '@/components/toast-store'
 import { useSubmitJob } from '@/features/jobs/use-jobs'
+import { describeSubmitError } from '@/features/jobs/submit-error'
 
 const DURATION_OPTIONS = [
   { label: '3 min', ms: 180_000 },
@@ -14,13 +16,16 @@ export function PromptComposer() {
   const [topic, setTopic] = useState('')
   const [durationMs, setDurationMs] = useState(DURATION_OPTIONS[1]!.ms)
   const navigate = useNavigate()
-  const submit = useSubmitJob()
+  const push = useToastStore((s) => s.push)
+  const submit = useSubmitJob((error) => push(describeSubmitError(error), 'bad'))
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!topic.trim() || submit.isPending) return
-    const job = await submit.mutateAsync({ topic: topic.trim(), targetDurationMs: durationMs })
-    navigate(`/jobs/${job.jobId}`)
+    submit.mutate(
+      { topic: topic.trim(), targetDurationMs: durationMs },
+      { onSuccess: (job) => navigate(`/jobs/${job.jobId}`, { replace: true }) },
+    )
   }
 
   return (

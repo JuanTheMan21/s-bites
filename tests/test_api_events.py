@@ -42,6 +42,55 @@ def test_stage_events_are_observed_for_a_running_job() -> None:
     assert any('"node"' in event for event in stage_events)
 
 
+@needs_ffmpeg
+def test_segment_data_appears_incrementally_not_only_after_the_job_finishes() -> None:
+    """Regression: api/runner.py used to call job_store.save() exactly twice per run -- once at
+    the very start (segments still empty), once after the whole graph finished -- and even after
+    a first attempt at fixing that added more save() calls, every one of them still carried an
+    empty segments[] until the very last: `state["job"].segments` (the pydantic list) is *only*
+    ever populated by finalize.py, at the end. The fan-out's real progress lives in a *separate*
+    state channel, `state["segments"]` (a dict merged by core/graph/state.py::merge_segments), so
+    a correct fix has to assemble the same way finalize.py itself does. Confirmed the actual save
+    sequence directly (offline, not part of the suite): segments appear at their full length,
+    unfilled, right after plan_segments; duration_ms fills in next (synthesize_segment); tier
+    lands after that (assign_tiers) -- a genuinely progressive fill, not one big jump.
+
+    Intercepts JobStore.save() directly rather than racing a live SSE stream against a REST GET
+    call -- against fakes, a whole 4-segment job finishes fast enough that the two race
+    unpredictably, which would make an assertion pass or fail on timing luck rather than on
+    whether the fix actually works. Recording every save() call's data is deterministic
+    regardless of timing.
+    """
+    adapters = fake_adapters()
+    app = create_app(adapters, frame_budget=FRAME_BUDGET, fps=FPS)
+
+    saved_segment_counts: list[int] = []
+    tiered_counts: list[int] = []
+    store = app.state.job_store
+    original_save = store.save
+
+    async def recording_save(job):
+        saved_segment_counts.append(len(job.segments))
+        tiered_counts.append(sum(1 for s in job.segments if s.tier is not None))
+        await original_save(job)
+
+    store.save = recording_save
+
+    with TestClient(app) as client:
+        job_id = client.post(
+            "/jobs", json={"topic": "x", "target_duration_ms": API_TEST_TARGET_DURATION_MS}
+        ).json()["job_id"]
+        finished = _wait_for_terminal(client, job_id)
+
+    assert finished["status"] == "succeeded"
+    # The old behaviour was exactly two saves (RUNNING at start, the finished snapshot), both with
+    # zero segments until the last -- more saves than that, with the full-length segment list
+    # already present and tiered before the very last save, is the fix.
+    assert len(saved_segment_counts) > 2
+    assert any(count == 4 for count in saved_segment_counts[:-1])
+    assert any(count == 4 for count in tiered_counts[:-1])
+
+
 def test_events_of_an_unknown_job_404s() -> None:
     app = create_app(fake_adapters(), frame_budget=FRAME_BUDGET, fps=FPS)
     with TestClient(app) as client:

@@ -1,11 +1,12 @@
-import { deriveCompletedPhases, type PipelinePhase } from '@/domain/stage'
 import type { JobView } from '@/domain/job'
 import { SegmentGrid } from '@/features/segments/SegmentGrid'
+import { ElapsedClock } from './ElapsedClock'
 import { FrameBudgetMeter } from './FrameBudgetMeter'
 import { PlayfulCaption } from './PlayfulCaption'
 import { ProductionStrip } from './ProductionStrip'
 import { StageLog } from './StageLog'
-import { useJobStream } from './use-job-stream'
+import { StageTicker } from './StageTicker'
+import { useProgressModel } from './use-progress-model'
 
 export function LiveProgress({
   job,
@@ -14,28 +15,34 @@ export function LiveProgress({
   job: JobView
   onOpenSegment: (index: number) => void
 }) {
-  const { events, connection } = useJobStream(job.jobId, job)
-
-  const lastTransition = [...events].reverse().find((e) => e.kind === 'transition')
-  const currentPhase: PipelinePhase =
-    lastTransition && lastTransition.kind === 'transition' ? lastTransition.phase : 'outline'
-
-  const completedPhases = deriveCompletedPhases(job.segments)
-  if (job.status === 'succeeded') completedPhases.add('finalize')
+  const { currentPhase, completedPhases, phaseProgress, activeSegmentIndex, connection, events } =
+    useProgressModel(job)
 
   return (
     <div className="flex flex-col gap-6">
-      <ProductionStrip currentPhase={currentPhase} completedPhases={completedPhases} />
+      <ProductionStrip
+        currentPhase={currentPhase}
+        completedPhases={completedPhases}
+        phaseProgress={phaseProgress}
+      />
       <div className="flex items-center justify-between gap-4">
         <PlayfulCaption key={currentPhase} phase={currentPhase} />
-        {connection === 'reconnecting' && (
-          <span className="rounded-full bg-signal-warn/12 px-2.5 py-1 font-mono text-[11px] text-signal-warn">
-            Reconnecting…
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {connection === 'reconnecting' && (
+            <span className="rounded-full bg-signal-warn/12 px-2.5 py-1 font-mono text-[11px] text-signal-warn">
+              Reconnecting…
+            </span>
+          )}
+          <ElapsedClock startedAt={job.createdAt} />
+        </div>
       </div>
+      <StageTicker events={events} />
       <FrameBudgetMeter segments={job.segments} />
-      <SegmentGrid segments={job.segments} onOpenSegment={onOpenSegment} />
+      <SegmentGrid
+        segments={job.segments}
+        activeSegmentIndex={activeSegmentIndex}
+        onOpenSegment={onOpenSegment}
+      />
       <StageLog events={events} />
     </div>
   )

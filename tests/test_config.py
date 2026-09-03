@@ -8,6 +8,7 @@ friends does not touch the network until a call is made.
 
 import pytest
 
+import config_queue
 import config_render
 from adapters.azure.job_queue import ServiceBusJobQueue
 from adapters.azure.llm_provider import AzureOpenAILLMProvider
@@ -21,7 +22,6 @@ from adapters.local.skill_registry import DiskSkillRegistry
 from adapters.local.storage import DiskStorage
 from config import (
     Adapters,
-    _job_queue,
     _skill_registry,
     _storage,
     build_adapters,
@@ -90,6 +90,21 @@ async def test_render_env_bridges_azure_llm_to_the_real_local_render_backend() -
     await close_adapters(adapters)
 
 
+async def test_queue_env_bridges_azure_to_the_real_local_job_queue() -> None:
+    """The same bridge as RENDER_ENV above, for the same reason: ServiceBusJobQueue is still
+    T34's stub (every method raises NotImplementedError), so RUNTIME_ENV=azure alone cannot
+    complete a job through the real API -- POST /jobs 500s the instant JobRunner tries to
+    enqueue it. QUEUE_ENV=local pairs real Azure LLM/TTS/Storage with the real LocalJobQueue,
+    which is what lets `uvicorn api.main:app` actually run a job the way cli.py already could."""
+    bridged = {**AZURE_ENV, "QUEUE_ENV": "local"}
+    adapters = build_adapters(bridged)
+
+    assert isinstance(adapters.llm, AzureOpenAILLMProvider)  # RUNTIME_ENV=azure, unaffected
+    assert isinstance(adapters.queue, LocalJobQueue)  # QUEUE_ENV=local
+
+    await close_adapters(adapters)
+
+
 def test_runtime_env_local_raises_naming_the_missing_pieces() -> None:
     """Loud, not silent -- the user's explicit choice over a new stub adapter or a silent gap."""
     with pytest.raises(RuntimeError) as exc_info:
@@ -105,7 +120,7 @@ def test_each_local_builder_returns_the_local_adapter() -> None:
     expose it under RUNTIME_ENV=local until a future task closes T10 (D58/D59)."""
     assert isinstance(_storage(LOCAL_ENV), DiskStorage)
     assert isinstance(_skill_registry(LOCAL_ENV), DiskSkillRegistry)
-    assert isinstance(_job_queue(LOCAL_ENV), LocalJobQueue)
+    assert isinstance(config_queue.resolve(LOCAL_ENV), LocalJobQueue)
     assert isinstance(config_render.resolve(LOCAL_ENV), PlaywrightHyperFramesRenderBackend)
 
 
