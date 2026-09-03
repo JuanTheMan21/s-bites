@@ -14,9 +14,13 @@ import sys
 from pathlib import Path
 
 
-def run(cmd: list[str], timeout: int = 90) -> subprocess.CompletedProcess | None:
+def run(
+    cmd: list[str], timeout: int = 90, cwd: str | None = None
+) -> subprocess.CompletedProcess | None:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        return subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=False, cwd=cwd
+        )
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -46,10 +50,18 @@ def lint_scene_template(path: Path) -> int:
 
 
 def format_frontend(path: Path) -> int:
-    if not Path("web/node_modules").exists():
+    web_dir = Path("web")
+    if not (web_dir / "node_modules").exists():
         return 0
-    run(["npx", "--no-install", "prettier", "--write", str(path)])
-    run(["npx", "--no-install", "eslint", "--fix", str(path)])
+    # npx resolves node_modules/.bin by walking cwd *upward*, never downward -- run from web_dir
+    # itself (not the hook's own repo-root cwd) with a web-relative path, or the two binaries
+    # below silently never resolve and this function does nothing at all.
+    try:
+        rel = path.resolve().relative_to(web_dir.resolve())
+    except ValueError:
+        rel = path
+    run(["npx", "--no-install", "prettier", "--write", str(rel)], cwd=str(web_dir))
+    run(["npx", "--no-install", "eslint", "--fix", str(rel)], cwd=str(web_dir))
     return 0
 
 

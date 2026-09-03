@@ -9,6 +9,7 @@ helper (there are exactly two edges in this repo, and a third does not exist yet
 import os
 
 from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.app import create_app
 from config import build_adapters
@@ -30,4 +31,22 @@ app = create_app(
     build_adapters(),
     frame_budget=_required_int("FRAME_BUDGET"),
     fps=_required_int("FPS"),
+)
+
+# The Vite dev server (default :5173) and its production origin are otherwise blocked outright --
+# create_app() itself must stay env-free (T23's tests and scripts/dump_openapi.py both build the
+# app without a live server or credentials), so the CORS origin list belongs here, the one place
+# api/ is documented to read the process environment.
+_web_origins = [
+    origin.strip()
+    for origin in os.environ.get("WEB_ORIGINS", "http://localhost:5173").split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_web_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Range", "Accept-Ranges"],
 )

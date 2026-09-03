@@ -1,7 +1,10 @@
 # Task Backlog
 
-36 tasks across 8 iterations. **One task per session.** Descriptions are deliberately high-level —
-detail is negotiated in plan mode at the start of each session, not pre-baked here.
+37 tasks across 8 iterations (T36 added 2026-09-04, mid-Iteration-5, at explicit user request — see
+decisionlog.md D136). **One task per session** (though iterations have twice now been built as one
+combined session by explicit user choice — T19-T23 and T24-T28+T36, both recorded in
+decisionlog.md). Descriptions are deliberately high-level — detail is negotiated in plan mode at
+the start of each session, not pre-baked here.
 
 Status: `todo` · `in-progress` · `done` · `blocked`
 
@@ -694,32 +697,54 @@ exercising the real `langgraph` library end to end against `tests/fakes/*` (neve
 
 ## Iteration 5 — React frontend
 
-### T24 — Frontend scaffold · `todo`
+**Built together, T24-T28 in one combined session** (user's own choice — see decisionlog.md
+D130-D137), the same pattern T19-T23 used. T36 (SCORM export) was added mid-session, also done.
+
+### T24 — Frontend scaffold · `done`
 Vite + TypeScript + Tailwind, with the API client generated from the backend OpenAPI schema so
 contracts cannot silently diverge.
-**DoD:** app builds; a type error appears if the backend contract changes.
-**Depends:** T23
+**DoD:** app builds; a type error appears if the backend contract changes. Both proven empirically
+(D132) — a real backend field rename was made, re-dumped, re-generated, and `tsc` failed in exactly
+`web/src/adapters/job-adapter.ts`, then reverted.
+**Depends:** T23 — met.
 
-### T25 — Submission & dashboard · `todo`
+### T25 — Submission & dashboard · `done`
 Topic entry and a job list showing status and history.
-**DoD:** a job can be started and tracked from the browser.
-**Depends:** T24
+**DoD:** a job can be started and tracked from the browser. Verified end to end through the real
+`PromptComposer` form (not just curl) for all three duration options — see D134.
+**Depends:** T24 — met.
 
-### T26 — Live progress view · `todo`
+### T26 — Live progress view · `done`
 Per-segment cards with tier badges and a stage timeline, fed by the T20 stream. The tier badges are
 what make the tier system legible to a viewer.
-**DoD:** progress updates live; tier assignment is visible per segment.
-**Depends:** T25
+**DoD:** progress updates live; tier assignment is visible per segment. Tier badges "earn" a flip
+animation on assignment (`components/TierBadge.tsx`).
+**Depends:** T25 — met.
 
-### T27 — Player & artifact browser · `todo`
+### T27 — Player & artifact browser · `done`
 Final video playback plus per-segment preview and scene inspection for debugging.
-**DoD:** any segment's audio, scene HTML, and clip can be inspected individually.
-**Depends:** T26
+**DoD:** any segment's audio, clip, and composed scene can be inspected individually — three new
+routes in `api/segments.py`. One honest scope note: rendered scene *HTML* is never persisted
+through `Storage` (it only exists in the run's `working_dir`); `Segment.scene` (the authoring
+source of truth) is served and rendered generically instead (D131), so as not to reach into T18's
+`core/graph/nodes/render_scene.py` — exactly the territory this frontend is meant to be insulated
+from.
+**Depends:** T26 — met.
 
-### T28 — Error states & polish · `todo`
+### T28 — Error states & polish · `done`
 Failure surfaces, retry and resume affordances, empty and loading states.
-**DoD:** every failure mode from T22 has a UI path.
-**Depends:** T27
+**DoD:** every failure mode from T22 has a UI path — 404, 409, retryable-vs-terminal failure
+(D135.2), dead-lettered-with-resume, SSE disconnect, null artifacts.
+**Depends:** T27 — met.
+
+### T36 — SCORM 1.2 export · `done` *(new task, added mid-session at the user's explicit request;
+not originally in this backlog)*
+A real `scorm/` package — manifest, zip assembly, and a launch page with genuine SCORM 1.2 API
+calls — not a stubbed button. Full reasoning: decisionlog D136.
+**DoD:** `GET /jobs/{id}/scorm` returns a zip an LMS can import directly; verified by unzipping a
+real downloaded package and confirming `imsmanifest.xml` + `launch.html` + `video.mp4` (+
+`subtitles.srt` when present).
+**Depends:** T27 (needs a finished video) — met.
 
 ---
 

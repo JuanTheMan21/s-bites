@@ -8,6 +8,7 @@ summarizer assumes.
 from fastapi.testclient import TestClient
 
 from api.app import create_app
+from interfaces import ProviderMisconfigured
 from tests.api_fixtures import API_TEST_TARGET_DURATION_MS, FPS, FRAME_BUDGET, fake_adapters
 from tests.graph_pipeline_fixtures import needs_ffmpeg
 from tests.test_api_jobs import _wait_for_terminal
@@ -72,3 +73,72 @@ def test_events_of_an_already_finished_job_report_once_and_do_not_hang() -> None
 
     assert len(events) == 1
     assert '"job_status": "succeeded"' in events[0]
+    assert '"terminal": true' in events[0]
+
+
+@needs_ffmpeg
+def test_a_dead_lettered_failure_reports_terminal_true_and_records_the_error(monkeypatch) -> None:
+    """T24: a client cannot otherwise tell a genuinely final failure from one that is about to be
+    auto-requeued (both publish an identical {"job_status": "failed"}) -- the stream staying open
+    is the only other signal, which is not observable without a timeout guess. `terminal` makes
+    it explicit, and VideoJob.error gives T28's failure surface something to show besides the
+    word "failed"."""
+    monkeypatch.setattr("api.runner.MAX_ATTEMPTS", 1)
+    adapters = fake_adapters()
+    adapters.tts.fail_next("synthesize", ProviderMisconfigured("simulated failure"))
+    app = create_app(adapters, frame_budget=FRAME_BUDGET, fps=FPS)
+
+    with TestClient(app) as client:
+        job_id = client.post(
+            "/jobs", json={"topic": "x", "target_duration_ms": API_TEST_TARGET_DURATION_MS}
+        ).json()["job_id"]
+
+        events = []
+        with client.stream("GET", f"/jobs/{job_id}/events") as stream:
+            assert stream.status_code == 200
+            for line in stream.iter_lines():
+                if line.startswith("data:"):
+                    events.append(line[len("data:") :].strip())
+
+        finished = client.get(f"/jobs/{job_id}").json()
+
+    assert finished["status"] == "failed"
+    assert finished["error"] is not None
+    assert "simulated failure" in finished["error"]
+    failure_events = [e for e in events if '"job_status": "failed"' in e]
+    assert len(failure_events) == 1
+    assert '"terminal": true' in failure_events[0]
+
+
+@needs_ffmpeg
+def test_a_retryable_failure_reports_terminal_false_and_the_stream_stays_open(monkeypatch) -> None:
+    monkeypatch.setattr("api.runner.MAX_ATTEMPTS", 2)
+    adapters = fake_adapters()
+    adapters.tts.fail_next("synthesize", ProviderMisconfigured("simulated failure"))
+    app = create_app(adapters, frame_budget=FRAME_BUDGET, fps=FPS)
+
+    with TestClient(app) as client:
+        job_id = client.post(
+            "/jobs", json={"topic": "x", "target_duration_ms": API_TEST_TARGET_DURATION_MS}
+        ).json()["job_id"]
+
+        events = []
+        with client.stream("GET", f"/jobs/{job_id}/events") as stream:
+            assert stream.status_code == 200
+            for line in stream.iter_lines():
+                if line.startswith("data:"):
+                    events.append(line[len("data:") :].strip())
+                # Stop once both the retryable failure and the eventual success have arrived --
+                # the stream stays open across the retry, so nothing else closes it for us.
+                statuses = [e for e in events if '"job_status"' in e]
+                if len(statuses) >= 2:
+                    break
+
+        finished = _wait_for_terminal(client, job_id)
+
+    assert finished["status"] == "succeeded"
+    statuses = [e for e in events if '"job_status"' in e]
+    assert '"job_status": "failed"' in statuses[0]
+    assert '"terminal": false' in statuses[0]
+    assert '"job_status": "succeeded"' in statuses[1]
+    assert '"terminal": true' in statuses[1]

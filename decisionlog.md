@@ -2656,3 +2656,187 @@ if its status is already `succeeded`/`failed`, emitting one status event and ret
 subscribing. The race this has to close, and does: there is no `await` between the status load and
 `bus.subscribe()`, and this project's runner is single-worker on one event loop, so nothing can
 advance the job's status in that gap -- confirmed, not assumed.
+
+## 2026-09-04 · T24-T28 (Iteration 5: the React frontend) + T36 (SCORM export, new task)
+
+### D130 -- The frontend's anti-corruption layer: `web/src/{api,adapters,domain,features}/`, one
+direction of dependency, enforced by an ESLint `no-restricted-imports` rule
+**Rejected:** letting components import the generated OpenAPI client directly and relying on code
+review to keep T18 churn out of the UI layer.
+**Reasoning:** the user's explicit, load-bearing requirement was that T18 (the open-ended,
+repeatedly-revisited iteration on scene/block/layout internals) must not force frontend changes.
+`Segment.scene` is `dict[str, Any]` by design (D29's precedent) specifically because its shape
+changes every T18 pass. `api/` holds the generated client and is the only place `openapi-fetch`
+may be imported; `adapters/` maps DTOs to `domain/` view models by **explicit destructure, never a
+spread**, so a field the backend renames or removes fails `tsc` in exactly one file
+(`adapters/job-adapter.ts`) -- proven empirically (see D132). `features/`/`components/`/`routes/`
+may import only `domain/` and `adapters/`; the rule is mechanical (`eslint.config.js`), not a
+convention, because a convention nobody enforces rots in two weeks. Caught its own violations
+live: `use-jobs.ts`, `use-job.ts`, `use-job-stream.ts`, and `JobDetailPage.tsx` all initially
+imported `api/` directly during the build and were fixed by pushing the api-calling+mapping
+composition into `adapters/job-adapter.ts` (`fetchJobList`, `fetchJob`, `createJob`,
+`resumeJobRequest`) and `adapters/stage-adapter.ts` (re-exporting `openJobEventStream`).
+
+### D131 -- `Segment.scene` renders as a generic, data-driven JSON tree (`adapters/scene-adapter.ts`
++ `features/segments/SceneTree.tsx`), never per-block-type React components
+**Rejected:** a React component per `BlockType`/`SceneLayout`, mirroring `rendering/`'s template
+set.
+**Reasoning:** per-block components would make the frontend a TypeScript mirror of `rendering/` --
+every future `/newblock` invocation would become a paired frontend task, exactly the coupling the
+user forbade. Value hints (`duration`/`color`/`code`/`key`) are inferred heuristically from key
+name and value shape, never from a hardcoded block schema, so a block type or layout that does not
+exist yet still renders correctly. Proven directly by
+`adapters/scene-adapter.test.ts`'s decoupling test, which feeds the normaliser an entirely invented
+future shape (`camera_path`, `particle_system_id`, nested arrays of arrays, a `new_block_type`
+field) and asserts it still produces a tree without throwing. The scene inspector is a developer/QA
+affordance; the real per-segment preview is the rendered clip (`clip_key`), not a re-implementation
+of the scene.
+
+### D132 -- `scripts/dump_openapi.py` builds the OpenAPI schema offline via
+`tests/api_fixtures.py::fake_adapters()`, not a live server
+**Rejected:** running `uvicorn api.main:app` against real Azure credentials and curling
+`/openapi.json`.
+**Reasoning:** `api.app.create_app(adapters, ...)` takes an already-resolved `Adapters` bundle
+(T19's design) and `app.openapi()` never runs the lifespan -- no adapter is ever contacted, no
+`FRAME_BUDGET`/`FPS` env vars, no Azure spend. This is what makes T24's DoD ("a type error appears
+if the backend contract changes") mechanically provable rather than aspirational: renamed
+`VideoJob.video_key` to `output_key`, re-ran the dump + `openapi-typescript` + `tsc`, and watched it
+fail in exactly `adapters/job-adapter.ts` and its test, then reverted. `web/openapi.json` is
+committed so drift shows up as a diff before it ever reaches a build.
+
+### D133 -- The frontend's own client-side routes (`/jobs`, `/jobs/:jobId`) collide with the
+backend's identical API paths; fixed by scoping the Vite dev proxy to `/api` (stripped before
+forwarding) rather than touching the backend's route namespace
+**Rejected:** prefixing the FastAPI routers themselves with `/api` (`app.include_router(...,
+prefix="/api")`); accepting the collision and only ever navigating client-side.
+**Found by real browser testing, not curl or the test suite.** Every API-only curl check passed
+throughout, because curl never exercises a full-page navigation the way a browser does. Screenshot
+evidence: navigating to `http://localhost:5173/jobs` in a real Chromium instance (via Python
+Playwright, already a project dependency) returned Chromium's raw JSON viewer instead of the React
+dashboard -- the dev proxy's bare `'/jobs'` prefix intercepted the browser's own navigation to the
+frontend's `/jobs` page before React Router ever saw it, forwarding it straight to the backend.
+Client-side `<Link>` navigation never triggers a fresh server request, so this was invisible until
+a full page load (a deep link, a refresh, or Playwright's `page.goto`) was actually tested.
+**Fixed entirely on the frontend side, with zero backend changes and zero risk to the already-
+reviewed T19-T23 route contract or its 14+ tests**: `web/src/api/base-url.ts`'s `API_BASE_URL`
+defaults to `/api` (not `''`); `vite.config.ts`'s proxy matches `/api` and rewrites it away before
+forwarding to the real backend. In production, `VITE_API_BASE` is set to the deployed backend's
+absolute origin -- a different origin entirely, so this specific collision cannot occur there
+regardless; the dev-proxy prefix is a dev-only concern by construction.
+
+### D134 -- `scripts/serve_fake.py::DynamicSegmentLLMProvider` reads the required segment count
+back out of the outline prompt's own text, rather than reusing a single fixed-count
+`fake_adapters()` bundle
+**Rejected:** shipping `serve_fake.py` with a single static `fake_adapters()` (as the pytest suite
+uses); silently overriding every submission's `target_duration_ms` to the one value the fixture
+supports.
+**Found by real UI testing, not curl.** `tests/api_fixtures.py::fake_adapters()` seeds its
+`PhaseQueueLLMProvider` for exactly `API_TEST_SEGMENT_COUNT = 4` (`API_TEST_TARGET_DURATION_MS =
+100_000`) -- correct for a test suite that always submits that one duration, but T25's real
+duration chips (3/7/10 min) compute to 6/15/21 segments via `VideoJob.segment_count`, none of which
+match 4. Submitting any of the three real UI options against the first version of `serve_fake.py`
+dead-lettered every time (`FakeLLMProvider`'s queue ran dry mid-run) -- caught only because the
+actual `PromptComposer` form was driven end-to-end in a real browser rather than verified only
+against a hand-picked `curl` duration. Fixed by exploiting a fact already true of the real prompt
+(`core/graph/nodes/outline.py`: `"Produce exactly {job.segment_count} segments."`): a
+`PhaseQueueLLMProvider` subclass refills its own queue from `seeded_llm(N)` the moment it sees that
+stated count, right before the first `Outline` call of each job. Reuses `seeded_llm` and
+`PhaseQueueLLMProvider` from `tests/graph_pipeline_fixtures.py` unmodified -- zero changes to
+shared, reviewed test fixtures. Verified: all three duration options produce exactly 6/15/21
+segments and a succeeded job with a real video, through the actual `PromptComposer` form.
+
+### D135 -- Four small backend changes made before any frontend code, once found necessary by
+reading the T19-T23 contract closely rather than by a live failure
+**Reasoning, one line each:**
+1. **CORS** (`api/main.py`, `WEB_ORIGINS` env var) -- without it, no browser fetch from the Vite
+   dev server or a deployed frontend origin can reach the API at all. Lives in `main.py`, not
+   `create_app`, because `create_app` must stay env-free for D132's offline dump and for T23's
+   tests.
+2. **`terminal` flag on every SSE status event** (`api/runner.py`, `api/jobs.py`) -- a retryable
+   failure and a genuinely final one publish an identical `{"job_status": "failed"}`; the stream
+   staying open was the *only* other signal, undetectable without a timeout guess. Three lines;
+   pinned by `tests/test_api_events.py`'s new race test
+   (`test_a_retryable_failure_reports_terminal_false_and_the_stream_stays_open`), which arms one
+   `fail_next` with `MAX_ATTEMPTS = 2` and asserts the first status event is
+   `terminal: false` while the second (the automatic retry's success) is `terminal: true`.
+3. **`VideoJob.error`** (`core/models.py`) -- without it, T28's failure surface could only ever
+   render the word "failed." Truncated to 500 chars, cleared on resume.
+4. **Range/206** (`api/byte_range.py`, split out of `api/artifacts.py` to stay under the 200-line
+   ceiling) -- local-disk/`FakeStorage`'s byte-streaming branch had no Range support at all, so
+   `<video>` seeking silently did not work against the project's primary day-to-day `RUNTIME_ENV`.
+   The no-`Range`-header path is byte-identical to the old response (verified by test), so this is
+   additive, not a behaviour change for any existing caller.
+
+Also fixed: `scripts/hook_asset_quality.py::format_frontend` ran `npx --no-install prettier` from
+the hook's own repo-root cwd, but `web/node_modules/.bin` is a child of `web/`, and npm resolves
+`node_modules/.bin` walking cwd *upward*, never downward -- the gate opened (`web/node_modules`
+exists) but resolution silently failed every time, formatting nothing. Fixed by running with
+`cwd="web"` and a web-relative path. Never triggered a visible error (the hook swallows non-zero
+exits by design) -- would have been discovered only as an unexplained wall of reformatting diffs
+much later.
+
+### D136 -- SCORM export (T36, new task) is a real `scorm/` package (manifest + zip + a launch
+page with real SCORM 1.2 API calls), not a stubbed download button
+**Rejected:** shipping only the UI affordance with the SCORM item disabled ("coming soon").
+**Reasoning:** explicit user decision when asked. SCORM 1.2 chosen over 2004 -- this package's
+entire scope is "play one video, report completion," and 1.2's simpler sequencing model has
+nothing missing for that while remaining the more widely supported LMS target. `scorm/manifest.py`
+builds `imsmanifest.xml`; `scorm/package.py` assembles an in-memory zip (manifest + a launch page
+running SCORM 1.2's own API-discovery algorithm, walking parent/opener frames + `LMSInitialize`/
+`LMSSetValue("cmi.core.lesson_status","completed")`/`LMSFinish` + the video + subtitles when
+present); `api/scorm.py` is `GET /jobs/{id}/scorm`. Deliberately its own top-level package, not
+`core/` (a delivery format is not business logic) and not `mux/` (that is ffmpeg's).
+
+### D137 -- Gamification (the user's explicit requirement) is "craft theatre + local stats," not a
+points/XP/leaderboard system, and needs no backend
+**Rejected:** a server-persisted achievements/points system.
+**Reasoning:** explicit user decision when asked, with the tradeoffs stated up front -- most
+gamification patterns (points, streaks, leaderboards) read as unserious in front of an enterprise
+buyer and were flagged as bad ideas rather than built. What shipped: a live, SSE-driven "production
+strip" phase timeline with rotating playful copy (`features/progress/phase-copy.ts`) that pins to a
+factual line past 90s in one phase (mockery-during-a-genuine-wait was explicitly avoided); tier
+badges that "earn" a flip animation the moment a real tier is assigned
+(`components/TierBadge.tsx`); a Wrap Report of only genuinely-derivable stats -- no fabricated
+frame counts. `features/achievements/milestone-rules.ts` is a pure function of the job list
+(`useJobsQuery`'s data) with a `localStorage`-only "seen" store (`seen-store.ts`) -- no backend
+endpoint, since every milestone is already derivable from `GET /jobs` and this backend has no
+auth/user model yet to attach server-side achievements to anyway.
+
+### D138 -- `project-reviewer` found and this session fixed two real bugs before checkpoint: a
+retrying job was indistinguishable from a dead one to any non-SSE consumer, and the SCORM launch
+page had an unescaped stored-XSS vector
+**High #1: `api/runner.py` persisted `JobStatus.FAILED` for an attempt about to be auto-requeued,
+not only for a genuinely final failure.** D135.2's `terminal` flag on the SSE event only helps a
+client *already connected* when the failure happens -- every other consumer reads persisted state:
+`api/jobs.py::stream_job_events`'s already-terminal check, a fresh page load, `useJobQuery`'s
+polling (`refetchInterval` stops on `status === 'failed'`), and most seriously `resume_job`'s own
+`status != FAILED` guard. A user who loaded or refreshed the job page during the retry window saw
+a permanent-looking failure with a *live, working* Resume button; clicking it would have enqueued
+a second, redundant run of the same `job_id`/checkpoint thread, since neither `LocalJobQueue` nor
+`FakeJobQueue` dedupe by `job_id`. **Fixed:** a requeued attempt now persists `JobStatus.QUEUED`
+(mirroring what `resume_job` itself already sets on an explicit resume) instead of `FAILED`, with
+`error` cleared rather than set. This makes every downstream consumer correct for free -- no
+frontend change needed, since the frontend already faithfully reflects whatever `job.status` the
+backend reports; the bug was entirely in what the backend was reporting. Pinned by
+`tests/test_api_resume.py::test_resuming_during_an_automatic_retry_is_rejected_not_double_enqueued`,
+which reads the SSE stream up to the retryable-failure event (persisted before it is published, so
+observing the event guarantees the fix has landed), then asserts a concurrent `GET` never shows
+`"failed"` and a concurrent resume attempt 409s rather than succeeding.
+**High #2: `scorm/package.py::_launch_html` interpolated `title` (`job.topic`, free-form user
+text) into `<title>{title}</title>` unescaped**, while `scorm/manifest.py` already escaped the
+identical value into `imsmanifest.xml` correctly. A topic containing
+`</title><script>...</script>` would execute the instant `launch.html` was opened in a browser or
+an LMS imported and launched the SCO -- a real stored-XSS vector reachable through the ordinary
+submission form. **Fixed:** `html.escape(title)`, same treatment `manifest.py` already gives it.
+Pinned by `tests/test_scorm_package.py::test_launch_page_escapes_a_title_with_html_special_characters`.
+**Low, dev-tooling only, documented rather than fixed:** `scripts/serve_fake.py
+::DynamicSegmentLLMProvider`'s "refill when empty" guard assumes a job's queue always drains
+exactly -- true for every clean run, not guaranteed after an *injected* failure leaves a
+differently-sized next job to draw from stale leftovers. No production exposure (dev-only script,
+never exercised by pytest); a caveat was added to the class's own docstring rather than spending
+further session time hardening a tool whose only purpose is manual UI exploration.
+**Reflects well on the review-before-checkpoint step in the build loop**: extensive live-browser
+testing this session (D133, D134) caught two real integration bugs that unit/API-level tests
+missed entirely -- but it did not catch either of these two, which needed a reviewer reading the
+actual state-transition logic and the actual HTML-generation code, not just exercising the happy
+path. Both kinds of verification found real bugs the other did not.

@@ -1,0 +1,102 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/bricolage-grotesque';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* ---------------------------------------------------------------------------
+ * Design tokens. Editorial-utilitarian, explicitly not the AI-slop default
+ * (no purple-blue gradients, no glassmorphism, no Inter). Warm paper ground,
+ * one industrial accent, personality carried by type and motion rather than
+ * decoration. Dark mode redefines every token below under the same names, so
+ * no component ever needs a `dark:` class.
+ * ------------------------------------------------------------------------- */
+@theme {
+  --font-display: 'Bricolage Grotesque Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+
+  --color-paper-0: #fbfaf6;
+  --color-paper-1: #f3f1e9;
+  --color-paper-2: #e7e4d8;
+  --color-ink-900: #16150f;
+  --color-ink-700: #3a382e;
+  --color-ink-500: #6b6759;
+  --color-ink-300: #a8a392;
+
+  --color-accent: #e8542f;
+  --color-accent-tint: #ffe9e1;
+
+  --color-signal-run: #2f6fe8;
+  --color-signal-ok: #1e7a54;
+  --color-signal-warn: #b8791c;
+  --color-signal-bad: #c2331f;
+
+  --color-tier-0: #6b6759;
+  --color-tier-1: #2f6fe8;
+  --color-tier-2: #e8542f;
+
+  --shadow-1: 0 1px 2px rgb(22 21 15 / 0.06), 0 0 0 1px rgb(22 21 15 / 0.05);
+  --shadow-2: 0 8px 24px -8px rgb(22 21 15 / 0.18), 0 0 0 1px rgb(22 21 15 / 0.06);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --duration-1: 120ms;
+  --duration-2: 220ms;
+  --duration-3: 420ms;
+  --ease-expo-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* Dark mode: system preference (no explicit choice) or an explicit `data-theme="dark"`. Same
+ * token names, different values -- this is the whole reason no component below carries a
+ * `dark:` class. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-paper-0: #14130e;
+    --color-paper-1: #1c1b14;
+    --color-paper-2: #2a281d;
+    --color-ink-900: #f3f1e9;
+    --color-ink-700: #d8d4c4;
+    --color-ink-500: #a8a392;
+    --color-ink-300: #6b6759;
+    --color-accent: #ff6b45;
+    --color-accent-tint: #3a2018;
+  }
+}
+:root[data-theme='dark'] {
+  --color-paper-0: #14130e;
+  --color-paper-1: #1c1b14;
+  --color-paper-2: #2a281d;
+  --color-ink-900: #f3f1e9;
+  --color-ink-700: #d8d4c4;
+  --color-ink-500: #a8a392;
+  --color-ink-300: #6b6759;
+  --color-accent: #ff6b45;
+  --color-accent-tint: #3a2018;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-1: 0ms;
+    --duration-2: 0ms;
+    --duration-3: 0ms;
+  }
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper-0);
+  color: var(--color-ink-900);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}

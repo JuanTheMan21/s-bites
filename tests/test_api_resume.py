@@ -70,3 +70,45 @@ def test_a_failure_before_the_first_checkpoint_still_recovers_on_retry(monkeypat
         finished = _wait_for_terminal(client, job_id)
 
     assert finished["status"] == "succeeded"
+
+
+@needs_ffmpeg
+def test_resuming_during_an_automatic_retry_is_rejected_not_double_enqueued(monkeypatch) -> None:
+    """Regression (project-reviewer, T24-T28 checkpoint): api/runner.py used to persist
+    JobStatus.FAILED even for an attempt about to be auto-requeued -- indistinguishable, to any
+    consumer reading persisted state rather than a live SSE stream, from a genuinely dead job.
+    Most seriously, resume_job's own `status != FAILED` guard would accept a resume click during
+    the retry window and enqueue a *second*, redundant run of the same job_id/thread (neither
+    LocalJobQueue nor FakeJobQueue dedupe by job_id). Fixed by persisting QUEUED, not FAILED, for
+    a requeued attempt -- mirroring what resume_job itself already sets on an explicit resume.
+    """
+    monkeypatch.setattr("api.runner.MAX_ATTEMPTS", 2)
+    adapters = fake_adapters()
+    adapters.tts.fail_next("synthesize", ProviderMisconfigured("simulated transient failure"))
+    app = create_app(adapters, frame_budget=FRAME_BUDGET, fps=FPS)
+
+    with TestClient(app) as client:
+        job_id = client.post(
+            "/jobs", json={"topic": "x", "target_duration_ms": API_TEST_TARGET_DURATION_MS}
+        ).json()["job_id"]
+
+        # api/runner.py saves the requeued-attempt status before publishing the SSE event that
+        # reports it -- by the time this event is observed here, GET already reflects the fix.
+        with client.stream("GET", f"/jobs/{job_id}/events") as stream:
+            for line in stream.iter_lines():
+                if line.startswith("data:") and '"job_status": "failed"' in line:
+                    break
+
+        mid_retry = client.get(f"/jobs/{job_id}").json()
+        resume_resp = client.post(f"/jobs/{job_id}/resume")
+
+        finished = _wait_for_terminal(client, job_id)
+
+    # Never observably "failed" to a fresh REST caller during the retry window -- the whole bug.
+    assert mid_retry["status"] != "failed"
+    # A resume attempt during that window is correctly rejected, not silently double-enqueued.
+    assert resume_resp.status_code == 409
+    assert finished["status"] == "succeeded"
+    # One synthesize call per segment across both attempts combined -- inflated above 4 if the
+    # rejected resume had actually enqueued a redundant second run.
+    assert len(adapters.tts.calls) == 4

@@ -123,14 +123,36 @@ class JobRunner:
             finished: VideoJob = snapshot.values["job"]
             await self._store.save(finished)
             await self._adapters.queue.complete(queued.receipt)
-            await self._bus.publish(job.job_id, {"job_status": finished.status.value})
+            await self._bus.publish(
+                job.job_id, {"job_status": finished.status.value, "terminal": True}
+            )
         except Exception as exc:
             logger.error("job %s failed on attempt %d: %s", job.job_id, queued.attempt, exc)
-            failed = job.model_copy(update={"status": JobStatus.FAILED})
-            await self._store.save(failed)
             requeue = queued.attempt < MAX_ATTEMPTS
+            # A requeued attempt is persisted as QUEUED, not FAILED -- project-reviewer caught the
+            # real consequence of getting this wrong: every consumer that reads persisted status
+            # rather than a live SSE stream (api/jobs.py's already-terminal check, a fresh page
+            # load, and -- most seriously -- resume_job's own `status != FAILED` guard) could not
+            # tell a job mid-automatic-retry from one genuinely dead, and a user clicking Resume
+            # during that window would enqueue a second, redundant run of the same job_id/thread
+            # (neither LocalJobQueue nor FakeJobQueue dedupe by job_id). Mirroring the status
+            # resume_job itself already sets for an explicit resume makes both paths consistent,
+            # and means resume_job's existing guard now correctly 409s during a retry window too,
+            # with no change needed there.
+            saved_status = JobStatus.FAILED if not requeue else JobStatus.QUEUED
+            saved_error = str(exc)[:500] if not requeue else None
+            failed = job.model_copy(update={"status": saved_status, "error": saved_error})
+            await self._store.save(failed)
             await self._adapters.queue.fail(queued.receipt, str(exc), requeue=requeue)
-            await self._bus.publish(job.job_id, {"job_status": JobStatus.FAILED.value})
+            # `terminal` is the one bit a client already *connected* to the SSE stream cannot
+            # otherwise observe: this event and a genuinely final failure publish an identical
+            # {"job_status": "failed"} except for whether the stream stays open for the retry that
+            # follows. Published regardless of what was just persisted above -- a live subscriber
+            # still sees the real-time hiccup even though REST/a fresh subscriber now correctly
+            # sees QUEUED instead.
+            await self._bus.publish(
+                job.job_id, {"job_status": JobStatus.FAILED.value, "terminal": not requeue}
+            )
             if requeue:
                 # Not terminal -- the same job_id comes back around this loop shortly, resuming
                 # from whatever checkpoint it reached. A subscriber watching this attempt should

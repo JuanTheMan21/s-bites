@@ -1,0 +1,760 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "FastAPI",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/jobs": {
+      "get": {
+        "summary": "List Jobs",
+        "operationId": "list_jobs_jobs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VideoJob"
+                  },
+                  "type": "array",
+                  "title": "Response List Jobs Jobs Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Submit Job",
+        "operationId": "submit_job_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}": {
+      "get": {
+        "summary": "Get Job",
+        "operationId": "get_job_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/resume": {
+      "post": {
+        "summary": "Resume Job",
+        "operationId": "resume_job_jobs__job_id__resume_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoJob"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/events": {
+      "get": {
+        "summary": "Stream Job Events",
+        "operationId": "stream_job_events_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/video": {
+      "get": {
+        "summary": "Get Video",
+        "operationId": "get_video_jobs__job_id__video_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/subtitles": {
+      "get": {
+        "summary": "Get Subtitles",
+        "operationId": "get_subtitles_jobs__job_id__subtitles_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/segments/{index}/audio": {
+      "get": {
+        "summary": "Get Segment Audio",
+        "operationId": "get_segment_audio_jobs__job_id__segments__index__audio_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Index"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/segments/{index}/clip": {
+      "get": {
+        "summary": "Get Segment Clip",
+        "operationId": "get_segment_clip_jobs__job_id__segments__index__clip_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Index"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/segments/{index}/scene": {
+      "get": {
+        "summary": "Get Segment Scene",
+        "operationId": "get_segment_scene_jobs__job_id__segments__index__scene_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "index",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Index"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}/scorm": {
+      "get": {
+        "summary": "Get Scorm Package",
+        "operationId": "get_scorm_package_jobs__job_id__scorm_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Importance": {
+        "type": "integer",
+        "enum": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "title": "Importance",
+        "description": "How much a segment matters, 1 (aside) to 5 (the point of the video)."
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "succeeded",
+          "failed"
+        ],
+        "title": "JobStatus",
+        "description": "Where a job is. ``FAILED`` is terminal only until T22 resumes it from its checkpoint."
+      },
+      "JobSubmission": {
+        "properties": {
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "target_duration_ms": {
+            "type": "integer",
+            "title": "Target Duration Ms",
+            "default": 420000
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "topic"
+        ],
+        "title": "JobSubmission"
+      },
+      "Segment": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index",
+            "description": "Position in the video, from 0."
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "visual_intent": {
+            "$ref": "#/components/schemas/VisualIntent"
+          },
+          "importance": {
+            "$ref": "#/components/schemas/Importance"
+          },
+          "narration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narration",
+            "description": "The spoken script for this segment, written by T15."
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms",
+            "description": "Measured length of the narration audio, in milliseconds. Set only by a TTSProvider from the file it wrote -- never estimated, never from a word count."
+          },
+          "word_marks": {
+            "items": {
+              "$ref": "#/components/schemas/WordMark"
+            },
+            "type": "array",
+            "title": "Word Marks",
+            "description": "T18A: per-word timing within this segment's narration audio, filled at the same stage as duration_ms. May be empty -- not every TTSProvider reports word boundaries; consumers must degrade to an even stagger rather than assume this is set."
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tier"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Assigned by core/tier_resolver.py, once duration_ms is known."
+          },
+          "scene": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scene",
+            "description": "This segment's composed scene: a layout plus the blocks that fill it. Untyped here for the same reason `slots` was before it -- the shape is progressive (core/graph/nodes/visual_plan.py writes it with each block's payload still null, core/graph/nodes/scene_author.py fills them in) and varies with the layout/block choice, which the LLM makes per video rather than per intent now. Validate with core.scene_schemas.ComposedScene at the point of use."
+          },
+          "clip_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clip Key",
+            "description": "Storage key of this segment's final clip (rendered video + narration audio, muxed). Set only by core/graph/nodes/render_scene.py, once slots are filled."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "index",
+          "title",
+          "summary",
+          "visual_intent",
+          "importance"
+        ],
+        "title": "Segment",
+        "description": "A segment as the pipeline knows it: the plan, plus everything measured since.\n\nThe nullable fields fill in stages, and the order is load-bearing. ``narration`` arrives\nfrom the scripting node, ``duration_ms`` from the TTS adapter *measuring the audio it just\nwrote*, and only then can ``tier`` be assigned and ``scene`` authored against a real\nduration.\n\nThat ordering is Invariant 1, and it is why this is a separate class rather than\n``SegmentPlan`` with more fields: a combined model would show the LLM a ``duration_ms``\nfield it is forbidden to fill, leaving the rule to be enforced by prompt wording. Here the\nmodel never sees the field at all."
+      },
+      "Tier": {
+        "type": "integer",
+        "enum": [
+          0,
+          1,
+          2
+        ],
+        "title": "Tier",
+        "description": "How richly a segment is rendered, and therefore what it costs in frames.\n\n``IntEnum`` because the tier resolver compares and sums these, and a checkpointed job\nserialises them as 0/1/2. The names say what happens; the values are the tier numbers used\neverywhere else. Capture method per tier is in the ``scene-templates`` skill."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VideoJob": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic",
+            "description": "The prompt as the user typed it."
+          },
+          "target_duration_ms": {
+            "type": "integer",
+            "title": "Target Duration Ms",
+            "default": 420000
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "default": "queued"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/Segment"
+            },
+            "type": "array",
+            "title": "Segments"
+          },
+          "video_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Key",
+            "description": "Storage key of the finished, concatenated video. Set only by core/graph/nodes/finalize.py, once every segment's clip has been rendered and muxed."
+          },
+          "subtitles_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitles Key",
+            "description": "T18A: storage key of the SRT sidecar (mux/subtitles.py). Set alongside video_key by core/graph/nodes/finalize.py. May stay null on the same terms as an individual segment's word_marks -- nothing downstream requires it."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "T24: why this job is FAILED, truncated to 500 chars. Set only by api/runner.py from the caught exception's str(); cleared on resume (api/jobs.py) so a retried job never displays a stale reason."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "topic"
+        ],
+        "title": "VideoJob",
+        "description": "One video request, and everything the pipeline has learned about it.\n\nServes as pipeline state, as the LangGraph checkpoint payload (T14), and as the API\nresponse body (T19) -- hence a plain model with defaults rather than a strict schema.\nExtras are forbidden all the same: pydantic ignores an unknown key by default, so a typo in\na request body would be dropped in silence rather than rejected."
+      },
+      "VisualIntent": {
+        "type": "string",
+        "enum": [
+          "title_card",
+          "bullet_list",
+          "comparison",
+          "diagram_flow",
+          "code_walkthrough",
+          "stat_callout"
+        ],
+        "title": "VisualIntent",
+        "description": "What a segment's visual is for. Closed by design."
+      },
+      "WordMark": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "offset_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Offset Ms"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Duration Ms"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "offset_ms",
+          "duration_ms"
+        ],
+        "title": "WordMark",
+        "description": "One spoken word, and when it landed in its segment's narration audio.\n\nT18A: what makes a caption or an on-screen reveal track the actual voice instead of an\nevenly-spaced guess. Contract vocabulary, not a domain concept -- same precedent as\n``SkillPack``/``QueuedJob`` living beside the interface they belong to rather than in\n``core/`` (D22's boundary runs one way: ``core`` may import ``interfaces``, never the\nreverse). ``offset_ms``/``duration_ms`` are relative to the *start of this segment's own\naudio*, not the final concatenated video."
+      }
+    }
+  }
+}

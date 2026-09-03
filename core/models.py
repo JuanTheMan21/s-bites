@@ -173,6 +173,12 @@ class VideoJob(BaseModel):
         "video_key by core/graph/nodes/finalize.py. May stay null on the same terms as an "
         "individual segment's word_marks -- nothing downstream requires it.",
     )
+    error: str | None = Field(
+        default=None,
+        description="T24: why this job is FAILED, truncated to 500 chars. Set only by "
+        "api/runner.py from the caught exception's str(); cleared on resume "
+        "(api/jobs.py) so a retried job never displays a stale reason.",
+    )
 
     @property
     def segment_count(self) -> int:

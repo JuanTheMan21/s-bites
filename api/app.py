@@ -17,6 +17,8 @@ from api.events import JobEventBus
 from api.job_store import JobStore
 from api.jobs import router as jobs_router
 from api.runner import JobRunner
+from api.scorm import router as scorm_router
+from api.segments import router as segments_router
 from config import Adapters, close_adapters
 
 
@@ -43,4 +45,6 @@ def create_app(adapters: Adapters, *, frame_budget: int, fps: int) -> FastAPI:
 
     app.include_router(jobs_router)
     app.include_router(artifacts_router)
+    app.include_router(segments_router)
+    app.include_router(scorm_router)
     return app

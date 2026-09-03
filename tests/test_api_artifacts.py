@@ -48,3 +48,27 @@ def test_video_streams_bytes_once_a_job_succeeds() -> None:
 
     assert subtitles.status_code == 200
     assert subtitles.headers["content-type"].startswith("text/plain")
+
+
+@needs_ffmpeg
+def test_a_range_request_returns_206_with_only_the_requested_bytes() -> None:
+    """T24: local-disk/FakeStorage's memory:// scheme took the byte-streaming branch with no
+    Range support at all, which is what made <video> seeking silently not work against the
+    project's primary day-to-day RUNTIME_ENV. api/byte_range.py closes that gap."""
+    adapters = fake_adapters()
+    app = create_app(adapters, frame_budget=FRAME_BUDGET, fps=FPS)
+
+    with TestClient(app) as client:
+        job_id = client.post(
+            "/jobs", json={"topic": "x", "target_duration_ms": API_TEST_TARGET_DURATION_MS}
+        ).json()["job_id"]
+        finished = _wait_for_terminal(client, job_id)
+        assert finished["status"] == "succeeded"
+
+        full = client.get(f"/jobs/{job_id}/video")
+        ranged = client.get(f"/jobs/{job_id}/video", headers={"Range": "bytes=0-9"})
+
+    assert ranged.status_code == 206
+    assert ranged.content == full.content[:10]
+    assert ranged.headers["content-range"] == f"bytes 0-9/{len(full.content)}"
+    assert ranged.headers["accept-ranges"] == "bytes"

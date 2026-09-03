@@ -50,7 +50,7 @@ async def resume_job(job_id: str, request: Request) -> VideoJob:
     # Flipped to queued before returning, same as submit_job -- otherwise this response (and any
     # GET poll landing inside the runner's up-to-1s dequeue interval) would still show "failed"
     # for a resume that has, in fact, already been accepted.
-    job = job.model_copy(update={"status": JobStatus.QUEUED})
+    job = job.model_copy(update={"status": JobStatus.QUEUED, "error": None})
     await request.app.state.job_store.save(job)
     # The runner tells a first attempt from a resume by asking the checkpointer whether this
     # job_id has a checkpoint at all (api/runner.py), so re-enqueueing the same id is the whole
@@ -76,7 +76,10 @@ async def stream_job_events(job_id: str, request: Request) -> EventSourceRespons
 
     async def stage_events():
         if already_terminal or queue is None:
-            yield {"event": "stage", "data": json.dumps({"job_status": job.status.value})}
+            yield {
+                "event": "stage",
+                "data": json.dumps({"job_status": job.status.value, "terminal": True}),
+            }
             return
         try:
             while True:
