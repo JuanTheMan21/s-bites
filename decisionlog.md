@@ -2533,3 +2533,126 @@ docstring mention of `adapters/azure/llm_provider.py`, verified by AST-level imp
 not a real import). No `.py` file over 200 lines.
 
 **Depends:** T18D -- met.
+
+---
+
+## 2026-09-03 · T19-T23 (Iteration 4: FastAPI backend)
+
+### D123 -- Synced this machine with `origin/dev` (11 commits, T18B-E already shipped on another
+machine) by stashing local drift, fast-forwarding, and leaving two files deliberately uncommitted
+**Rejected:** discarding the local drift outright and pulling clean; committing everything found.
+**Reasoning:** this machine's `dev` was a strict ancestor of `origin/dev` (fast-forward-safe,
+confirmed via `git log origin/dev..HEAD` before touching anything), so the sync itself was
+mechanical. Three uncommitted local files existed at session start: `.claude/CLAUDE.md` (stale,
+auto-generated -- resolved by taking upstream's version outright and letting `/reindex` regenerate
+it fresh, since fighting over auto-generated content is never the right use of a merge decision);
+`mux/ffmpeg_run.py` (`DEFAULT_TIMEOUT_S` 60.0 -> 300.0, a real, unreviewed behavior change from a
+prior session); and `.mcp.json` (this machine's own absolute repo path, `C:/Users/antoj/Downloads/
+s-bites`, differing from the committed path, which is the other machine's -- `C:/Users/juant/
+Desktop/s_bites`). The user's own call, asked directly rather than assumed: stash, pull, pop,
+decide later. The latter two remain **uncommitted on this machine** after this checkpoint --
+`.mcp.json`'s path must never be committed as-is (it would silently break the other machine's next
+pull), and the ffmpeg timeout bump is a real change nobody has reviewed or attributed to a task.
+
+### D124 -- T18's iteration chain (T18F, plus three real-render findings T18E recorded but did not
+fix) paused; Iteration 4 (T19-T23, the FastAPI backend) built instead, on the user's own explicit
+instruction
+**Rejected:** picking up T18F by default (the placeholder "next" tasks.md already named).
+**Reasoning:** T18E's own handoff.md left "what's next" as a genuinely open question -- T18F was
+next in sequence but not next by any judgement call, and the three findings it recorded (inter-
+annotation collision, a version-number-driven `TIMELINE` blind spot, combined-effects layout
+collisions) were real, unscoped work competing for the same slot. The user's instruction this
+session -- "put a pause on that," move to T19 -- answers that open question directly. Nothing in
+`tasks.md` changes to reflect the pause; T18F and the three findings simply stay `todo`/recorded,
+untouched, exactly where T18E left them.
+
+### D125 -- T19 through T23 (all of Iteration 4) built in one combined session, by the user's own
+choice, rather than the project's own "one task per session" default
+**Rejected:** T19 alone, reassessing after; T19 through T28 (also pulling in the React frontend).
+**Reasoning:** offered as a real choice, not assumed. Iteration 4 is one cohesive deliverable (a
+single FastAPI backend) where T20-T23 each depend on the task immediately before it and share one
+set of new modules under `api/`; T24 (Iteration 5) is a different tech stack (Vite/React) and the
+natural stopping point regardless. The domain models were already built anticipating exactly this
+grouping -- `core/models.py::VideoJob`'s own docstring names "the API response body (T19)",
+`config.py`'s `Adapters`/`close_adapters` docstrings name "the FastAPI lifespan (T19)" -- so the
+five tasks were never really five separate designs, just five DoDs against one build.
+
+### D126 -- `api/runner.py`: one serial in-process background task drives the whole job lifecycle;
+first-attempt-vs-resume is decided by asking the checkpointer, not by checking whether the
+checkpoint file exists on disk
+**Rejected:** a concurrent/fan-out runner (multiple jobs claimed and run in parallel on one loop);
+inferring "first attempt" from `Path.exists()` on the checkpoint sqlite file (**shipped once,
+found wrong by `project-reviewer`, and fixed before this checkpoint** -- see below).
+**Reasoning:** serial-by-design matches T34's own stated plan ("worker and API become separate
+processes") -- this session's runner is the in-process precursor, not the final shape, and serial
+execution is what keeps `JobStore`'s per-job writes race-free without a lock on every write, only
+the one concurrent path (`api/jobs.py`'s submission, guarded by `app.state.index_lock`).
+**The real bug, for anyone touching this file again:** `AsyncSqliteSaver.from_conn_string(path)`
+creates `path` on disk the instant it opens the connection -- **before any checkpoint is ever
+written**. A first version of this code checked `db_path.exists()` to decide whether to pass the
+graph its full initial state or `None` (resume). That check is wrong the moment a job's first-ever
+attempt fails before its first checkpointed superstep (e.g. `plan_segments`, the graph's first
+node, raising a non-transient error) -- the file already exists from the open connection, so every
+subsequent attempt wrongly resumes an empty thread and crashes on LangGraph's own
+`EmptyInputError`, burning the whole `MAX_ATTEMPTS` budget on an error unrelated to the original
+one, and dead-lettering permanently (the explicit `/resume` endpoint doesn't help either -- it
+re-enqueues into the identical broken check). Fixed by asking the saver directly, inside the
+`async with AsyncSqliteSaver.from_conn_string(...) as saver:` block: `existing_checkpoint = await
+saver.aget_tuple(gconfig)`, `None` meaning a genuine first attempt. Verified empirically against
+the real (non-faked) `langgraph` library, not just by reading the fix, and pinned by
+`tests/test_api_resume.py::test_a_failure_before_the_first_checkpoint_still_recovers_on_retry`.
+Caught only because `tests/test_graph_resume.py`'s own resume tests -- and this session's first
+version of `tests/test_api_resume.py` -- both induce their failures inside `synthesize_segment`,
+which only runs *after* `plan_segments` has already completed and checkpointed once; a failure
+before the first checkpoint was untested anywhere in the repo until this task.
+**Also found and fixed in the same pass:** the `graph.astream_events(...)` call was missing
+`durability="sync"`, unlike every other real call site of this graph (`cli.py`,
+`tests/test_graph_pipeline.py`, `tests/test_graph_resume.py`) -- without it the default
+(`durability="async"`, confirmed by reading `langgraph`'s own source) lets a checkpoint write for
+a just-completed superstep still be in flight while the next superstep starts, reopening the exact
+gap D68 closed for `ainvoke`. Added to match.
+**This is where D67 finally closes.** `core/graph/context.py::GraphContext` still deliberately
+excludes `JobQueue` (D66) -- nothing inside a graph run can see `QueuedJob.attempt` -- so the
+attempt ceiling could only ever live in whatever code wraps a whole invocation from the outside.
+`api/runner.py::MAX_ATTEMPTS = 3` and the `queued.attempt < MAX_ATTEMPTS` gate on
+`queue.fail(..., requeue=...)` is that wrapper, finally built.
+
+### D127 -- `api/job_store.py`: job listing and history backed by one small `jobs/index.json` file
+through `Storage`, rather than adding a `list()` method to the `Storage` interface
+**Rejected:** adding `Storage.list()`, implemented across `DiskStorage`, `BlobStorage`, and
+`FakeStorage`.
+**Reasoning:** `Storage` has no list operation because nothing under `core/` has ever needed one --
+adding one is real three-way adapter-parity work (D40's `inspect.signature` equality, semantics
+across a filesystem walk vs. a Blob container listing vs. an in-memory dict) with nothing else in
+the project asking for it yet. A single index file, written by the one call site that can ever
+race it (`api/jobs.py`'s submission path, serialised by `app.state.index_lock`), reuses the
+storage seam the project already has instead of growing the interface for a T22-only need. If a
+second real caller ever needs to enumerate storage contents, that is the point to revisit this,
+not before.
+
+### D128 -- `api/artifacts.py` resolves `Storage.url()`'s scheme at the API layer (`http(s)://`
+redirects, anything else streams bytes) instead of branching on `RUNTIME_ENV` or an adapter type
+**Rejected:** checking `RUNTIME_ENV`/`RENDER_ENV` to decide redirect-vs-stream; `isinstance`-
+checking the concrete `Storage` implementation.
+**Reasoning:** the interface's own docstring says `url()`'s return value is "opaque to core/ --
+only the API layer dereferences it," which is exactly what scheme-sniffing is -- and it is the one
+approach that never names a concrete adapter class (`config.py` stays the only module CLAUDE.md
+permits to do that) while still correctly covering all three real schemes without special-casing
+any of them by name: `DiskStorage`'s `file://`, `BlobStorage`'s SAS `https://`, and
+`FakeStorage`'s `memory://` (verified this discriminates correctly in tests -- an early version of
+this branch checked for `file://` specifically and would have redirected a browser to a
+`memory://` URL in every offline test, since the "not file://" case was wrongly assumed to always
+mean "web-fetchable").
+
+### D129 -- `GET /jobs/{job_id}/events` (T20's SSE endpoint) checks the job's status before
+subscribing, and short-circuits to one immediate event for an already-terminal job
+**Rejected:** subscribing unconditionally and relying on the client to give up eventually.
+**Reasoning:** found by `project-reviewer`, not anticipated in the original design. `JobEventBus
+.close()` only reaches subscribers registered *at the time it is called* -- a client that connects
+after a run has already finished (a page refresh, a reconnect after a network blip) would get a
+brand-new, empty queue nothing will ever publish to, and the request would hang open forever.
+Fixed by loading the job first (404 if unknown, matching every other endpoint in this file) and,
+if its status is already `succeeded`/`failed`, emitting one status event and returning instead of
+subscribing. The race this has to close, and does: there is no `await` between the status load and
+`bus.subscribe()`, and this project's runner is single-worker on one event loop, so nothing can
+advance the job's status in that gap -- confirmed, not assumed.

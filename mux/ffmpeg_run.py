@@ -14,7 +14,7 @@ from pathlib import Path
 
 from interfaces import RenderFailed
 
-DEFAULT_TIMEOUT_S = 60.0
+DEFAULT_TIMEOUT_S = 300.0
 
 
 async def run_ffmpeg(

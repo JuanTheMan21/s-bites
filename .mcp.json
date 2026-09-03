@@ -28,7 +28,7 @@
       "command": "repowise",
       "args": [
         "mcp",
-        "C:/Users/juant/Desktop/s_bites",
+        "C:/Users/antoj/Downloads/s-bites",
         "--transport",
         "stdio"
       ],

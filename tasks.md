@@ -650,32 +650,45 @@ would be premature — the validation render item above exists to show off a wor
 
 ## Iteration 4 — FastAPI backend
 
-### T19 — API skeleton · `todo`
+### T19 — API skeleton · `done`
 Job submission and the runner that drives the graph, reusing the pydantic models from T4 as request
 and response contracts.
-**DoD:** posting a job starts a real run and returns an id.
-**Depends:** T18
+**DoD:** posting a job starts a real run and returns an id — met, `api/jobs.py::submit_job` +
+`api/runner.py::JobRunner`.
+**Depends:** T18 — met.
+**Built together with T20-T23 in one combined session** (D125), by the user's own choice — see
+`handoff.md` for the full shape and `decisionlog.md` D123-D129 for every non-obvious call made
+building it, including two real bugs (`api/runner.py`'s resume-detection logic, a missing
+`durability="sync"`) found by `project-reviewer` and fixed before this checkpoint.
 
-### T20 — Progress streaming · `todo`
+### T20 — Progress streaming · `done`
 Live per-segment progress to clients, sourced from graph events rather than a bespoke event bus.
-**DoD:** a client observes stage transitions for each segment as they happen.
-**Depends:** T19
+**DoD:** a client observes stage transitions for each segment as they happen — met,
+`api/events.py::JobEventBus`/`summarize_node_event` sourced from `graph.astream_events`, SSE via
+`api/jobs.py::stream_job_events`.
+**Depends:** T19 — met.
 
-### T21 — Artifact serving · `todo`
+### T21 — Artifact serving · `done`
 Video and intermediate artifacts served through the `Storage` interface — never raw filesystem
 paths, so the Blob backend works unchanged.
-**DoD:** playback works identically under both `RUNTIME_ENV` values.
-**Depends:** T19
+**DoD:** playback works identically under both `RUNTIME_ENV` values — met, `api/artifacts.py`
+scheme-sniffs `Storage.url()` (D128) rather than branching on `RUNTIME_ENV` or a concrete adapter
+type. **Known gap, not blocking this DoD:** no HTTP Range/206 support on the byte-streaming branch
+— see `handoff.md`'s "Known gaps."
+**Depends:** T19 — met.
 
-### T22 — Job persistence & resume · `todo`
+### T22 — Job persistence & resume · `done`
 Job listing, history, and an endpoint that resumes a failed run from its checkpoint.
-**DoD:** a failed job resumes via the API without recomputing finished segments.
-**Depends:** T20
+**DoD:** a failed job resumes via the API without recomputing finished segments — met,
+`api/job_store.py` (D127) + `api/jobs.py::resume_job`, pinned by
+`tests/test_api_resume.py::test_resume_recovers_a_dead_lettered_job_without_re_synthesizing`.
+**Depends:** T20 — met.
 
-### T23 — API test suite · `todo`
+### T23 — API test suite · `done`
 Full backend coverage against the fakes, no network, no Azure.
-**DoD:** every endpoint covered offline.
-**Depends:** T22
+**DoD:** every endpoint covered offline — met, 14 tests across `tests/test_api_*.py`, all
+exercising the real `langgraph` library end to end against `tests/fakes/*` (never a mocked graph).
+**Depends:** T22 — met.
 
 ---
 
