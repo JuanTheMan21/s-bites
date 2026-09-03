@@ -73,6 +73,54 @@
     }
   }
 
+  // T18I: SceneLayout.SINGLE's own per-block loop (_layout_single.html) can
+  // stack more than one large block -- normalize_layout (core/scene_normalize.py) now caps this
+  // at authoring time, but a scene composed from an OLDER checkpoint (written before that fix)
+  // can still arrive here with a real multi-block stack. This is the render-side backstop:
+  // measure #stage's own real content span against the usable band (the same
+  // HF_CAPTION_BAND_TOP_FRAC this file already uses for a single dropped caption, reused rather
+  // than re-typed a third time -- D124's own review already caught that duplication once), and
+  // scale #stage down just enough to fit if it doesn't. Applied as a genuine GSAP tracked
+  // property (tl.set, D89) so it composes with #camera's own drift rather than fighting it --
+  // #stage sits inside #camera.
+  //
+  // #stage itself is height:100% of a 1080px-tall frame (top-aligned, y=0..1080), so its own
+  // border-box CENTRE -- and therefore transform-origin: center center's pivot -- sits at the
+  // frame's fixed y=540, NOT at wherever #stage's content happens to start. #stage also lays its
+  // children out with justify-content: center, so when the stacked children need MORE room than
+  // the box has, the overflow splits SYMMETRICALLY above and below that y=540 pivot -- confirmed
+  // live via direct Playwright instrumentation (project-reviewer's own review pass), which
+  // measured real overflowing content starting well above y=0. A first version of this function
+  // measured each child's own BOTTOM against #stage's own top edge, silently assuming content
+  // starts flush with it -- correct only when nothing overflows, which is precisely the one case
+  // this function has nothing to do. Fixed: measure the real min top / max bottom across every
+  // child, and scale each half (above/below the y=540 pivot) independently against its own
+  // available room, taking the more restrictive of the two.
+  var HF_STAGE_FIT_FLOOR = 0.75;
+  function hfFitStageToBand(stageId, rootId) {
+    var stage = document.getElementById(stageId);
+    var root = document.getElementById(rootId || "root");
+    if (!stage || !stage.children.length || !root) return 1;
+    var rootRect = root.getBoundingClientRect();
+    var scale = rootRect.width / 1920;
+    var pivot = 540; // #stage's own border-box centre -- see the comment above for why.
+
+    var minTop = Infinity, maxBottom = -Infinity;
+    for (var i = 0; i < stage.children.length; i++) {
+      var childRect = stage.children[i].getBoundingClientRect();
+      minTop = Math.min(minTop, (childRect.top - rootRect.top) / scale);
+      maxBottom = Math.max(maxBottom, (childRect.bottom - rootRect.top) / scale);
+    }
+
+    var bandTop = HF_CAPTION_BAND_TOP_FRAC * 1080;
+    // Each side's own scale ceiling: how much the farther-from-pivot edge can be shrunk toward
+    // the pivot before it clears its own boundary (bandTop below, the frame's own top=0 above).
+    var kBelow = maxBottom > pivot ? (bandTop - pivot) / (maxBottom - pivot) : Infinity;
+    var kAbove = minTop < pivot ? pivot / (pivot - minTop) : Infinity;
+    var k = Math.min(1, kBelow, kAbove);
+    return k >= 1 ? 1 : Math.max(HF_STAGE_FIT_FLOOR, k);
+  }
+
   // T18G: a shared, per-container registry of already-placed boxes (container-local units, the
   // same space hfAnnotationOffset returns) -- hfAnnotationPlace checks a candidate against it
   // before accepting, and hfRegisterPlacedRect lets a non-annotation element (an edge label) join
@@ -97,12 +145,20 @@
      rect already registered for this container -- clamping into that box as a last resort rather
      than ever landing outside it (which can still overlap a registered rect, in an extremely
      dense scene; this is best-effort, not a guarantee). The chosen box is itself registered on
-     the way out, so the NEXT annotation in this container avoids it in turn. #}
+     the way out, so the NEXT annotation in this container avoids it in turn.
+
+     T18I: gained a "parallel" candidate for a line-shaped target (detected from the target
+     element's own tag, not a caller flag -- automatic and impossible to get out of sync with the
+     markup), and a horizontal in-bounds check alongside the existing vertical one -- previously
+     nothing here checked a candidate's X against the container's own width, which is exactly
+     what produces an escaped_container finding once a candidate's X math (off.dx + off.w/2 -
+     annoW/2) lands close to an edge. Return shape is now {x, y, rotation}; every existing caller
+     already ignores extra keys on plain object literals, so this is additive. #}
   function hfAnnotationPlace(targetId, containerId, annoId, headlineId, captionLayerId, sides) {
     var off = hfAnnotationOffset(targetId, containerId);
     var anno = document.getElementById(annoId);
     var container = document.getElementById(containerId);
-    if (!anno || !container) return { x: off.dx, y: off.dy };
+    if (!anno || !container) return { x: off.dx, y: off.dy, rotation: 0 };
     var root = document.getElementById("root");
     var scale = root ? root.getBoundingClientRect().width / 1920 : 1;
     var a = anno.getBoundingClientRect();
@@ -110,6 +166,7 @@
     var c = container.getBoundingClientRect();
 
     var top = 0, bottom = c.height / scale;
+    var left = 0, right = c.width / scale;
     var headline = headlineId && document.getElementById(headlineId);
     if (headline) top = Math.max(top, (headline.getBoundingClientRect().bottom - c.top) / scale);
     var captionLayer = captionLayerId && document.getElementById(captionLayerId);
@@ -119,7 +176,9 @@
 
     var placed = window.__hfPlacedRects[containerId] || [];
     function inBounds(pos) {
-      return pos.y >= top && pos.y + annoH <= bottom;
+      return (
+        pos.x >= left && pos.x + annoW <= right && pos.y >= top && pos.y + annoH <= bottom
+      );
     }
     function clearOfPlaced(pos) {
       var box = { x: pos.x, y: pos.y, w: annoW, h: annoH };
@@ -133,30 +192,87 @@
     var candidates = {
       // "tip": the annotation wrap's own top-left corner (not its centre) lands exactly on the
       // target's centre -- CURSOR's own design, a glyph whose tip does the pointing.
-      tip: { x: off.dx + off.w / 2, y: off.dy + off.h / 2 },
-      center: { x: off.dx + off.w / 2 - annoW / 2, y: off.dy + off.h / 2 - annoH / 2 },
-      above: { x: off.dx + off.w / 2 - annoW / 2, y: off.dy - annoH - GAP },
-      below: { x: off.dx + off.w / 2 - annoW / 2, y: off.dy + off.h + GAP },
+      tip: { x: off.dx + off.w / 2, y: off.dy + off.h / 2, rotation: 0, dirX: 0, dirY: 1 },
+      center: {
+        x: off.dx + off.w / 2 - annoW / 2, y: off.dy + off.h / 2 - annoH / 2,
+        rotation: 0, dirX: 0, dirY: 1,
+      },
+      above: {
+        x: off.dx + off.w / 2 - annoW / 2, y: off.dy - annoH - GAP,
+        rotation: 0, dirX: 0, dirY: 1,
+      },
+      below: {
+        x: off.dx + off.w / 2 - annoW / 2, y: off.dy + off.h + GAP,
+        rotation: 0, dirX: 0, dirY: 1,
+      },
     };
-    var order = sides && sides.length ? sides : ["above", "below", "center"];
 
-    // T18G: a small vertical nudge search around each candidate BEFORE moving to the next side
-    // -- confirmed live that without this, a caller with only one candidate side (CURSOR's own
+    // T18I: angle is computed in RENDERED space -- the diagram SVGs draw with
+    // preserveAspectRatio="none", so the viewBox's own x1/y1/x2/y2 numbers map non-uniformly
+    // onto the screen and their raw ratio would give the wrong on-screen angle. off.w/off.h
+    // (from hfAnnotationOffset's own already-scale-normalized rect) give the true magnitude;
+    // only the SIGN of each axis's direction is read from the attributes.
+    var targetEl = document.getElementById(targetId);
+    var isLine =
+      !!targetEl && (targetEl.tagName === "line" || targetEl.hasAttribute("data-hf-line"));
+    if (isLine) {
+      var signX = 1, signY = 1;
+      if (targetEl.tagName === "line") {
+        var dx = (parseFloat(targetEl.getAttribute("x2")) || 0) -
+          (parseFloat(targetEl.getAttribute("x1")) || 0);
+        var dy = (parseFloat(targetEl.getAttribute("y2")) || 0) -
+          (parseFloat(targetEl.getAttribute("y1")) || 0);
+        signX = dx < 0 ? -1 : 1;
+        signY = dy < 0 ? -1 : 1;
+      }
+      var angle = Math.atan2(off.h * signY, off.w * signX);
+      var dirX = Math.cos(angle), dirY = Math.sin(angle);
+      var perpX = -dirY, perpY = dirX;
+      var midX = off.dx + off.w / 2, midY = off.dy + off.h / 2;
+      var reach = annoH / 2 + GAP;
+      // Keep text upright: normalizing into (-90, 90] turns any line angle into a shallow tilt
+      // rather than ever rendering the caption upside down.
+      var rotationDeg = (angle * 180) / Math.PI;
+      if (rotationDeg > 90) rotationDeg -= 180;
+      if (rotationDeg <= -90) rotationDeg += 180;
+      candidates.parallel = {
+        x: midX + perpX * reach - annoW / 2,
+        y: midY + perpY * reach - annoH / 2,
+        rotation: rotationDeg,
+        dirX: dirX, dirY: dirY,
+      };
+    }
+
+    var order = sides && sides.length
+      ? sides.filter(function (s) { return !!candidates[s]; })
+      : ["above", "below", "center"];
+    if (!order.length) order = ["center"];
+
+    // T18G: a small nudge search around each candidate BEFORE moving to the next side --
+    // confirmed live that without this, a caller with only one candidate side (CURSOR's own
     // ["tip"]) never actually benefited from collision avoidance at all: its one candidate fails
     // clearOfPlaced, the old Pass 2 fell straight through to "in-bounds is enough" and accepted
     // the SAME overlapping position anyway. Two annotations on the same graph node (a CHECK and
     // a CURSOR) visibly collided in a real render before this fix.
+    // T18I: generalized from "always nudge vertically" to "nudge along the candidate's OWN
+    // direction" (candidates[side].dirX/dirY) -- "parallel"'s direction is the line's own, not
+    // the frame's Y axis; nudging it vertically would search across the line, not along it.
     function nudged(pos) {
       var step = (annoH + GAP) * 0.65;
       var offsets = [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6];
       for (var s = 0; s < offsets.length; s++) {
-        var cand = { x: pos.x, y: pos.y + offsets[s] * step };
+        var cand = {
+          x: pos.x + pos.dirX * offsets[s] * step,
+          y: pos.y + pos.dirY * offsets[s] * step,
+          rotation: pos.rotation,
+        };
         if (inBounds(cand) && clearOfPlaced(cand)) return cand;
       }
       return null;
     }
 
-    // Pass 1: each candidate side, nudged vertically until one is both in-bounds and clear.
+    // Pass 1: each candidate side, nudged along its own direction until one is both in-bounds
+    // and clear.
     for (var i = 0; i < order.length; i++) {
       var found = nudged(candidates[order[i]]);
       if (found) {
@@ -171,12 +287,13 @@
       var pos2 = candidates[order[k]];
       if (inBounds(pos2)) {
         hfRegisterPlacedRect(containerId, { x: pos2.x, y: pos2.y, w: annoW, h: annoH });
-        return pos2;
+        return { x: pos2.x, y: pos2.y, rotation: pos2.rotation };
       }
     }
     var fallback = candidates[order[0]];
-    fallback.y = Math.min(Math.max(fallback.y, top), Math.max(top, bottom - annoH));
-    hfRegisterPlacedRect(containerId, { x: fallback.x, y: fallback.y, w: annoW, h: annoH });
-    return fallback;
+    var clampedX = Math.min(Math.max(fallback.x, left), Math.max(left, right - annoW));
+    var clampedY = Math.min(Math.max(fallback.y, top), Math.max(top, bottom - annoH));
+    hfRegisterPlacedRect(containerId, { x: clampedX, y: clampedY, w: annoW, h: annoH });
+    return { x: clampedX, y: clampedY, rotation: fallback.rotation };
   }
 {% endmacro %}

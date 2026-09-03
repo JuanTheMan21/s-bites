@@ -27,10 +27,11 @@ from adapters.local.storage import DiskStorage
 from core.block_schemas import TitleSlots
 from core.block_types import BlockType, MotifName, SceneLayout
 from core.graph import GraphContext, build_graph
-from core.models import Importance, VideoJob, VisualIntent
+from core.models import Importance, VisualIntent
 from core.outline_schema import Outline, SegmentPlan
 from core.scene_plan_schema import PlannedBlock, SegmentScenePlan, VideoScenePlan
 from core.scripting_schema import Narration
+from core.video_job import VideoJob
 from interfaces import SkillPack
 from tests.fakes import FakeLLMProvider, FakeRenderBackend, FakeSkillRegistry, FakeTTSProvider
 

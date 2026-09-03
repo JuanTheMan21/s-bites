@@ -9,7 +9,8 @@ two segments: each task only ever contributes the one key it owns.
 
 from typing import Annotated, TypedDict
 
-from core.models import Segment, VideoJob
+from core.models import Segment
+from core.video_job import VideoJob
 
 
 def merge_segments(existing: dict[int, Segment], update: dict[int, Segment]) -> dict[int, Segment]:

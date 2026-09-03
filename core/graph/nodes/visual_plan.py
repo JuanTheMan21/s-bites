@@ -18,6 +18,7 @@ from core.graph.nodes.skill_prompt import load_step_prompt
 from core.graph.nodes.structured_retry import generate_with_bounded_retries
 from core.graph.state import GraphState
 from core.models import Segment
+from core.scene_normalize import normalize_layout
 from core.scene_plan_schema import SegmentScenePlan, VideoScenePlan
 from core.scene_schemas import ComposedBlock, ComposedScene
 from interfaces import LLMProvider, SkillRegistry
@@ -148,15 +149,17 @@ async def plan_visuals(state: GraphState, runtime: Runtime[GraphContext]) -> dic
             if segment_plan is None:
                 scene = _fallback_scene(plan.motif)
             else:
+                planned_blocks = [
+                    ComposedBlock(
+                        block_type=b.block_type, role=b.role, anchor_phrase=b.anchor_phrase
+                    )
+                    for b in segment_plan.blocks
+                ]
+                layout, blocks = normalize_layout(segment_plan.layout, planned_blocks)
                 scene = ComposedScene(
                     motif=plan.motif,
-                    layout=segment_plan.layout,
-                    blocks=[
-                        ComposedBlock(
-                            block_type=b.block_type, role=b.role, anchor_phrase=b.anchor_phrase
-                        )
-                        for b in segment_plan.blocks
-                    ],
+                    layout=layout,
+                    blocks=blocks,
                     continues_previous=segment_plan.continues_previous,
                 )
         updated[segment.index] = segment.model_copy(update={"scene": scene.model_dump()})

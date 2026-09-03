@@ -18,7 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.block_types import AnnotationType, BlockType, MotifName, SceneLayout
+from core.block_types import AnnotationTargetKind, AnnotationType, BlockType, MotifName, SceneLayout
 
 
 class ComposedBlock(BaseModel):
@@ -51,6 +51,7 @@ class ComposedAnnotation(BaseModel):
 
     annotation_type: AnnotationType
     target_block_index: int
+    target_kind: AnnotationTargetKind = AnnotationTargetKind.ITEM
     target_item_index: int
     anchor_phrase: str
     caption: str | None

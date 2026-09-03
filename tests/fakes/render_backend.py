@@ -42,9 +42,25 @@ class FakeRenderBackend(FailureInjector, RenderBackend):
     raises it.
     """
 
-    def __init__(self, findings: Sequence[str] = (), geometry_findings: Sequence[str] = ()) -> None:
+    def __init__(
+        self,
+        findings: Sequence[str] = (),
+        geometry_findings: Sequence[str] = (),
+        geometry_findings_sequence: Sequence[Sequence[str]] | None = None,
+    ) -> None:
         self.findings = list(findings)
         self.geometry_findings = list(geometry_findings)
+        # T18I: geometry_findings_sequence lets a test simulate render_scene.py's own recovery
+        # sequence (first attempt fails, a re-authored/fallback attempt succeeds) -- one entry
+        # per validate_geometry call, in order; the LAST entry repeats once exhausted, so a test
+        # doesn't have to predict exactly how many attempts a given scenario takes. None (the
+        # default) keeps the old single-static-list behaviour every existing caller relies on.
+        self._geometry_findings_sequence = (
+            [list(entry) for entry in geometry_findings_sequence]
+            if geometry_findings_sequence is not None
+            else None
+        )
+        self.validate_geometry_calls = 0
         self.captures: list[CaptureCall] = []
         self.renders: list[RenderCall] = []
 
@@ -75,4 +91,9 @@ class FakeRenderBackend(FailureInjector, RenderBackend):
 
     async def validate_geometry(self, composition: Path) -> list[str]:
         self._maybe_fail("validate_geometry")
+        if self._geometry_findings_sequence is not None:
+            index = min(self.validate_geometry_calls, len(self._geometry_findings_sequence) - 1)
+            self.validate_geometry_calls += 1
+            return list(self._geometry_findings_sequence[index])
+        self.validate_geometry_calls += 1
         return list(self.geometry_findings)

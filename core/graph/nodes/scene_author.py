@@ -44,6 +44,7 @@ async def fill_block(
     block: ComposedBlock,
     *,
     duration_ms: int,
+    feedback: str | None = None,
 ) -> dict[str, Any]:
     """Fill one block's content payload, given how long the scene it belongs to is on screen.
 
@@ -51,6 +52,11 @@ async def fill_block(
     this function -- Invariant 1's structural enforcement, unchanged from before T18B: a caller
     who has not measured yet cannot satisfy this signature without inventing a number in plain
     sight.
+
+    ``feedback`` (T18I), when given, is a corrective note appended after the base prompt -- the
+    same "## Revise" appendix shape ``visual_plan.py``'s own single re-ask already uses, reused
+    here by ``core/graph/nodes/scene_reauthor.py`` for its one bounded re-author attempt after a
+    geometry finding names this block's content as too large for the frame.
 
     The returned dict is ``block_schema_for(block.block_type)``'s own ``model_dump()`` -- it is
     stored on that block's ``payload`` inside ``Segment.scene``, which is untyped (D29), so
@@ -68,6 +74,8 @@ async def fill_block(
         f"Segment title: {segment.title}\n"
         f"Narration this scene accompanies:\n{segment.narration}"
     )
+    if feedback:
+        prompt = f"{prompt}\n\n{feedback}"
     payload = await generate_with_bounded_retries(
         llm,
         prompt,
@@ -110,6 +118,16 @@ async def author_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
         )
 
     scene = ComposedScene.model_validate(segment.scene)
+    # T18I: resume idempotency -- a segment already fully authored in a previous run of this SAME
+    # job_id (a checkpoint resume) has every block's payload already set. Without this, a resumed
+    # job re-authors from scratch: real LLM spend, and (via sampling non-determinism) DIFFERENT
+    # content than the attempt that already rendered cleanly -- exactly what the handoff's own
+    # "resume doesn't actually skip ahead" gotcha named. A partially-authored scene (some blocks
+    # filled, one not -- unreachable today since fill_block calls run together via gather, but not
+    # a state this guard should silently paper over) still falls through to a full re-author below.
+    if scene.blocks and all(block.payload is not None for block in scene.blocks):
+        return {"segments": {segment.index: segment}}
+
     payloads = await asyncio.gather(
         *(
             fill_block(

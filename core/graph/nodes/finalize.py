@@ -12,7 +12,7 @@ from langgraph.runtime import Runtime
 from core.graph.context import GraphContext
 from core.graph.nodes.render_scene import local_clip_path
 from core.graph.state import GraphState
-from core.models import JobStatus
+from core.video_job import JobStatus
 from mux.concat_segments import concat_segments
 from mux.subtitles import write_srt
 
@@ -47,12 +47,19 @@ async def finalize(state: GraphState, runtime: Runtime[GraphContext]) -> dict:
     subtitles_key = FINAL_SUBTITLES_KEY.format(job_id=job.job_id)
     await context.storage.put_file(subtitles_key, srt_dest, content_type="text/plain")
 
+    # T18I: every segment that needed a re-author, a fallback, or both -- the production-facing
+    # signal this pipeline previously had none of beyond a crash. status stays SUCCEEDED
+    # regardless: a degraded segment still produced a usable video, and this list is what says
+    # the story isn't quite that simple, not a reason to call the whole job failed.
+    degraded = [s.render_outcome for s in ordered if s.render_outcome is not None]
+
     updated_job = job.model_copy(
         update={
             "segments": ordered,
             "status": JobStatus.SUCCEEDED,
             "video_key": key,
             "subtitles_key": subtitles_key,
+            "degraded_segments": degraded,
         }
     )
     return {"job": updated_job}

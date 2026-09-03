@@ -16,7 +16,7 @@ from adapters.azure.llm_provider import AzureOpenAILLMProvider
 from adapters.local.skill_registry import DiskSkillRegistry
 from core.graph.nodes.outline import generate_outline
 from core.graph.nodes.scripting import write_narration
-from core.models import VideoJob
+from core.video_job import VideoJob
 from tests.azure_live import require
 
 pytestmark = pytest.mark.live

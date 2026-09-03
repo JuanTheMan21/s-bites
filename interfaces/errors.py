@@ -112,6 +112,15 @@ class CompositionInvalid(Exception):
     returns findings rather than raising, so this is raised by the code that decides a
     finding is fatal -- our own, running identically on both stacks.
 
-    Retry: **will not help.** Nothing about a requeue changes the composition, so a retry
-    reproduces this exactly while consuming an attempt.
+    Retry: **will not help** as a blind requeue. Nothing about re-running the SAME composition
+    changes it, so a bare retry reproduces this exactly while consuming an attempt. T18I:
+    ``findings`` (the raw fatal strings that triggered this) lets a caller judge whether the
+    underlying CONTENT is worth one bounded re-author with corrective feedback
+    (``rendering/geometry_findings.py::is_content_retryable``, ``core/graph/nodes/
+    render_scene.py``) -- a narrower, explicit exception to the "will not help" rule above,
+    which still holds for re-running the identical composition unchanged.
     """
+
+    def __init__(self, message: str, *, findings: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.findings: list[str] = findings or []

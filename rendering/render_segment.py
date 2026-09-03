@@ -79,7 +79,8 @@ async def render_segment(
     fatal = [f for f in findings if not f.startswith("[warning]") and not f.startswith("[info]")]
     if fatal:
         raise CompositionInvalid(
-            f"segment {segment.index}'s composition ({composition}) failed lint: {fatal}"
+            f"segment {segment.index}'s composition ({composition}) failed lint: {fatal}",
+            findings=fatal,
         )
 
     # T18H: a second, equally-fatal gate -- lint is static (one page load, schema-only) and
@@ -93,7 +94,8 @@ async def render_segment(
     if fatal_geometry:
         raise CompositionInvalid(
             f"segment {segment.index}'s composition ({composition}) failed geometry validation: "
-            f"{fatal_geometry}"
+            f"{fatal_geometry}",
+            findings=fatal_geometry,
         )
 
     renderer = _TIER_RENDERERS[segment.tier]

@@ -20,7 +20,8 @@ from pathlib import Path
 import pytest
 
 from core.graph import GraphContext, build_graph
-from core.models import Tier, VideoJob
+from core.models import Tier
+from core.video_job import VideoJob
 from mux.concat_segments import DEFAULT_TRANSITION_S
 from tests.fakes import FakeStorage, FakeTTSProvider
 from tests.graph_pipeline_live_fixtures import seeded_llm, seeded_skills

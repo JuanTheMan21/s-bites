@@ -14,7 +14,8 @@ from langgraph.graph import END, START, StateGraph
 
 from core.graph import GraphContext, GraphState
 from core.graph.nodes.tiering import assign_tiers
-from core.models import DEFAULT_TARGET_DURATION_MS, Segment, Tier, VideoJob
+from core.models import DEFAULT_TARGET_DURATION_MS, Segment, Tier
+from core.video_job import VideoJob
 from tests.fakes import (
     FakeLLMProvider,
     FakeRenderBackend,

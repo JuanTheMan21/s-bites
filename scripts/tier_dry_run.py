@@ -28,8 +28,9 @@ from config import Adapters, build_adapters, close_adapters
 from core.frame_budget import scale_frame_budget
 from core.graph.nodes.outline import generate_outline
 from core.graph.nodes.scripting import write_narration
-from core.models import DEFAULT_TARGET_DURATION_MS, Segment, Tier, VideoJob
+from core.models import DEFAULT_TARGET_DURATION_MS, Segment, Tier
 from core.tier_resolver import TierPlan, resolve_tiers
+from core.video_job import VideoJob
 
 RUN_ROOT = Path("artifacts") / "_tier_dry_run"
 

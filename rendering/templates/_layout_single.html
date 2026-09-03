@@ -39,6 +39,8 @@
         display: flex;
         flex-direction: column;
         justify-content: center;
+        transform-origin: center center;
+        will-change: transform;
       }
     </style>
   </head>
@@ -89,12 +91,21 @@
         0,
       );
 
+      // T18I: backstop for a multi-block SINGLE stack that overflows the usable band -- see
+      // hfFitStageToBand's own comment (_annotations.html) for why this measures BEFORE any
+      // annotation positioning below, and why a real GSAP tween (not a manual style write) is
+      // what keeps this seek-safe under #camera's own drift.
+      var __hfStageFit = hfFitStageToBand("stage", "root");
+      if (__hfStageFit < 1) {
+        tl.set("#stage", { scale: __hfStageFit }, 0);
+      }
+
       {% for block in blocks %}
       {% import "_block_" ~ block.block_type ~ ".html" as blk %}
       {{ blk.script(block.prefix, block.payload, block.entrance_start, block.item_starts, block.step_starts, duration_sec, compact=false) }}
       {% for annotation in block.annotations %}
       {% import "_annotation_" ~ annotation.annotation_type ~ ".html" as ann_tpl %}
-      {{ ann_tpl.script(annotation.prefix, annotation.caption, annotation.entrance_start, annotation.target_id, annotation.container_id, annotation.headline_id, "ls-captions") }}
+      {{ ann_tpl.script(annotation.prefix, annotation.caption, annotation.entrance_start, annotation.target_id, annotation.container_id, annotation.headline_id, "ls-captions", annotation.is_line) }}
       {% endfor %}
       {% endfor %}
 

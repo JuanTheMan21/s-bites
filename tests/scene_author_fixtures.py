@@ -16,8 +16,9 @@ from core.graph import GraphContext, GraphState
 from core.graph.nodes.scene_author import author_scene
 from core.graph.retry_policy import build_transient_retry_policy
 from core.graph.state import SegmentTask
-from core.models import Segment, VideoJob
+from core.models import Segment
 from core.scene_schemas import ComposedBlock, ComposedScene
+from core.video_job import VideoJob
 from interfaces import SkillPack
 from tests.block_examples import EXAMPLES
 from tests.fakes import (

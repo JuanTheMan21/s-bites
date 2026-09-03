@@ -6,8 +6,8 @@ state update and two refusals, both of which are about the node rather than the 
 import pytest
 
 from core.annotation_plan_schema import AuthoredAnnotation, SceneAnnotations
-from core.block_types import BlockType
-from core.scene_schemas import ComposedScene
+from core.block_types import AnnotationTargetKind, BlockType
+from core.scene_schemas import ComposedBlock, ComposedScene
 from tests.block_examples import EXAMPLES
 from tests.fakes import FakeLLMProvider
 from tests.scene_author_fixtures import (
@@ -56,6 +56,7 @@ async def test_annotations_are_authored_after_blocks_are_filled(tmp_path) -> Non
     annotation = AuthoredAnnotation(
         annotation_type="cursor",
         target_block_index=0,
+        target_kind=AnnotationTargetKind.ITEM,
         target_item_index=1,
         anchor_phrase="cannot tell data from code",
         caption=None,
@@ -73,6 +74,34 @@ async def test_annotations_are_authored_after_blocks_are_filled(tmp_path) -> Non
     assert len(scene.annotations) == 1
     assert scene.annotations[0].target_block_index == 0
     assert scene.annotations[0].target_item_index == 1
+
+
+async def test_a_fully_authored_segment_is_not_re_authored_on_resume(tmp_path) -> None:
+    """T18I resume idempotency: a segment whose scene already has every block's payload set (it
+    was fully authored in a prior run of this same job_id) must not re-author from scratch on
+    resume -- the handoff's own observed gotcha (real LLM spend, and via sampling
+    non-determinism, possibly DIFFERENT content than the attempt that already rendered). The
+    empty llm queue proves it: fill_block/author_annotations would raise loudly if either ran."""
+    segment = a_planned_segment(3, a_planned_block(BlockType.TEXT_PANEL))
+    filled_scene = ComposedScene.model_validate(segment.scene).model_copy(
+        update={
+            "blocks": [
+                ComposedBlock(
+                    block_type=BlockType.TEXT_PANEL,
+                    role="role",
+                    anchor_phrase=None,
+                    payload=EXAMPLES[BlockType.TEXT_PANEL],
+                )
+            ]
+        }
+    )
+    segment = segment.model_copy(update={"scene": filled_scene.model_dump()})
+    llm = FakeLLMProvider([])
+
+    authored = await run_author_scene(segment, a_context(a_skill_registry(), llm, tmp_path))
+
+    assert authored[3].scene == segment.scene
+    assert llm.calls == []
 
 
 async def test_an_unmeasured_segment_raises_before_any_llm_call(tmp_path) -> None:

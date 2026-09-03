@@ -9,7 +9,7 @@ scene_author.py`` fills every block, so it can name a real item.
 
 from pydantic import Field
 
-from core.block_types import AnnotationType
+from core.block_types import AnnotationTargetKind, AnnotationType
 from core.strict_schema import StrictSchema
 
 
@@ -24,10 +24,18 @@ class AuthoredAnnotation(StrictSchema):
         description="Which block in this segment's blocks list (0-based) this annotation "
         "attaches to. Only a block listed with numbered items below may be targeted."
     )
+    target_kind: AnnotationTargetKind = Field(
+        description="ITEM for a point-shaped target (a node, a row, a cell) -- the common case. "
+        "LINK for a line-shaped target (a graph_diagram edge, a sequence_diagram message arrow) "
+        "-- use this whenever the thing being pointed out IS the connection/relationship itself, "
+        "not one of its endpoints, so it renders alongside the line rather than on top of it."
+    )
     target_item_index: int = Field(
-        description="Which numbered item of the target block this points at (0-based), matching "
-        "one of the numbered items listed for that block -- the third array_grid cell, the "
-        "second code_diff line, the first graph_diagram node. Always a real item; never a guess."
+        description="Which numbered item/link of the target block this points at (0-based), "
+        "matching one of the numbered entries listed for that block under 'items' when "
+        "target_kind is ITEM, or 'links' when target_kind is LINK -- the third array_grid cell, "
+        "the second code_diff line, the first graph_diagram node, or (LINK) the first "
+        "graph_diagram edge. Always a real entry; never a guess."
     )
     anchor_phrase: str = Field(
         description="A short phrase copied VERBATIM from this segment's narration, marking the "

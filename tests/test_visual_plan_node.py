@@ -68,7 +68,7 @@ async def _run_plan_visuals(segments: dict, context: GraphContext) -> dict:
     builder.add_edge("plan_visuals", END)
     graph = builder.compile()
 
-    from core.models import VideoJob
+    from core.video_job import VideoJob
 
     job = VideoJob(job_id="job-1", topic="a topic")
     result = await graph.ainvoke({"job": job, "segments": segments}, context=context)

@@ -1,19 +1,22 @@
-"""The vocabulary the pipeline speaks: what a job is, what a segment is, what a tier is.
+"""The vocabulary the pipeline speaks: what a segment is, what a tier is.
 
 Pipeline state and the enums it is built from. What the *LLM* returns lives one module over
 in ``core/outline_schema.py`` -- the split is Invariant 1, and ``Segment`` explains it.
+``VideoJob``/``JobStatus`` live in ``core/video_job.py`` (T18I, split out to stay under the
+200-line ceiling) -- a genuinely separate concern (the whole run) from this module's own
+(one segment), the same way ``core/scene_schemas.py`` is kept separate (D28's reasoning).
 
 stdlib and pydantic only. ``core/tier_resolver.py`` may import nothing but stdlib and this
 module, so anything added here that reaches outside the process breaks T5's definition of done
 as well as the boundary rule.
 """
 
-from datetime import UTC, datetime
 from enum import IntEnum, StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.render_outcome import RenderOutcome
 from core.synthesis import WordMark
 
 # Narration pace. The one number that turns a requested video length into a segment count, so
@@ -80,15 +83,6 @@ class Importance(IntEnum):
     CRITICAL = 5
 
 
-class JobStatus(StrEnum):
-    """Where a job is. ``FAILED`` is terminal only until T22 resumes it from its checkpoint."""
-
-    QUEUED = "queued"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-
-
 class Segment(BaseModel):
     """A segment as the pipeline knows it: the plan, plus everything measured since.
 
@@ -143,44 +137,9 @@ class Segment(BaseModel):
         description="Storage key of this segment's final clip (rendered video + narration "
         "audio, muxed). Set only by core/graph/nodes/render_scene.py, once slots are filled.",
     )
-
-
-class VideoJob(BaseModel):
-    """One video request, and everything the pipeline has learned about it.
-
-    Serves as pipeline state, as the LangGraph checkpoint payload (T14), and as the API
-    response body (T19) -- hence a plain model with defaults rather than a strict schema.
-    Extras are forbidden all the same: pydantic ignores an unknown key by default, so a typo in
-    a request body would be dropped in silence rather than rejected.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    job_id: str
-    topic: str = Field(description="The prompt as the user typed it.")
-    target_duration_ms: int = DEFAULT_TARGET_DURATION_MS
-    status: JobStatus = JobStatus.QUEUED
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    segments: list[Segment] = Field(default_factory=list)
-    video_key: str | None = Field(
+    render_outcome: RenderOutcome | None = Field(
         default=None,
-        description="Storage key of the finished, concatenated video. Set only by "
-        "core/graph/nodes/finalize.py, once every segment's clip has been rendered and muxed.",
+        description="T18I: set only when this segment's render needed more than one attempt -- "
+        "a re-author, a fallback to a plain title card, or both. Null is the common case (clean "
+        "on the first try) and is not itself a RenderOutcome variant; see that type's docstring.",
     )
-    subtitles_key: str | None = Field(
-        default=None,
-        description="T18A: storage key of the SRT sidecar (mux/subtitles.py). Set alongside "
-        "video_key by core/graph/nodes/finalize.py. May stay null on the same terms as an "
-        "individual segment's word_marks -- nothing downstream requires it.",
-    )
-
-    @property
-    def segment_count(self) -> int:
-        """How many segments this job's target length calls for.
-
-        Derived, deliberately. A ``SEGMENT_COUNT = 15`` in the outline node reads fine until
-        someone asks for a ten-minute video and gets a seven-minute one made of longer
-        segments. Target length is a parameter of the request, so segment count is a function
-        of it.
-        """
-        return max(MIN_SEGMENTS, round(self.target_duration_ms / 1000 / SECONDS_PER_SEGMENT))

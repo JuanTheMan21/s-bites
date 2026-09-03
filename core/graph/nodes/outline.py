@@ -3,8 +3,9 @@ from the ``outline`` pack and the ``house-style`` pack it is always interpolated
 
 from core.graph.nodes.skill_prompt import load_step_prompt
 from core.graph.nodes.structured_retry import generate_with_bounded_retries
-from core.models import Segment, VideoJob
+from core.models import Segment
 from core.outline_schema import Outline
+from core.video_job import VideoJob
 from interfaces import LLMProvider, SkillRegistry
 
 OUTLINE_PACK = "outline"
