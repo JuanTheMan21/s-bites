@@ -748,7 +748,7 @@ real downloaded package and confirming `imsmanifest.xml` + `launch.html` + `vide
 `subtitles.srt` when present).
 **Depends:** T27 (needs a finished video) — met.
 
-### T37 — Frontend visual redesign · `todo` *(new task, added after T24-T28/T36's first real
+### T37 — Frontend visual redesign · `done` *(new task, added after T24-T28/T36's first real
 end-to-end use surfaced that the visual design doesn't match what the user actually wants)*
 The functional frontend (T24-T28, T36) works end to end against a real backend — verified via two
 real Azure renders — but the user rejected its current visual design after using it for real.
@@ -787,6 +787,12 @@ component's real visual code changes; the approved direction then implemented fo
 `web`'s `tsc -b --noEmit`/`eslint .`/`vitest run`/`npm run build` all still green; no regression in
 Parts 1-3's structural behaviour or the T18/frontend seam (CLAUDE.md invariant 5).
 **Depends:** T24-T28, T36 — met.
+**Done, with one disclosed substitution:** Claude's `design` skill turned out not to be installed
+in this repo, so the wireframe gate was met via Impeccable's real direction-roll workflow
+(disclosed as it happened, not after) instead — full story in decisionlog D145-D148. All DoD
+checks green; two `project-reviewer` passes plus a two-round `impeccable-finish-reviewer` loop, no
+open findings in `web/` at close. One pre-existing (not T37-introduced) accessibility gap in
+`Pill`/`StatusPill`'s status-tone colors was found but not fixed — see `handoff.md`.
 
 ---
 

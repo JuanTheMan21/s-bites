@@ -5,9 +5,9 @@ import { Pill } from '@/components/Pill'
  * disabled facsimile of working upload behaviour. Filling it in later is wiring, not layout. */
 export function LibraryPage() {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-4 px-6 py-16">
-      <div className="flex items-center gap-2">
-        <h1 className="font-display text-3xl text-ink-900">Document library</h1>
+    <div className="mx-auto flex max-w-3xl flex-col gap-4 px-8 py-16">
+      <div className="flex items-center gap-3">
+        <h1 className="font-display text-4xl text-ink-900">Document library</h1>
         <Pill tone="neutral">Coming soon</Pill>
       </div>
       <EmptyState

@@ -11,7 +11,7 @@ export function StudioPage() {
   const { jobId } = useParams<{ jobId?: string }>()
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-8 px-6 py-16">
+    <div className="mx-auto flex max-w-6xl flex-col gap-8 px-8 py-16">
       <ComposerSection collapsed={Boolean(jobId)} />
       {jobId ? (
         <JobStageLoader jobId={jobId} />

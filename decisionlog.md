@@ -2954,3 +2954,90 @@ fixes first, in their own time, before any styling code changes -- and because a
 is inherently a separate session boundary (the user reacts to a published artifact, not to more
 live-coding). Full context repeated in `handoff.md`, not only here, since a fresh session reads
 that first.
+
+## 2026-09-04 · T37 built (frontend visual redesign)
+
+Merged `8ebda33`/`7e1a192` in from another machine first (T24-T28+T36, already reviewed in a prior
+session -- not re-litigated here), then built T37 against D144's gate: a wireframe/direction
+round, explicit user sign-off, then implementation, then a two-round finish-review loop, then a
+second live-UI pass on user feedback (sizing, copy, dark-mode toggle, animated placeholder).
+
+### D145 -- The direction round ran degraded (a self-built grounded candidate list, not a live
+catalog roll), and the user picked their own top-ranked candidate over the tool's anti-rut
+assignment
+**Rejected:** treating the degraded roll as a blocker; silently picking a direction without
+disclosing the substitution; building the assigned candidate without offering the alternative.
+**Reasoning:** `concept-seed.mjs --scope direction --mode operate` reported no reachable catalog
+service -- confirmed not a sandbox network block (`curl` to the same URL succeeded; Node's own
+`fetch` specifically failed, an unresolved Node-only proxy/cert quirk on this machine). Per the
+skill's own documented fallback, built a ranked list of 7 grounded visual-world candidates by hand
+(broadcast/NLE timeline, mission-control telemetry, storyboard/script binder, radio/podcast
+console, subtitle/caption editor, split-flap board, slate/take log -- spanning creative-pro
+software, operations dashboards, print/paper artifacts, and physical AV equipment, explicitly
+excluding the category's dark-mode-neon rut and its flat-SaaS-dashboard opposite). The tool's
+anti-rut assignment landed on candidate 5 (caption editor); presented both that assignment and the
+top-ranked candidate 1 (broadcast/production timeline) as an "Impeccable's Pick" card, disclosing
+the degraded roll in the same message. User picked the Pick card, not the assignment -- a
+legitimate outcome the skill's own doc names explicitly ("familiar and effective is a legitimate
+destination, not a failure of nerve"). Full 7-candidate list and rationale recorded in
+`.impeccable/surfaces/web-src.md`.
+
+### D146 -- The live-progress segment display is a horizontal clip strip (`ClipStrip.tsx`), not
+`SegmentGrid`'s card grid; `SegmentGrid` is kept, scoped to the finished/browse view only
+**Rejected:** restyling `SegmentGrid` in place and reusing it for both the live and finished
+views, as the first build pass did.
+**Reasoning:** the finish-reviewer's fidelity check (spawned fresh, no forked context, per its own
+contract) caught that the direction contract's FIRST VIEWPORT block explicitly promised "segment
+blocks sit on that track, not a card grid" -- and the first pass shipped exactly the pre-existing
+`grid-cols-2/3/4` wrap, only restyled cosmetically. `ClipStrip.tsx` is a new, separate component
+(`overflow-x-auto` snap-scroll, reusing `SegmentCard` inside fixed-width items) used only in
+`LiveProgress.tsx`; `SegmentGrid`/`JobResult.tsx`'s browse view was left untouched deliberately --
+browsing many completed segments after a job finishes is a different task from watching a strip
+fill in live, and a wrapping grid is the right tool for that one, not a regression to fix. Two
+follow-up review rounds also added a real waveform to `ClipTrack.tsx` (deterministic per-bar
+height, keyed to real segment count, never fabricated audio data -- D137) and a scroll-affordance
+fade on `ClipStrip`, both flagged by the same reviewer against the same contract.
+
+### D147 -- `--color-accent` is never used as literal text color on a light background; two new
+derived tokens (`--color-accent-ink`, `--color-accent-solid`) exist specifically for that
+**Rejected:** reusing `--color-accent` for hover-state text and pill labels, as the first pass of
+this session's polish work did; "just make hover more colorful" as a general instruction without
+checking contrast.
+**Reasoning:** `--color-accent` (`#e8542f`) measures 3.13-3.50:1 against every light background it
+was used as text on (`--color-accent-tint`, `--color-paper-0`, `--color-paper-1`) -- below WCAG
+AA's 4.5:1 floor for normal text, in some cases *worse* than the resting (non-hover) state it
+replaced. Caught first in `Pill.tsx`'s `accent` tone and hover states on nav links, then a wider
+`project-reviewer` sweep during this same fix surfaced the same defect on `Button.tsx`'s primary
+variant (white text on solid `--color-accent` background, 3.50:1) -- pre-existing from before this
+session, not introduced by it, but fixed here since the tooling and the pattern were already in
+hand. Two new tokens, not one: `--color-accent-ink` (`#b8391c` light / `#ff6b45` dark, 4.94-5.52:1
+against every light background measured) for text sitting on a light/tinted ground, and
+`--color-accent-solid` (`#c23e1f` light / `#ff6b45` dark, 5.02:1) for white text on a solid
+accent-filled button, because the two use cases need different amounts of darkening and collapsing
+them into one token would either wash out the border/icon uses of `--color-accent` (unaffected,
+left alone -- those are graphical, not text, held to WCAG's lower 3:1 non-text bar) or under-darken
+one of the two text cases. Dark mode needs neither new value -- both pairings already pass there
+(5.32:1, 6.59:1) -- so both new tokens just reuse `--color-accent` under `:root[data-theme='dark']`.
+**Known gap, not fixed this session:** `Pill`/`StatusPill`'s `run`/`ok`/`warn`/`bad` tones use the
+same "saturated color as literal text on its own light tint" pattern and measure 2.82-4.43:1 in
+light mode -- the exact same defect class, pre-existing, sitting two lines from code this session
+touched, but out of T37's stated scope (a visual-direction redesign, not a full accessibility
+audit of every existing token pairing). Flagged by `project-reviewer`'s final pass; carried to
+`handoff.md` as a follow-up.
+
+### D148 -- Dark mode is a real, explicit, `localStorage`-persisted toggle now (`theme-store.ts` +
+`ThemeToggle.tsx`), defaulting to light, never derived from `prefers-color-scheme`
+**Rejected:** leaving `data-theme="dark"` wired to tokens but no control (T37's original scope,
+per D144); deriving the default from the OS preference on first visit.
+**Reasoning:** direct user request, after seeing the shipped redesign, for a visible toggle --
+T37's plan had deliberately deferred building the control itself while keeping the token plumbing
+ready. `useThemeStore` (Zustand + `persist`) defaults to `'light'`; `useApplyTheme` writes
+`document.documentElement.dataset.theme`. First shipped with a plain `useEffect`; the same
+`project-reviewer` pass caught that `useEffect` runs after the browser's first paint, so a
+returning dark-mode visitor would see one frame of light tokens on every load even though
+`persist`'s `localStorage` rehydration is itself synchronous (confirmed by reading Zustand's own
+middleware source, not assumed) -- switched to `useLayoutEffect`, which runs before paint, closing
+the flash. The same pass also caught that `html { color-scheme: light }` was never overridden
+inside `:root[data-theme='dark']`, which had been inert dead CSS while dark mode was unreachable
+but became a live, user-visible bug (light-themed native scrollbars/form controls on a near-black
+page) the moment the toggle shipped -- fixed by setting `color-scheme: dark` inside that block.

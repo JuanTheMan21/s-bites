@@ -11,14 +11,14 @@ const TONE_CLASS: Record<NonNullable<Props['tone']>, string> = {
   ok: 'bg-signal-ok/12 text-signal-ok',
   warn: 'bg-signal-warn/12 text-signal-warn',
   bad: 'bg-signal-bad/12 text-signal-bad',
-  accent: 'bg-accent-tint text-accent',
+  accent: 'bg-accent-tint text-accent-ink',
 }
 
 export function Pill({ tone = 'neutral', className, ...rest }: Props) {
   return (
     <span
       className={classNames(
-        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-[11px] font-medium tracking-wide uppercase',
+        'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-mono text-xs font-medium tracking-wide uppercase',
         TONE_CLASS[tone],
         className,
       )}

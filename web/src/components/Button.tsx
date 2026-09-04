@@ -9,7 +9,7 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANT_CLASS: Record<Variant, string> = {
-  primary: 'bg-accent text-paper-0 border-transparent',
+  primary: 'bg-accent-solid text-paper-0 border-transparent',
   secondary: 'bg-paper-0 text-ink-900 border-ink-300/40',
   ghost: 'bg-transparent text-ink-700 border-transparent hover:bg-paper-1',
 }

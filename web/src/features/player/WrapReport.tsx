@@ -22,9 +22,9 @@ function useCountUp(target: number, durationMs = 700): number {
 
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="font-display text-3xl text-ink-900 tabular-nums">{value}</span>
-      <span className="font-mono text-[11px] tracking-wide text-ink-500 uppercase">{label}</span>
+    <div className="flex flex-col gap-1">
+      <span className="font-display text-4xl text-ink-900 tabular-nums">{value}</span>
+      <span className="font-mono text-xs tracking-wide text-ink-500 uppercase">{label}</span>
     </div>
   )
 }
@@ -47,7 +47,7 @@ export function WrapReport({ job }: { job: JobView }) {
   const total = tierCounts.reduce((a, b) => a + b, 0) || 1
 
   return (
-    <div className="flex flex-col gap-5 rounded-lg border border-ink-300/25 bg-paper-1 p-5">
+    <div className="flex flex-col gap-6 rounded-lg border border-ink-300/25 bg-paper-1 p-6">
       <p className="font-mono text-xs tracking-wide text-ink-500 uppercase">Wrap report</p>
       <div className="grid grid-cols-3 gap-4">
         <Stat label="Segments" value={segmentCount} />
@@ -55,8 +55,8 @@ export function WrapReport({ job }: { job: JobView }) {
         <Stat label="Words narrated" value={words} />
       </div>
       <div className="flex flex-col gap-2">
-        <p className="font-mono text-[11px] tracking-wide text-ink-500 uppercase">Tier mix</p>
-        <div className="flex h-2 overflow-hidden rounded-full bg-paper-2">
+        <p className="font-mono text-xs tracking-wide text-ink-500 uppercase">Tier mix</p>
+        <div className="flex h-2.5 overflow-hidden rounded-full bg-paper-2">
           {TIER_NUMBERS.map((tier, i) => {
             const descriptor = describeTier(tier)!
             const pct = (tierCounts[i]! / total) * 100
@@ -64,12 +64,13 @@ export function WrapReport({ job }: { job: JobView }) {
             return (
               <div
                 key={tier}
+                className="transition-[width] duration-500 ease-(--ease-expo-out)"
                 style={{ width: `${pct}%`, background: `var(${descriptor.colorVar})` }}
               />
             )
           })}
         </div>
-        <div className="flex gap-4 font-mono text-[11px] text-ink-500">
+        <div className="flex gap-4 font-mono text-xs text-ink-500">
           {TIER_NUMBERS.map((tier, i) => (
             <span key={tier}>
               {describeTier(tier)!.label}: {tierCounts[i]}

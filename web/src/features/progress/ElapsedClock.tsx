@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { IconPlay } from '@/components/icons'
 
 function formatElapsed(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
@@ -21,7 +22,11 @@ export function ElapsedClock({ startedAt }: { startedAt: string }) {
   const elapsed = now - new Date(startedAt).getTime()
 
   return (
-    <span className="font-mono text-xs tabular-nums text-ink-500" aria-live="off">
+    <span
+      className="inline-flex items-center gap-1 font-mono text-xs tabular-nums text-ink-500"
+      aria-live="off"
+    >
+      <IconPlay className="h-3 w-3" />
       {formatElapsed(elapsed)}
     </span>
   )

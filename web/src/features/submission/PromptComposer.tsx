@@ -5,6 +5,7 @@ import { classNames } from '@/components/class-names'
 import { useToastStore } from '@/components/toast-store'
 import { useSubmitJob } from '@/features/jobs/use-jobs'
 import { describeSubmitError } from '@/features/jobs/submit-error'
+import { usePlaceholderCycle } from './use-placeholder-cycle'
 
 const DURATION_OPTIONS = [
   { label: '3 min', ms: 180_000 },
@@ -15,6 +16,7 @@ const DURATION_OPTIONS = [
 export function PromptComposer() {
   const [topic, setTopic] = useState('')
   const [durationMs, setDurationMs] = useState(DURATION_OPTIONS[1]!.ms)
+  const placeholder = usePlaceholderCycle(topic.trim().length === 0)
   const navigate = useNavigate()
   const push = useToastStore((s) => s.push)
   const submit = useSubmitJob((error) => push(describeSubmitError(error), 'bad'))
@@ -29,28 +31,28 @@ export function PromptComposer() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-      <label className="flex flex-col gap-2">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+      <label className="flex flex-col gap-2.5">
         <span className="font-mono text-xs tracking-wide text-ink-500 uppercase">Topic</span>
         <textarea
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
-          placeholder="Teach me about SQL injection"
+          placeholder={placeholder}
           rows={3}
-          className="resize-none rounded-md border border-ink-300/30 bg-paper-0 px-4 py-3 font-display text-2xl text-ink-900 placeholder:text-ink-300 focus:border-accent focus:outline-none"
+          className="resize-none rounded-md border border-ink-300/30 bg-paper-0 px-5 py-4 font-display text-3xl text-ink-900 placeholder:text-ink-300 focus:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--color-ring)"
         />
       </label>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2.5">
         {DURATION_OPTIONS.map((option) => (
           <button
             key={option.ms}
             type="button"
             onClick={() => setDurationMs(option.ms)}
             className={classNames(
-              'rounded-full border px-3 py-1.5 font-mono text-xs transition-colors duration-(--duration-1)',
+              'rounded-full border px-4 py-2 font-mono text-sm transition-colors duration-(--duration-1)',
               option.ms === durationMs
-                ? 'border-accent bg-accent-tint text-accent'
+                ? 'border-accent bg-accent-tint text-accent-ink'
                 : 'border-ink-300/30 text-ink-500 hover:border-ink-300/60',
             )}
           >
@@ -59,7 +61,11 @@ export function PromptComposer() {
         ))}
       </div>
 
-      <Button type="submit" disabled={!topic.trim() || submit.isPending} className="self-start">
+      <Button
+        type="submit"
+        disabled={!topic.trim() || submit.isPending}
+        className="self-start px-6 py-3 text-base"
+      >
         {submit.isPending ? 'Starting…' : 'Make the video'}
       </Button>
     </form>

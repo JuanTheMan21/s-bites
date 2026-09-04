@@ -1,5 +1,6 @@
 import { Button } from '@/components/Button'
 import { DropdownMenu, type MenuItem } from '@/components/DropdownMenu'
+import { IconChevronDown } from '@/components/icons'
 import { artifactUrls } from '@/domain/artifact-links'
 import type { JobView } from '@/domain/job'
 
@@ -14,5 +15,15 @@ export function ArtifactActions({ job }: { job: JobView }) {
     { key: 'scorm', label: 'Download SCORM package', href: artifactUrls.scorm(job.jobId) },
   ]
 
-  return <DropdownMenu trigger={<Button variant="secondary">Download ▾</Button>} items={items} />
+  return (
+    <DropdownMenu
+      trigger={
+        <Button variant="secondary">
+          Download
+          <IconChevronDown />
+        </Button>
+      }
+      items={items}
+    />
+  )
 }

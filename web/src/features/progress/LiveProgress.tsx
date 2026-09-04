@@ -1,13 +1,16 @@
 import type { JobView } from '@/domain/job'
-import { SegmentGrid } from '@/features/segments/SegmentGrid'
+import { ClipStrip } from './ClipStrip'
+import { ClipTrack } from './ClipTrack'
 import { ElapsedClock } from './ElapsedClock'
-import { FrameBudgetMeter } from './FrameBudgetMeter'
 import { PlayfulCaption } from './PlayfulCaption'
-import { ProductionStrip } from './ProductionStrip'
 import { StageLog } from './StageLog'
 import { StageTicker } from './StageTicker'
 import { useProgressModel } from './use-progress-model'
 
+/** The direction's signature interaction: one continuous clip track the eye follows top to
+ * bottom, replacing six stacked equal-weight widgets with a single focal anchor (a sweeping
+ * playhead over a real waveform) plus a REC line above it and a subordinate clip strip below --
+ * never a card grid competing with the track for the same visual weight. */
 export function LiveProgress({
   job,
   onOpenSegment,
@@ -17,15 +20,11 @@ export function LiveProgress({
 }) {
   const { currentPhase, completedPhases, phaseProgress, activeSegmentIndex, connection, events } =
     useProgressModel(job)
+  const assigned = job.segments.filter((s) => s.tier !== null).length
 
   return (
-    <div className="flex flex-col gap-6">
-      <ProductionStrip
-        currentPhase={currentPhase}
-        completedPhases={completedPhases}
-        phaseProgress={phaseProgress}
-      />
-      <div className="flex items-center justify-between gap-4">
+    <div className="flex flex-col gap-4 rounded-lg border border-ink-300/25 bg-paper-1 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <PlayfulCaption key={currentPhase} phase={currentPhase} />
         <div className="flex items-center gap-3">
           {connection === 'reconnecting' && (
@@ -33,12 +32,24 @@ export function LiveProgress({
               Reconnecting…
             </span>
           )}
+          {job.segments.length > 0 && (
+            <span className="font-mono text-[11px] text-ink-500 tabular-nums">
+              {assigned}/{job.segments.length} tiered
+            </span>
+          )}
           <ElapsedClock startedAt={job.createdAt} />
         </div>
       </div>
+      <ClipTrack
+        currentPhase={currentPhase}
+        completedPhases={completedPhases}
+        phaseProgress={phaseProgress}
+        events={events}
+        createdAt={job.createdAt}
+        segmentCount={job.segments.length}
+      />
       <StageTicker events={events} />
-      <FrameBudgetMeter segments={job.segments} />
-      <SegmentGrid
+      <ClipStrip
         segments={job.segments}
         activeSegmentIndex={activeSegmentIndex}
         onOpenSegment={onOpenSegment}

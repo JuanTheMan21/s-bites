@@ -29,9 +29,9 @@ export function DropdownMenu({ trigger, items }: { trigger: ReactNode; items: Me
               onSelect={item.onSelect}
               asChild={Boolean(item.href) && !item.disabled}
               className={classNames(
-                'flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-2 text-sm text-ink-900',
-                'outline-none data-[highlighted]:bg-paper-1',
-                item.disabled && 'cursor-not-allowed text-ink-300',
+                'flex cursor-pointer items-center gap-2 rounded-sm px-2.5 py-2 text-sm text-ink-900 transition-colors duration-(--duration-1)',
+                'outline-none data-[highlighted]:bg-accent-tint',
+                item.disabled && 'cursor-not-allowed text-ink-300 data-[highlighted]:bg-transparent data-[highlighted]:text-ink-300',
               )}
               title={item.disabled ? item.disabledReason : undefined}
             >

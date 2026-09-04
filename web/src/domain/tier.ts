@@ -1,16 +1,16 @@
 export interface TierDescriptor {
   label: string
-  /** A CSS custom property name, e.g. `--tier-2`, defined in `index.css`. */
+  /** A CSS custom property name, e.g. `--color-tier-2`, emitted by index.css's `@theme` block. */
   colorVar: string
 }
 
 const TIERS: Record<number, TierDescriptor> = {
-  0: { label: 'Static', colorVar: '--tier-0' },
-  1: { label: 'Reveal', colorVar: '--tier-1' },
-  2: { label: 'Animated', colorVar: '--tier-2' },
+  0: { label: 'Static', colorVar: '--color-tier-0' },
+  1: { label: 'Reveal', colorVar: '--color-tier-1' },
+  2: { label: 'Animated', colorVar: '--color-tier-2' },
 }
 
-const UNKNOWN_TIER: TierDescriptor = { label: 'Unknown tier', colorVar: '--ink-500' }
+const UNKNOWN_TIER: TierDescriptor = { label: 'Unknown tier', colorVar: '--color-ink-500' }
 
 /** `null` (not yet assigned) is distinct from an unrecognised number (a future Tier the
  * backend added) -- the caller decides how to render "not yet earned" vs. "earned something

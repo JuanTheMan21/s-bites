@@ -1,4 +1,5 @@
 import { AnimatePresence, m } from 'motion/react'
+import { IconCheck, IconDot } from '@/components/icons'
 import type { StageEvent } from '@/domain/stage'
 
 const VISIBLE = 3
@@ -36,9 +37,11 @@ export function StageTicker({ events }: { events: StageEvent[] }) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
-            className="font-mono text-[11px] text-ink-500"
+            className="flex items-center gap-1.5 font-mono text-[11px] text-ink-500"
           >
-            <span className="text-ink-300">{event.edge === 'end' ? '✓' : '·'}</span>{' '}
+            <span className="text-ink-300">
+              {event.edge === 'end' ? <IconCheck className="h-3 w-3" /> : <IconDot className="h-3 w-3" />}
+            </span>
             {describeTransition(event)}
           </m.div>
         ))}

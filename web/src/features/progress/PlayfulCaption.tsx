@@ -38,8 +38,19 @@ export function PlayfulCaption({ phase }: { phase: PipelinePhase }) {
   const caption = lines[index]
 
   return (
-    <div className="flex flex-col gap-0.5">
-      <p className="font-mono text-xs tracking-wide text-ink-500 uppercase">{PHASE_LABEL[phase]}</p>
+    <div className="flex min-w-0 items-baseline gap-2.5">
+      <span className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[11px] font-medium tracking-wide text-accent-ink uppercase">
+        <m.span
+          aria-hidden
+          className="h-1.5 w-1.5 rounded-full bg-accent"
+          animate={{ opacity: [1, 0.35, 1] }}
+          transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        Rec
+      </span>
+      <span className="shrink-0 font-mono text-[11px] text-ink-500 uppercase">
+        {PHASE_LABEL[phase]}
+      </span>
       <AnimatePresence mode="wait">
         <m.p
           key={caption}
@@ -47,7 +58,7 @@ export function PlayfulCaption({ phase }: { phase: PipelinePhase }) {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -4 }}
           transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-          className="font-display text-lg text-ink-900"
+          className="min-w-0 flex-1 truncate font-display text-base text-ink-900"
         >
           {caption}
         </m.p>

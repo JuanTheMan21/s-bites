@@ -25,6 +25,14 @@
 
   --color-accent: #e8542f;
   --color-accent-tint: #ffe9e1;
+  /* Text-on-accent-tint needs its own shade: --color-accent (3.13:1) fails WCAG AA against
+     --color-accent-tint. This one measures 4.94:1. Dark mode's accent/accent-tint pair already
+     passes (5.32:1) so it reuses --color-accent below rather than needing its own value. */
+  --color-accent-ink: #b8391c;
+  /* Solid-fill buttons need their own shade too: white text on --color-accent measures 3.50:1,
+     failing WCAG AA. This measures 5.02:1. Dark mode's white-on-accent pairing already passes
+     (6.59:1, dark text on a light accent) so it reuses --color-accent below. */
+  --color-accent-solid: #c23e1f;
 
   --color-signal-run: #2f6fe8;
   --color-signal-ok: #1e7a54;
@@ -47,25 +55,19 @@
   --duration-3: 420ms;
   --ease-expo-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-standard: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --color-ring: var(--color-accent);
 }
 
-/* Dark mode: system preference (no explicit choice) or an explicit `data-theme="dark"`. Same
- * token names, different values -- this is the whole reason no component below carries a
- * `dark:` class. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --color-paper-0: #14130e;
-    --color-paper-1: #1c1b14;
-    --color-paper-2: #2a281d;
-    --color-ink-900: #f3f1e9;
-    --color-ink-700: #d8d4c4;
-    --color-ink-500: #a8a392;
-    --color-ink-300: #6b6759;
-    --color-accent: #ff6b45;
-    --color-accent-tint: #3a2018;
-  }
-}
+/* Light only, always -- T37/D144: the OS/browser `prefers-color-scheme` must never force a dark
+ * palette on a visitor. `data-theme="dark"` is an explicit opt-in, wired to `ThemeToggle.tsx`
+ * (`theme-store.ts` sets the attribute), and overrides every token (signal/tier included --
+ * previously only 9 of 17 tokens flipped, leaving status colors at light values on a near-black
+ * ground). `color-scheme: dark` here is what theme scrollbars/form-control chrome to match --
+ * without it, native browser surfaces stay light against this block's own near-black ground. */
 :root[data-theme='dark'] {
+  color-scheme: dark;
+
   --color-paper-0: #14130e;
   --color-paper-1: #1c1b14;
   --color-paper-2: #2a281d;
@@ -73,8 +75,22 @@
   --color-ink-700: #d8d4c4;
   --color-ink-500: #a8a392;
   --color-ink-300: #6b6759;
+
   --color-accent: #ff6b45;
   --color-accent-tint: #3a2018;
+  --color-accent-ink: #ff6b45;
+  --color-accent-solid: #ff6b45;
+
+  --color-signal-run: #5b9bff;
+  --color-signal-ok: #3ecf8e;
+  --color-signal-warn: #e0a53e;
+  --color-signal-bad: #f0594a;
+
+  --color-tier-0: #a8a392;
+  --color-tier-1: #5b9bff;
+  --color-tier-2: #ff6b45;
+
+  --color-ring: var(--color-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -86,7 +102,7 @@
 }
 
 html {
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
 body {
@@ -99,4 +115,12 @@ body {
 
 #root {
   min-height: 100vh;
+}
+
+/* Craft-floor: browser surfaces the app didn't draw still carry the design -- a themed
+ * focus-visible ring app-wide, since none existed before this pass. */
+:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }

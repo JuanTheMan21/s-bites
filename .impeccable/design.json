@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-04T00:00:00Z",
+  "title": "Design System: skill-bites",
+  "extensions": {
+    "colorMeta": {
+      "accent": { "role": "primary", "displayName": "Signal Orange", "canonical": "#e8542f", "tonalRamp": ["#3a1409", "#5c2010", "#832d17", "#b03d20", "#e8542f", "#f0805e", "#f7ac93", "#fddcd0"] },
+      "accent-tint": { "role": "primary", "displayName": "Signal Orange Tint", "canonical": "#ffe9e1", "tonalRamp": ["#4a2015", "#6b3222", "#93492f", "#c26847", "#ffe9e1", "#fff0e9", "#fff6f1", "#fffbf9"] },
+      "paper-0": { "role": "neutral", "displayName": "Paper 0 (page ground)", "canonical": "#fbfaf6", "tonalRamp": ["#14130e", "#26241a", "#3d3a29", "#5c5842", "#7d7862", "#a29c86", "#c8c3ac", "#fbfaf6"] },
+      "paper-1": { "role": "neutral", "displayName": "Paper 1 (raised surface)", "canonical": "#f3f1e9", "tonalRamp": ["#14130e", "#25231a", "#3c3928", "#5a5640", "#7c775f", "#a19c85", "#c7c2aa", "#f3f1e9"] },
+      "paper-2": { "role": "neutral", "displayName": "Paper 2 (track/well)", "canonical": "#e7e4d8", "tonalRamp": ["#14130e", "#242219", "#3a3727", "#57533c", "#78745a", "#9c9781", "#c1bca4", "#e7e4d8"] },
+      "ink-900": { "role": "neutral", "displayName": "Ink 900 (primary text)", "canonical": "#16150f", "tonalRamp": ["#16150f", "#2b291d", "#44412d", "#635f43", "#87825d", "#aeaa87", "#d5d2b5", "#f6f5e9"] },
+      "ink-700": { "role": "neutral", "displayName": "Ink 700 (secondary text)", "canonical": "#3a382e", "tonalRamp": ["#16150f", "#2b291d", "#3a382e", "#635f43", "#87825d", "#aeaa87", "#d5d2b5", "#f6f5e9"] },
+      "ink-500": { "role": "neutral", "displayName": "Ink 500 (tertiary/label text)", "canonical": "#6b6759", "tonalRamp": ["#16150f", "#2b291d", "#44412d", "#6b6759", "#87825d", "#aeaa87", "#d5d2b5", "#f6f5e9"] },
+      "ink-300": { "role": "neutral", "displayName": "Ink 300 (hairline/quietest)", "canonical": "#a8a392", "tonalRamp": ["#16150f", "#2b291d", "#44412d", "#635f43", "#87825d", "#a8a392", "#d5d2b5", "#f6f5e9"] },
+      "signal-run": { "role": "tertiary", "displayName": "Signal Run", "canonical": "#2f6fe8", "tonalRamp": ["#0e1f42", "#173263", "#204689", "#295bad", "#2f6fe8", "#6796ee", "#9fbdf3", "#d6e2fb"] },
+      "signal-ok": { "role": "tertiary", "displayName": "Signal OK", "canonical": "#1e7a54", "tonalRamp": ["#0a2a1d", "#12442e", "#195e3f", "#1e7a54", "#279968", "#5fba8f", "#98dbb9", "#d1f0e0"] },
+      "signal-warn": { "role": "tertiary", "displayName": "Signal Warn", "canonical": "#b8791c", "tonalRamp": ["#3e2809", "#5f3d0d", "#835411", "#a86815", "#b8791c", "#d59a44", "#e9bd82", "#f8e2c2"] },
+      "signal-bad": { "role": "tertiary", "displayName": "Signal Bad", "canonical": "#c2331f", "tonalRamp": ["#3f0f08", "#61180d", "#872213", "#ac2c19", "#c2331f", "#e0644f", "#ef9a89", "#fbd2c9"] },
+      "tier-0": { "role": "tertiary", "displayName": "Tier 0 — Static", "canonical": "#6b6759", "tonalRamp": ["#16150f", "#2b291d", "#44412d", "#6b6759", "#87825d", "#aeaa87", "#d5d2b5", "#f6f5e9"] },
+      "tier-1": { "role": "tertiary", "displayName": "Tier 1 — Reveal", "canonical": "#2f6fe8", "tonalRamp": ["#0e1f42", "#173263", "#204689", "#295bad", "#2f6fe8", "#6796ee", "#9fbdf3", "#d6e2fb"] },
+      "tier-2": { "role": "tertiary", "displayName": "Tier 2 — Animated", "canonical": "#e8542f", "tonalRamp": ["#3a1409", "#5c2010", "#832d17", "#b03d20", "#e8542f", "#f0805e", "#f7ac93", "#fddcd0"] },
+      "ring": { "role": "tertiary", "displayName": "Focus Ring (= Accent)", "canonical": "#e8542f", "tonalRamp": ["#3a1409", "#5c2010", "#832d17", "#b03d20", "#e8542f", "#f0805e", "#f7ac93", "#fddcd0"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Composer topic textarea, animated stat numbers (WrapReport), the REC line's rotating caption (PlayfulCaption)." },
+      "title": { "displayName": "Title", "purpose": "Page/dialog headings, job-card topic, EmptyState headline, clip-block segment titles." },
+      "body": { "displayName": "Body", "purpose": "Default UI/body text, form copy, menu items, toasts." },
+      "label": { "displayName": "Label (Mono-Caps)", "purpose": "Instrument captions, clip-track timecodes, pills, nav links, meter/status readouts." }
+    },
+    "shadows": [
+      { "name": "shadow-1", "value": "0 1px 2px rgb(22 21 15 / 0.06), 0 0 0 1px rgb(22 21 15 / 0.05)", "purpose": "Resting elevation for Card, active Tabs trigger, resting clip block." },
+      { "name": "shadow-2", "value": "0 8px 24px -8px rgb(22 21 15 / 0.18), 0 0 0 1px rgb(22 21 15 / 0.06)", "purpose": "Overlay elevation: Dialog, DropdownMenu, Tooltip, toasts, JobCard hover." }
+    ],
+    "motion": [
+      { "name": "duration-1", "value": "120ms", "purpose": "Micro-interactions: button lift, tab color transitions." },
+      { "name": "duration-2", "value": "220ms", "purpose": "Small overlays: toast/dialog opacity, hover sheen fade, tier-color-bar transitions." },
+      { "name": "duration-3", "value": "420ms", "purpose": "Reserved slower step in the token scale (largest defined duration)." },
+      { "name": "ease-expo-out", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Default motion easing across the app: button hover, card entrance, tier badge flip, clip-track playhead glide." },
+      { "name": "ease-standard", "value": "cubic-bezier(0.65, 0, 0.35, 1)", "purpose": "Defined standard easing token (secondary to ease-expo-out, which dominates actual usage)." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main call-to-action; accent fill, pointer-tracked hover sheen and glow ring, app-wide focus-visible ring.",
+      "html": "<button class=\"ds-btn-primary\">Make the video</button>",
+      "css": ".ds-btn-primary { display:inline-flex; align-items:center; justify-content:center; gap:8px; background:#e8542f; color:#fbfaf6; border:1px solid transparent; border-radius:10px; padding:8px 16px; font-family:'Geist Variable',sans-serif; font-size:14px; font-weight:500; transition:transform 120ms cubic-bezier(0.16,1,0.3,1), box-shadow 120ms cubic-bezier(0.16,1,0.3,1); } .ds-btn-primary:hover { transform:translateY(-1px); box-shadow:0 0 0 1px #e8542f, 0 6px 20px -6px #e8542f; } .ds-btn-primary:focus-visible { outline:2px solid #e8542f; outline-offset:2px; border-radius:6px; } .ds-btn-primary:active { transform:translateY(0) scale(.985); }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "Mono-caps status token; tone maps to job status (queued/running/succeeded/failed).",
+      "html": "<span class=\"ds-pill ds-pill-ok\">Succeeded</span>",
+      "css": ".ds-pill { display:inline-flex; align-items:center; gap:6px; border-radius:9999px; padding:4px 10px; font-family:'JetBrains Mono Variable',monospace; font-size:11px; font-weight:500; letter-spacing:0.05em; text-transform:uppercase; } .ds-pill-ok { background:rgba(30,122,84,0.12); color:#1e7a54; }"
+    },
+    {
+      "name": "Clip Track",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Signature component: a broadcast-timeline rail with a deterministic hash-seeded waveform, an accent fill keyed to real phase progress, and a sweeping playhead with a pulsing halo.",
+      "html": "<div class=\"ds-clip-track\"><div class=\"ds-clip-track-bars\"><span class=\"ds-bar ds-bar-fill\" style=\"height:60%\"></span><span class=\"ds-bar ds-bar-fill\" style=\"height:40%\"></span><span class=\"ds-bar\" style=\"height:70%\"></span><span class=\"ds-bar\" style=\"height:30%\"></span></div><div class=\"ds-playhead\"></div></div>",
+      "css": ".ds-clip-track { position:relative; display:flex; align-items:center; gap:1px; height:36px; overflow:hidden; border-radius:10px; background:#e7e4d8; padding:0 8px; } .ds-bar { flex:1; min-width:1px; border-radius:9999px; background:rgba(168,163,146,0.35); transition:background-color 300ms; } .ds-bar-fill { background:rgba(232,84,47,0.7); } .ds-playhead { position:absolute; top:50%; left:60%; transform:translate(-50%,-50%); width:20px; height:20px; border-radius:9999px; background:rgba(232,84,47,0.4); }"
+    },
+    {
+      "name": "Clip Block (Segment Card)",
+      "kind": "card",
+      "refersTo": null,
+      "description": "A segment rendered as an NLE clip block: literal tier-color fill bar across the top edge, timecode-formatted duration.",
+      "html": "<button class=\"ds-clip-block\"><span class=\"ds-clip-block-tier\"></span><div class=\"ds-clip-block-body\"><span class=\"ds-clip-block-index\">01</span><p class=\"ds-clip-block-title\">Segment title</p><span class=\"ds-clip-block-duration\">0:04.2</span></div></button>",
+      "css": ".ds-clip-block { display:flex; flex-direction:column; overflow:hidden; border-radius:16px; border:1px solid rgba(168,163,146,0.25); background:#f3f1e9; text-align:left; } .ds-clip-block-tier { height:6px; width:100%; background:#2f6fe8; } .ds-clip-block-body { display:flex; flex-direction:column; gap:10px; padding:16px; } .ds-clip-block-index { font-family:'JetBrains Mono Variable',monospace; font-size:11px; color:#6b6759; } .ds-clip-block-title { font-family:'Bricolage Grotesque Variable',sans-serif; font-size:16px; color:#16150f; } .ds-clip-block-duration { font-family:'JetBrains Mono Variable',monospace; font-size:11px; color:#6b6759; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Standard raised container: job cards, live-progress panel, wrap-report panel.",
+      "html": "<div class=\"ds-card\">Card content</div>",
+      "css": ".ds-card { border-radius:16px; border:1px solid rgba(168,163,146,0.25); background:#f3f1e9; padding:20px; box-shadow:0 1px 2px rgba(22,21,15,0.06), 0 0 0 1px rgba(22,21,15,0.05); }"
+    },
+    {
+      "name": "Composer Input",
+      "kind": "input",
+      "refersTo": null,
+      "description": "The single free-text topic field, set in display type rather than body type.",
+      "html": "<textarea class=\"ds-input-topic\" rows=\"3\" placeholder=\"Teach me about SQL injection\"></textarea>",
+      "css": ".ds-input-topic { resize:none; border-radius:10px; border:1px solid rgba(168,163,146,0.3); background:#fbfaf6; padding:12px 16px; font-family:'Bricolage Grotesque Variable',sans-serif; font-size:24px; color:#16150f; } .ds-input-topic::placeholder { color:#a8a392; } .ds-input-topic:focus { border-color:#e8542f; outline:none; } .ds-input-topic:focus-visible { outline:2px solid #e8542f; outline-offset:2px; }"
+    },
+    {
+      "name": "Tabs",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Segmented control; paper-2 track, raised active trigger.",
+      "html": "<div class=\"ds-tabs\"><button class=\"ds-tab ds-tab-active\">One</button><button class=\"ds-tab\">Two</button></div>",
+      "css": ".ds-tabs { display:inline-flex; gap:4px; border-radius:10px; background:#e7e4d8; padding:4px; } .ds-tab { border-radius:6px; padding:6px 12px; font-family:'Geist Variable',sans-serif; font-size:14px; color:#3a382e; background:transparent; border:none; } .ds-tab-active { background:#fbfaf6; color:#16150f; box-shadow:0 1px 2px rgba(22,21,15,0.06), 0 0 0 1px rgba(22,21,15,0.05); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Broadcast Timeline",
+    "overview": "T37 re-grounded the console in a broadcast/NLE production-timeline vocabulary (Premiere/Descript/Resolve) rather than the six-equal-widget dashboard the previous pass shipped. The product's own mechanism -- duration-locked segments assembled into a video -- IS a timeline, and the UI now says so directly: a horizontal clip track with a real waveform, a sweeping playhead, and timecodes replaces the prior ring-and-tick 'production strip' as the page's one focal instrument. This was the user's explicit, informed choice ('Impeccable's Pick') over the tool's own anti-rut assignment. The warm paper-and-ink neutral system and the single industrial-orange accent carry over unchanged from the prior system -- this is a re-staging of the same material world around a new signature device, not a palette or type replacement. Dark mode is no longer OS-driven: it is light-only, always; data-theme=\"dark\" remains a complete token set but is an unwired future opt-in, not a live feature.",
+    "keyCharacteristics": [
+      "Warm paper neutrals + one industrial accent, applied narrowly",
+      "A horizontal clip track (waveform + sweeping playhead + timecodes) as the one focal live-progress instrument, not a row of six equal-weight widgets",
+      "Display type (Bricolage Grotesque) for numbers and headings, mono (JetBrains Mono) for uppercase labels, timecodes, and instrument readouts, sans (Geist) for body/UI text",
+      "Soft, low-contrast ambient shadows only -- no hard offset shadows, no heavy elevation",
+      "Real, state-driven motion and data only -- waveform bars are deterministic (hashed, not random), playhead and timecodes read off actual SSE event timestamps, never a timer",
+      "Light-only by design; dark-mode tokens are complete but intentionally unwired",
+      "One consistent inline-SVG icon system app-wide; no unicode glyphs standing in for icons"
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "--color-accent is the only saturated color outside the signal set; it marks exactly one primary action or one 'this is live right now' state per view. It is never used for large fills or backgrounds.", "section": "colors" },
+      { "name": "The Signal-Not-Decoration Rule", "body": "signal-run/ok/warn/bad exist only to report real job/status state -- a status vocabulary, not a general decorative palette.", "section": "colors" },
+      { "name": "The Tier-Is-Literal-Color Rule", "body": "tier-0/1/2 render as the literal fill color of a segment's clip block -- tier is read off the color, not inferred from a label. Depends on domain/tier.ts's fixed --color-tier-N binding.", "section": "colors" },
+      { "name": "The Mono-Caps Instrument Rule", "body": "Any text describing a measured quantity, status, or timecode renders in uppercase JetBrains Mono at 11px with wide tracking, tabular-nums where numeric -- never the display or body face.", "section": "typography" },
+      { "name": "The Ambient-Only Rule", "body": "Shadows are diffuse and low-opacity; a hard-offset/outlined shadow would contradict the paper-and-ink editorial register.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use JetBrains Mono, uppercase, wide-tracked, tabular-nums, for any label describing a measured value, status, or timecode.",
+      "Do keep shadows soft and ambient (Shadow 1 / Shadow 2 only).",
+      "Do redefine color tokens under identical names for dark mode rather than adding dark: variants, even while dark mode itself stays unwired.",
+      "Do drive animated state (waveform fill, playhead position, timecodes, counts, badges) from real backend data, never a fabricated timer or invented percentage.",
+      "Do put the live progress view's segments on a horizontal clip strip/track, never a wrapping card grid; reserve the card grid for the finished/browse view.",
+      "Do use the shared components/icons.tsx inline-SVG set for any icon; never a unicode glyph or emoji."
+    ],
+    "donts": [
+      "Don't introduce a second saturated accent color.",
+      "Don't add hard-offset or high-contrast drop shadows.",
+      "Don't let the OS/browser prefers-color-scheme drive the palette; the app is light-only, always, by explicit decision (T37/D144).",
+      "Don't treat repeated/duplicate phase labels in StageTicker as a design choice to preserve -- it's an upstream backend data gap (segmentTitle not always populated), not a frontend pattern."
+    ]
+  }
+}

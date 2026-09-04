@@ -23,11 +23,11 @@ export function JobCard({ job }: { job: JobView }) {
     >
       <Link
         to={`/jobs/${job.jobId}`}
-        className="group flex items-center justify-between gap-4 rounded-lg border border-ink-300/25 bg-paper-1 px-5 py-4 transition-[transform,box-shadow] duration-(--duration-1) ease-(--ease-expo-out) hover:-translate-y-0.5 hover:shadow-(--shadow-2)"
+        className="group flex items-center justify-between gap-4 rounded-lg border border-ink-300/25 bg-paper-1 px-6 py-5 transition-[transform,box-shadow,border-color] duration-(--duration-2) ease-(--ease-expo-out) hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-[0_0_0_1px_var(--color-accent),0_10px_28px_-10px_var(--color-accent)]"
       >
-        <div className="flex min-w-0 flex-col gap-1">
-          <p className="truncate font-display text-lg text-ink-900">{job.topic}</p>
-          <p className="font-mono text-[11px] text-ink-500">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <p className="truncate font-display text-xl text-ink-900">{job.topic}</p>
+          <p className="font-mono text-xs text-ink-500">
             {job.segments.length || '—'} segments · {relativeTime(job.createdAt)}
           </p>
         </div>

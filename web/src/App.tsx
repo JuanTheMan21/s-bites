@@ -1,5 +1,7 @@
 import { Link, Route, Routes } from 'react-router-dom'
 import { Button } from '@/components/Button'
+import { ThemeToggle } from '@/components/ThemeToggle'
+import { useApplyTheme } from '@/components/theme-store'
 import { Toaster } from '@/components/Toaster'
 import { TooltipProvider } from '@/components/Tooltip'
 import { DashboardPage } from '@/routes/DashboardPage'
@@ -10,17 +12,24 @@ import { StudioPage } from '@/routes/StudioPage'
 function AppShell() {
   return (
     <header className="border-b border-ink-300/20">
-      <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-        <Link to="/" className="font-display text-lg text-ink-900">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-8 py-5">
+        <Link to="/" className="font-display text-2xl font-bold tracking-tight text-ink-900">
           skill-bites
         </Link>
-        <nav className="flex items-center gap-4">
-          <Link to="/jobs" className="font-mono text-xs text-ink-500 hover:text-ink-900">
+        <nav className="flex items-center gap-5">
+          <Link
+            to="/jobs"
+            className="font-mono text-sm text-ink-500 underline decoration-accent decoration-2 underline-offset-4 decoration-transparent transition-[color,text-decoration-color] duration-(--duration-1) hover:text-ink-900 hover:decoration-accent"
+          >
             Videos
           </Link>
-          <Link to="/library" className="font-mono text-xs text-ink-500 hover:text-ink-900">
+          <Link
+            to="/library"
+            className="font-mono text-sm text-ink-500 underline decoration-accent decoration-2 underline-offset-4 decoration-transparent transition-[color,text-decoration-color] duration-(--duration-1) hover:text-ink-900 hover:decoration-accent"
+          >
             Library
           </Link>
+          <ThemeToggle />
           <Link to="/">
             <Button variant="secondary">New video</Button>
           </Link>
@@ -31,6 +40,7 @@ function AppShell() {
 }
 
 export default function App() {
+  useApplyTheme()
   return (
     <TooltipProvider>
       <AppShell />

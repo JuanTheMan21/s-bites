@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { classNames } from '@/components/class-names'
+import { IconChevronDown, IconChevronRight } from '@/components/icons'
 import type { SceneNode } from '@/domain/scene'
 
 function formatValue(node: Extract<SceneNode, { kind: 'value' }>): string {
@@ -53,7 +54,9 @@ function Branch({ node, depth }: { node: SceneNode; depth: number }) {
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 py-0.5 font-mono text-xs text-ink-700 hover:text-ink-900"
       >
-        <span className="text-ink-300">{open ? '▾' : '▸'}</span>
+        <span className="text-ink-300">
+          {open ? <IconChevronDown /> : <IconChevronRight />}
+        </span>
         <span>{node.label}</span>
         <span className="text-ink-300">
           {node.kind === 'array' ? `[${count}]` : `{${count}}`}

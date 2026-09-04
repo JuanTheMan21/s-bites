@@ -14,8 +14,8 @@ export function JobResult({
   return (
     <div className="flex flex-col gap-6">
       <VideoPlayer job={job} />
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-xs text-ink-500">
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-sm text-ink-500">
           Any segment's clip and composed scene can be inspected individually below.
         </p>
         <ArtifactActions job={job} />
