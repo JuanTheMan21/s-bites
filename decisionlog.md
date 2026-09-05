@@ -3681,3 +3681,63 @@ have added real latency while fixing nothing. Measuring against the actual repor
 implementing is what caught this, not a hypothesis about how the tool probably works.
 
 **Depends:** D155 (same session, same real render's findings).
+
+### D157 — Latency, Phase 3: removed the one genuinely decorative perpetual tween (the user's own
+observation), measured the frame budget's real trade-off before touching it, raised concurrency
+carefully after checking actual free memory, deferred the geometry re-author scoping
+
+**The user's own direct observation was the correct lever, and it was checked, not assumed
+correct.** "Them two cards floating up and down, that's so unnecessary" pointed at
+`_layout_split_horizontal.html`'s counter-phase idle bob (±6px, yoyo, both panels, for the whole
+segment). Removed. Verified, not assumed safe: `hyperframes check`'s frozen-sweep guard exists
+specifically to fail a composition with no genuine motion across its full length, so before
+committing to the removal a real segment (10, from `91c3dbeb`) was recomposed with the current
+templates and re-checked -- `motion.findings` came back empty, confirming each panel's own
+block-level content (headline, items) already provides enough real, narration-anchored motion on
+its own. The background hairline pulse (`_tokens.html::background_script`) and the title
+underline glow were investigated and deliberately NOT removed: both are documented, load-bearing
+anti-freeze fallbacks for when a scene has nothing else moving (a title card with zero
+`key_terms`; any layout's shared base layer) -- removing either risks reintroducing `sweep_static`
+findings across the whole corpus for a tween the user never actually complained about (both are a
+1.5px hairline and a thin underline glow, low-visibility by design).
+
+**The frame budget's real cost was measured, not guessed, and the trade-off was put to the user
+rather than decided unilaterally.** `scripts/tier_budget_sweep.py` (new): narrates a real topic
+ONCE, then evaluates `resolve_tiers()` against that same measured segment set across several
+budget values, avoiding the apples-to-oranges problem of re-running `tier_dry_run.py` per value
+(a fresh LLM outline each time). Against the same TCP-handshake topic as D152's own render (15
+segments, 367s of real narration): budget 1400 -> 2 of 15 segments animated (42s); 3000 -> 5 (113s);
+6000 -> 10 (240s); 9500 (today) -> all 15 (367s), zero demoted. The honest cost named to the user:
+a demoted segment does not just lose ambient motion, it loses D155's own item-anchored entrance
+timing work too, replaced by `Tier.REVEAL`'s 4-still crossfade -- a real, visible trade, not a
+free latency win the way the idle-bob removal was. **User's choice: leave `FRAME_BUDGET=9500`
+unchanged**, keeping every segment fully animated over the latency reduction this session measured
+as available. Recorded as a deliberate choice in `.env`'s own comment, not a gap.
+
+**`RENDER_MAX_CONCURRENCY` raised from 2 to 3, not to `config_render.py`'s own default of 4,
+after checking actual free memory rather than assuming CPU was the only constraint.** `.env.example`'s
+own existing comment on `RENDER_WORKERS` already warned this machine can drop to ~2.4GB free under
+load; checked directly (`Get-CimInstance Win32_OperatingSystem`) before changing anything and
+found only ~4GB free even at the time of checking. Doubling concurrent browser+ffmpeg worker pairs
+to 4 risks real memory pressure on this specific machine, not just being a CPU question on its
+16 cores -- raised to 3 instead, a genuine 50% increase in parallelism with less of that risk.
+Unverified under real load; the next real render is the actual test.
+
+**Geometry re-author scoping (refill only the failing block, not every block in the scene) is
+deferred, not abandoned, and the reason is recorded plainly rather than silently dropped.**
+`validate_geometry`'s findings carry rich per-finding data (`selector`, `containerSelector`,
+`rect`) in the CLI's own raw JSON, but `adapters/local/render_backend.py::validate_geometry`
+flattens every finding into a plain `"[severity] code: message"` string before it ever reaches
+`core/graph/nodes/scene_reauthor.py` -- exactly the shape `is_content_retryable`/
+`is_fatal_geometry_finding` need, but it discards everything that would let a caller attribute a
+finding to a specific block. A coordinate-based heuristic (a `SPLIT_HORIZONTAL` finding's `rect.x`
+determines left- vs right-panel) was considered and rejected for this session: it is fragile
+(depends on layout-specific geometry assumptions baked into a heuristic rather than the schema),
+and this Phase's other three items (bob removal, budget decision, concurrency) already deliver the
+session's real latency win. Real fix, if picked up later: thread the structured finding (not the
+flattened string) far enough to know which block a `content_overlap`/`canvas_overflow` finding's
+`containerSelector` belongs to, which needs `RenderBackend.validate_geometry`'s own return type to
+carry more than a bare string list -- an interface change, not a one-line fix, and not attempted
+under this session's own time budget without properly designing it.
+
+**Depends:** D155, D156.
