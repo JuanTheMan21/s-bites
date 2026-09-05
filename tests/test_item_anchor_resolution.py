@@ -9,6 +9,12 @@ Each fixture below deliberately gives an item a display text that does NOT appea
 narration -- so a resolver still keyed to display text would find no match at all and fall back to
 the positional default for every item, while the fix (keyed to ``anchor_phrase``) resolves a real,
 narration-anchored time.
+
+T18J: ``resolve_item_starts`` gained required ``entrance_start``/``end_s`` keywords and now
+returns ``(payload, starts)`` rather than bare ``starts`` -- the fallback-behavior test below was
+rewritten for the new interpolation-based fallback (``tests/test_item_timing_order.py`` covers
+that fallback and the reordering fix in full); the three anchor-resolution proofs are unaffected
+since every item in them matches, so neither change alters their expected values.
 """
 
 from core.block_schemas import TextPanelSlots
@@ -17,8 +23,8 @@ from core.block_schemas_graph import GraphDiagramSlots
 from interfaces.tts_provider import WordMark
 from rendering.block_timing import resolve_item_starts
 
-_DEFAULT_ITEM_START = 0.75
-_DEFAULT_ITEM_STAGGER = 0.22
+_ENTRANCE_START = 0.15
+_END_S = 10.0
 
 
 def _word_marks(narration: str) -> list[WordMark]:
@@ -59,16 +65,14 @@ def test_graph_diagram_nodes_resolve_via_anchor_phrase_not_label() -> None:
         }
     )
 
-    starts = resolve_item_starts("graph_diagram", payload, word_marks)
+    _, starts = resolve_item_starts(
+        "graph_diagram", payload, word_marks, entrance_start=_ENTRANCE_START, end_s=_END_S
+    )
 
     assert starts is not None
     # "the request reaches" starts at word index 1 (0.4s); "it forwards onward" at index 7 (2.8s).
     assert starts[0] == 0.4
     assert starts[1] == 2.8
-    assert starts != [
-        _DEFAULT_ITEM_START,
-        _DEFAULT_ITEM_START + _DEFAULT_ITEM_STAGGER,
-    ]
 
 
 def test_text_panel_items_resolve_via_anchor_phrase_not_text() -> None:
@@ -87,7 +91,9 @@ def test_text_panel_items_resolve_via_anchor_phrase_not_text() -> None:
         }
     )
 
-    starts = resolve_item_starts("text_panel", payload, word_marks)
+    _, starts = resolve_item_starts(
+        "text_panel", payload, word_marks, entrance_start=_ENTRANCE_START, end_s=_END_S
+    )
 
     assert starts is not None
     assert starts[0] == 0.8  # "reaches" is word index 2
@@ -112,13 +118,18 @@ def test_code_diff_lines_resolve_via_anchor_phrase_not_source_text() -> None:
         }
     )
 
-    starts = resolve_item_starts("code_diff", payload, word_marks)
+    _, starts = resolve_item_starts(
+        "code_diff", payload, word_marks, entrance_start=_ENTRANCE_START, end_s=_END_S
+    )
 
     assert starts is not None
     assert starts[0] == 0.0
 
 
-def test_unresolved_anchor_phrase_falls_back_to_positional_default() -> None:
+def test_unresolved_anchor_phrases_interpolate_across_the_visible_window() -> None:
+    """T18J: replaces the old flat-cascade fallback proof. Neither anchor matches, so both items
+    must land somewhere in ``[entrance_start, end_s]``, in order -- not at a fixed instant
+    disconnected from the block's own timing."""
     word_marks = _word_marks("Nothing here mentions the anchor at all")
     payload = GraphDiagramSlots.model_validate(
         {
@@ -144,9 +155,10 @@ def test_unresolved_anchor_phrase_falls_back_to_positional_default() -> None:
         }
     )
 
-    starts = resolve_item_starts("graph_diagram", payload, word_marks)
+    _, starts = resolve_item_starts(
+        "graph_diagram", payload, word_marks, entrance_start=_ENTRANCE_START, end_s=_END_S
+    )
 
-    assert starts == [
-        _DEFAULT_ITEM_START,
-        _DEFAULT_ITEM_START + _DEFAULT_ITEM_STAGGER,
-    ]
+    assert starts is not None
+    assert starts[0] < starts[1]
+    assert all(_ENTRANCE_START <= s <= _END_S for s in starts)

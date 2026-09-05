@@ -3567,3 +3567,64 @@ silently failed to take effect" would look like if it ever regressed.
 `web/src/api/schema.d.ts`, clean `tsc -b --noEmit`.
 
 **Depends:** D153.
+
+### D155 — Three timing defects, all confirmed against a real rendered job's checkpoint before
+any fix was written, fixed in `rendering/block_timing.py` and `rendering/compose.py`
+
+**The user watched the closing render from the previous session and reported five defects with
+timestamps.** Three were timing bugs; all three were reproduced against `91c3dbeb`'s own
+checkpoint data (queried directly via `AsyncSqliteSaver`, the same technique D152 used) before any
+line of fix code was written — the exact numbers, not estimates: 78/82 item anchors matched (95%,
+so this was never an anchor-matching problem); 1 segment (7) with items rendered out of narration
+order; 3 segments (4, 8, 10) whose SPLIT_HORIZONTAL right-panel headline waited past 40% of the
+segment, one at 80%.
+
+1. **A multi-block panel's headline waited for the block's own content anchor.** Every block
+   template ties its headline entrance to the same `entrance_start` value
+   (`tl.fromTo("#{prefix}-headline", ..., {{ entrance_start }})`, confirmed identical across all 8
+   non-text_panel block partials, not just `_block_text_panel.html`) — a real problem only in
+   `SPLIT_HORIZONTAL`, where both panels are already visually present from the layout's own
+   tilt-in tween (`_layout_split_horizontal.html`'s panel-entry tween, independent of any block's
+   own content). A single-block scene's headline entering on its own narration cue is correct
+   choreography (the block IS the segment's content); a panel's headline entering on cue when its
+   sibling panel is already fully visible reads as broken. **Fix, in
+   `rendering/compose.py::_build_renderable`:** a new `is_multi_block` flag (`len(scene.blocks) >
+   1`) forces `entrance_start` to the structural, index-based default regardless of whether the
+   block's own `anchor_phrase` resolved, but ONLY in a multi-block scene — the single-block branch
+   is byte-for-byte unchanged. No template touched: every partial already just consumes whatever
+   `entrance_start` it's handed.
+2. **Items rendered in authored order even when their resolved anchors placed them in a different
+   narration order.** `resolve_item_starts` computed correct-but-unused times and left the payload
+   list untouched. **Fix:** for a closed, deliberately narrow set of block types whose item order
+   carries no meaning of its own (`_SORTABLE_ITEM_FIELDS = {text_panel, icon_panel, title}`), the
+   function now reorders both the items and their times together by resolved time, returning the
+   reordered payload (`payload.model_copy(update={field: items})`) alongside it — the same
+   "closed vocabulary, extend only on confirmed evidence" discipline `_CONTENT_SIZING_CODES`
+   documents for itself. `graph_diagram`'s `nodes` and `code_diff`'s `lines` stay in `_ITEM_FIELDS`
+   (they still need timing) but are deliberately excluded from the sortable set: CHAIN's rail is
+   drawn in node order, `GraphDiagramSlots` requires edges to reference the n-1 consecutive node
+   pairs, and code line order is the code. Reordering either would silently break something a
+   passing test would never catch, so a dedicated regression test
+   (`test_graph_diagram_nodes_are_never_reordered`) pins the exclusion, not just the inclusion.
+3. **An unmatched anchor fell back to a flat 0.75s + 0.22s-per-item cascade** — disconnected from
+   both the block's own measured duration and from `entrance_start` itself, so an unmatched item
+   could appear before the block containing it had even entered (worse than the user's reported
+   symptom, found while fixing it, not separately reported). **Fix:** `_interpolate_missing`
+   treats `entrance_start`/`end_s` as virtual bookend anchors at positions `-1`/`n` and linearly
+   interpolates every gap — before the first real match, between two matches, and after the last —
+   as the same one-loop case, so every returned time falls inside the block's own visible window
+   regardless of how many items actually matched. All-unmatched degrades to an even spread across
+   that window; this is a strict improvement over the old cascade in every case, not just the
+   previously-reported one.
+
+**Verification discipline carried over from D151-154**: every fix has a regression test built
+directly from the live-measured defect (a reversed-order narration fixture reproducing segment
+7's exact shape; a late-anchor fixture reproducing segment 8's 80%-through timing), not a
+synthetic example invented after the fact. `resolve_item_starts`'s signature changed (`payload,
+starts = resolve_item_starts(..., entrance_start=..., end_s=...)`, was a bare `starts` list) —
+`tests/test_item_anchor_resolution.py`'s three anchor-resolution proofs (T18G) were updated for
+the new call shape but their asserted VALUES are unchanged, since every item in them matches and
+neither fix path engages; only its fourth test (the fallback case) needed new expected values,
+rewritten for interpolation rather than the retired flat cascade.
+
+**Depends:** none — root-caused independently from real render data, not from a prior task.

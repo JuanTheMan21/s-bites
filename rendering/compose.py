@@ -71,7 +71,12 @@ class RenderableBlock:
 
 
 def _build_renderable(
-    index: int, block: ComposedBlock, word_marks: list[WordMark]
+    index: int,
+    block: ComposedBlock,
+    word_marks: list[WordMark],
+    *,
+    is_multi_block: bool,
+    duration_s: float,
 ) -> RenderableBlock:
     if block.payload is None:
         raise ValueError(
@@ -82,11 +87,26 @@ def _build_renderable(
     payload = schema.model_validate(block.payload)
     block_type = block.block_type.value
 
-    anchor_ms = resolve_anchor(word_marks, block.anchor_phrase)
-    entrance_start = (
-        anchor_ms / 1000
-        if anchor_ms is not None
-        else _DEFAULT_ENTRANCE_BASE + index * _DEFAULT_ENTRANCE_STEP
+    structural_start = _DEFAULT_ENTRANCE_BASE + index * _DEFAULT_ENTRANCE_STEP
+    # T18J: in a multi-block scene (SPLIT_HORIZONTAL, the only one today) both panels are already
+    # visually present from the layout's own tilt-in tween -- a block's headline is that panel's
+    # identity label, not content to reveal partway through the segment. Gating it on the block's
+    # own anchor_phrase (as a single-block scene correctly does, to reveal content exactly when
+    # narration introduces it) stranded a headline until whatever the narration said about that
+    # specific panel's topic -- confirmed live, one panel's headline waited until 80% through its
+    # segment. A single-block scene keeps the narration-anchored behavior: there the block IS the
+    # segment's content, and revealing it on cue is correct choreography.
+    if is_multi_block:
+        entrance_start = structural_start
+    else:
+        anchor_ms = resolve_anchor(word_marks, block.anchor_phrase)
+        entrance_start = anchor_ms / 1000 if anchor_ms is not None else structural_start
+
+    payload, item_starts = resolve_item_starts(
+        block_type, payload, word_marks, entrance_start=entrance_start, end_s=duration_s
+    )
+    step_starts = resolve_step_starts(
+        block_type, payload, word_marks, entrance_start=entrance_start, end_s=duration_s
     )
 
     return RenderableBlock(
@@ -94,8 +114,8 @@ def _build_renderable(
         block_type=block_type,
         payload=payload,
         entrance_start=entrance_start,
-        item_starts=resolve_item_starts(block_type, payload, word_marks),
-        step_starts=resolve_step_starts(block_type, payload, word_marks),
+        item_starts=item_starts,
+        step_starts=step_starts,
         annotations=[],
     )
 
@@ -129,8 +149,16 @@ def compose_scene(segment: Segment, dest_dir: Path) -> Path:
         )
 
     scene = ComposedScene.model_validate(segment.scene)
+    duration_s = segment.duration_ms / 1000
+    is_multi_block = len(scene.blocks) > 1
     renderable = [
-        _build_renderable(index, block, segment.word_marks)
+        _build_renderable(
+            index,
+            block,
+            segment.word_marks,
+            is_multi_block=is_multi_block,
+            duration_s=duration_s,
+        )
         for index, block in enumerate(scene.blocks)
     ]
     annotations_by_block = resolve_annotations(scene, renderable, segment.word_marks)
@@ -143,7 +171,7 @@ def compose_scene(segment: Segment, dest_dir: Path) -> Path:
     template = _env.get_template(f"_layout_{scene.layout.value}.html")
     html = template.render(
         blocks=renderable,
-        duration_sec=segment.duration_ms / 1000,
+        duration_sec=duration_s,
         palette=palette,
         cues=group_into_cues(segment.word_marks),
     )
