@@ -3428,3 +3428,58 @@ way.
 
 **Depends:** T18H -- met. Carries T18I forward; the geometry-gap-closure and closing-render halves
 of T18I's original scope (`tasks.md`) are still open.
+
+### D152 — Closing render confirms D151's fixes, live: text_occluded retry works, sequence-diagram
+length is now hard-capped, annotation density dropped 87% -> 27% -- one soft limit still soft
+
+Same topic (`"how a TCP three-way handshake works"`) rendered before (job `b7696e12`) and after
+(job `91c3dbeb`) D151's changes, deliberately -- the handshake's own sequence-diagram-shaped
+content was exactly what the user complained about, so it stress-tests every fix at once. Numbers
+pulled from each job's own `AsyncSqliteSaver` checkpoint (`core/graph/state.py`'s `segments`), not
+estimated:
+
+| | Before (`b7696e12`) | After (`91c3dbeb`) |
+|---|---|---|
+| `text_occluded` skips the retry | Yes -- 0 re-author attempts logged for either failing segment | No -- both failing segments logged `"re-authoring this scene once"` before falling back |
+| `sequence_diagram` message counts | `[6, 6, 6, 6, 6, 5, 7]` | `[3, 3, 3, 3, 3]` -- every one exactly 3 |
+| Segments carrying any annotation | 13 of 15 (87%) | 4 of 15 (27%) |
+| Degraded (fell back to title card) | 2 of 15 | 2 of 15 |
+| Wall clock | 818.4s (~13.6 min) | 1085.9s (~18.1 min) |
+
+**The `text_occluded` fix is confirmed working, live, exactly as intended** -- both failing
+segments this time logged a real re-author attempt with the specific findings fed back, where the
+baseline skipped straight to the fallback for the identical finding shape.
+
+**The message-count cap is a hard guarantee, confirmed** -- `core/scene_content_normalize.py`
+truncates deterministically, so 3 is now a ceiling that cannot be exceeded regardless of what the
+model returns, not a request. Every sequence diagram in the after-run hit exactly the ceiling
+(the model still tries for more; truncation is doing the actual enforcing), which is expected and
+correct.
+
+**The annotation density cap is working as designed** -- 87% to 27% is a real, large improvement
+this session can point to directly, and 27% is comfortably under the 40% video-wide budget with
+room to spare (meaning the per-scene "at most one or two" cap and the "sparingly" skill guidance
+are also doing real work on their own, not just the whole-video backstop).
+
+**The `sequence_diagram` frequency cap is confirmed as a SOFT nudge, not a hard guarantee, and
+that is worth stating plainly rather than glossing over.** `plan_visuals` genuinely re-asked (two
+separate skill-pack fetches logged, one per `plan_video_visuals` call, confirming the reask fired
+-- the node-level start/finish timing alone does not distinguish one call from two) but the second
+plan still returned 4 `sequence_diagram`-primary segments against a cap of 3. This is the exact,
+already-documented behavior `core/block_triggers.py::missed_block_opportunities` established first
+("the second plan is taken as final even if it still misses -- no third call") applied to the new
+check -- consistent with the project's own design, not a bug, but a real limit to know about
+before promising this cap always holds. If the user wants a hard guarantee here too, the fix is
+the same shape as the message-count cap: a deterministic downgrade of the excess segments (e.g.
+demote the frequency-violating segment's block choice) rather than a third LLM call.
+
+**Latency exceeded the session's own 15-minute target for a 10-minute-equivalent video, and the
+reason is visible in the log, not mysterious**: both degraded segments in this run needed the full
+retry-then-fallback sequence (3 attempts each: initial, re-author, fallback), each attempt a real
+render-and-validate cycle. The baseline run's two failures skipped the retry (the very bug this
+session fixed) and so were, by coincidence, faster. A run with fewer geometry failures -- which is
+what Phase 2's still-open closing-render work is for -- will cost less, not more; the honest
+statement is that this session traded a small latency cost for a real correctness fix, and Phase
+2/3's remaining geometry work is what recovers the difference.
+
+**Depends:** D151.
