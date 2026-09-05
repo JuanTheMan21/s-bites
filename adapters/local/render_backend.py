@@ -32,6 +32,15 @@ MAX_BACKOFF_S = 10.0
 RENDER_TIMEOUT_FLOOR_S = 180.0
 RENDER_TIMEOUT_FACTOR = 12.0
 
+# T18J: the real geometry of _captions.html's caption band, as canvas fractions
+# (926/1080=0.8574 top, 1016/1080=0.9407 bottom) -- confirmed empirically
+# (tests/test_render_segment_live.py's own Phase-0 spike, D116) that a caption_zone_collision
+# finding folds into the SAME "layout" category validate_geometry already reads, under no
+# separate top-level JSON key, so passing this is the whole fix; no new parsing needed. Also
+# confirmed to add no measurable cost (~15-18s either way against a real composition) -- it is a
+# geometric check against samples the tool already takes, not a new sampling pass.
+CAPTION_ZONE = "x0=0;y0=0.8574;x1=1;y1=0.9407;severity=error"
+
 
 def render_timeout_s(duration_ms: int) -> float:
     """The render timeout for a segment of ``duration_ms``: generous, and never below the floor."""
@@ -128,9 +137,20 @@ class PlaywrightHyperFramesRenderBackend(RenderBackend):
         # the same way `render` does, and this method (unlike the diagnostic `check()` above) is
         # wired into every real segment's render path, so leaving it unbounded would let it starve
         # the very renders it gates (found by review, before this ever ran against a real job).
+        #
+        # T18J: caption_zone added, measured to cost nothing extra (~15-18s either way against a
+        # real composition -- it is a geometric check against samples already taken, not a new
+        # sampling pass, see CAPTION_ZONE's own comment). at_transitions/frame_check stay off:
+        # at_transitions was re-measured this session against the two real overlaps a user
+        # flagged and changed nothing about their classification (occurrences 3->7, severity
+        # unchanged) -- the actual fix for those was is_fatal_geometry_finding, not more sampling.
         async with self._semaphore:
             payload = await hyperframes_check.check(
-                composition.parent, at_transitions=False, frame_check=False, contrast=False
+                composition.parent,
+                at_transitions=False,
+                frame_check=False,
+                contrast=False,
+                caption_zone=CAPTION_ZONE,
             )
         # `layout.findings` alone is not enough: if the browser check itself never ran to
         # completion (a page crash, a JS exception mid-composition, a navigation timeout), the CLI
@@ -140,10 +160,17 @@ class PlaywrightHyperFramesRenderBackend(RenderBackend):
         # its own equivalent guard for exactly this "the tool didn't run" vs. "the tool found
         # nothing" distinction; this folds `runtime` findings in for the same reason (found by
         # review) rather than trusting an empty `layout.findings` on its own.
+        #
+        # T18J: `motion` findings folded in too -- this call already pays for computing them
+        # (no new flag, no new cost), and they were previously silently dropped on the floor.
         return [
             f"[{finding.get('severity', 'error')}] {finding.get('code', 'unknown')}: "
             f"{finding.get('message', '')}"
-            for section in (payload.get("runtime", {}), payload.get("layout", {}))
+            for section in (
+                payload.get("runtime", {}),
+                payload.get("layout", {}),
+                payload.get("motion", {}),
+            )
             for finding in section.get("findings", [])
         ]
 

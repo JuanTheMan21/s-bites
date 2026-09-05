@@ -12,6 +12,7 @@ from core.models import Segment, Tier
 from interfaces import CompositionInvalid, RenderBackend
 from rendering.animated import render_animated
 from rendering.compose import compose_scene
+from rendering.geometry_findings import is_fatal_geometry_finding
 from rendering.reveal import render_reveal
 from rendering.static import render_static
 
@@ -43,12 +44,13 @@ async def render_segment(
 
     Raises:
         ValueError: one of the three required fields above is unset.
-        CompositionInvalid: ``render.lint`` or (T18H) ``render.validate_geometry`` returned an
-            ``[error]``-severity finding (T18A: ``[warning]``/``[info]`` findings do not block the
-            render -- see the inline comment at the lint call for why). This project's "catch it
-            at write time, no repair loop" stance (D2), applied uniformly before all three tiers
-            rather than only before Tier 2, since both gates are cheap relative to a render and a
-            broken composition is equally wrong screenshotted as rendered.
+        CompositionInvalid: ``render.lint`` returned an ``[error]``-severity finding, or (T18H)
+            ``render.validate_geometry`` returned a finding ``is_fatal_geometry_finding`` (T18J)
+            judges fatal -- see that function's own docstring for why ``[warning]`` is not
+            uniformly exempt there the way it is for ``lint``. This project's "catch it at write
+            time, no repair loop" stance (D2), applied uniformly before all three tiers rather
+            than only before Tier 2, since both gates are cheap relative to a render and a broken
+            composition is equally wrong screenshotted as rendered.
     """
     missing = [
         name
@@ -86,11 +88,13 @@ async def render_segment(
     # T18H: a second, equally-fatal gate -- lint is static (one page load, schema-only) and
     # structurally cannot see two elements' rendered boxes actually overlapping mid-animation,
     # the recurring class of bug three sessions of real renders kept rediscovering by chance.
-    # Same severity filter, same failure path as lint above -- deliberately not a new mechanism.
+    # T18J: NOT the same severity filter as lint above -- two real user-flagged overlaps were
+    # both classified [warning] by hyperframes check (confirmed unaffected by sample density),
+    # so a blanket "[warning] never blocks" rule here was silently waving through exactly what
+    # this gate exists to catch. is_fatal_geometry_finding still exempts a [warning] whose code
+    # is not a known content-sizing defect.
     geometry_findings = await render.validate_geometry(composition)
-    fatal_geometry = [
-        f for f in geometry_findings if not f.startswith("[warning]") and not f.startswith("[info]")
-    ]
+    fatal_geometry = [f for f in geometry_findings if is_fatal_geometry_finding(f)]
     if fatal_geometry:
         raise CompositionInvalid(
             f"segment {segment.index}'s composition ({composition}) failed geometry validation: "

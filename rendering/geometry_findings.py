@@ -62,6 +62,39 @@ def is_content_retryable(findings: list[str]) -> bool:
     return bool(codes) and all(code in _CONTENT_SIZING_CODES for code in codes)
 
 
+def is_fatal_geometry_finding(finding: str) -> bool:
+    """T18J: whether one ``validate_geometry`` finding should block a render.
+
+    ``[error]`` always blocks; ``[info]`` never does (``hyperframes check``'s own "a single
+    transient sample" demotion, per its documented persistence rule). ``[warning]`` is the
+    interesting case: ``rendering/render_segment.py`` used to treat every ``[warning]`` the same
+    as ``[info]`` -- correct for ``lint()``'s own stylistic nags (a real render once hit a genuine
+    ``composition_file_too_large`` warning that should not block), but this blanket rule was ALSO
+    silently waving through ``validate_geometry``'s own content-sizing findings whenever
+    ``hyperframes check`` happened to classify them as ``warning`` rather than ``error``.
+
+    Confirmed live, not guessed: two user-flagged real defects (a graph-diagram caption
+    overlapping a label, a sequence-diagram overlap) both reported as
+    ``[warning] content_overlap`` with 3+ occurrences held across a real time window --
+    and neither one's classification changed when re-checked at higher sample density
+    (9 -> 21) or with ``--at-transitions`` enabled (occurrences rose 3 -> 7, severity did not
+    move), so raising sample density does not fix this; only the fatal-classification rule can.
+    A ``[warning]`` whose own code is in the already-established content-sizing vocabulary
+    (``is_content_retryable``'s own set) is therefore fatal too -- the same codes we already
+    trust enough to spend a bounded re-author retry on. Every other ``[warning]`` (a template/code
+    concern, or a category not on this list) stays non-fatal, unchanged.
+    """
+    match = _FINDING_RE.match(finding)
+    if not match:
+        return True
+    severity, code = match.group("severity"), match.group("code")
+    if severity == "info":
+        return False
+    if severity == "error":
+        return True
+    return code in _CONTENT_SIZING_CODES
+
+
 def feedback_note(findings: list[str]) -> str:
     """The corrective appendix text handed to ``scene_reauthor.reauthor_scene`` -- names exactly
     what overflowed/escaped/overlapped, in the same "## Revise" shape ``visual_plan.py

@@ -3628,3 +3628,56 @@ neither fix path engages; only its fourth test (the fallback case) needed new ex
 rewritten for interpolation rather than the retired flat cascade.
 
 **Depends:** none — root-caused independently from real render data, not from a prior task.
+
+### D156 — The geometry gate's real blind spot was severity classification, not sample density:
+measured against the two exact compositions the user flagged, before writing any fix
+
+**The plan going into this phase assumed the fix was "raise sample density"** — `hyperframes
+check`'s own persistence rule demotes a single-sample finding to `[info]`, so denser sampling
+seemed like the obvious lever. **Measured directly against the two real compositions from the
+job the user watched (segments 10 and 13 of `91c3dbeb`, both still on disk) before writing a
+single line of fix code, and the assumption was wrong.**
+
+Both compositions genuinely have `content_overlap` findings — `hyperframes check` already detects
+them, correctly, at `samples=9` (today's default): a graph-diagram caption overlapping its own
+label (segment 10) and two sequence-diagram overlaps (segment 13). Re-checked at `samples=21` and
+again with `--at-transitions` enabled: occurrences rose (3 → 3 → 7 as sampling got denser), but
+**severity never moved off `[warning]`, on either composition, at any setting tried.** So the gate
+was never blind to these two defects at all — it saw them and said so.
+
+**The actual defect was one line away: `rendering/render_segment.py`'s fatal-finding filter
+treated every `[warning]` the same as `[info]` — never fatal.** That rule is correct for
+`lint()`'s own stylistic nags (a real render once hit a genuine `[warning]
+composition_file_too_large]` that should not block anything), but `validate_geometry` shares the
+identical filter, so it was silently waving through exactly the content-sizing defects the whole
+gate exists to catch, whenever `hyperframes check` happened to grade them `[warning]` rather than
+`[error]` — which, per this measurement, is not rare.
+
+**Fix:** `rendering/geometry_findings.py::is_fatal_geometry_finding` — `[error]` is always fatal,
+`[info]` never is, and `[warning]` is fatal only when its own code is in the already-established
+content-sizing vocabulary (`_CONTENT_SIZING_CODES`, the same set `is_content_retryable` trusts).
+`lint()`'s own filter is untouched — this is deliberately scoped to `validate_geometry` alone, not
+a blanket "all warnings are now fatal" change, since that risks reintroducing exactly the
+permanently-blocked-render failure mode `composition_file_too_large` already taught this project
+to avoid. Verified end-to-end against both real flagged compositions (not just a synthetic
+string): both now correctly classify as fatal.
+
+**Two free additions folded in at zero measured cost, since the investigation was already being
+done:** `caption_zone` (the constant already existed test-only in
+`tests/test_render_segment_live.py`, moved to a shared `adapters/local/render_backend.py::
+CAPTION_ZONE` constant both now import) and the `motion` findings section, which
+`validate_geometry` was already paying to compute and silently discarding. Both measured at no
+additional wall-clock cost against the real compositions (the caption-zone check is geometric
+against samples already taken, not a new pass; motion findings arrive in the same JSON payload).
+`at_transitions`/`frame_check` stay off, per the same reasoning D150 already recorded, now
+reinforced by this session's own direct measurement that at_transitions specifically does not fix
+either real defect it was hypothesized might need it.
+
+**The general lesson, worth stating since it reverses this session's own plan:** the plan's own
+"cheapest lever first" ordering (denser sampling before touching the fatal-classification logic)
+turned out backwards once measured against real data — the cheapest fix (a filter change, zero
+added render cost) was also the most direct one, and the "obvious" lever (more sampling) would
+have added real latency while fixing nothing. Measuring against the actual reported bug before
+implementing is what caught this, not a hypothesis about how the tool probably works.
+
+**Depends:** D155 (same session, same real render's findings).
