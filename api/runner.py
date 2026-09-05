@@ -24,7 +24,7 @@ from api.job_store import JobStore
 from config import Adapters
 from core.graph import GraphContext, build_graph
 from core.graph.state import GraphState
-from core.models import JobStatus, VideoJob
+from core.video_job import JobStatus, VideoJob
 from interfaces import QueuedJob
 
 logger = logging.getLogger(__name__)

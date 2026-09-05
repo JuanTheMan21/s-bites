@@ -25,6 +25,7 @@ from core import (
     VideoJob,
     VisualIntent,
 )
+from core.render_outcome import RenderOutcome
 
 
 def a_plan(**overrides: object) -> SegmentPlan:
@@ -145,6 +146,37 @@ def test_outline_wraps_the_list_because_strict_mode_needs_an_object_root() -> No
 def test_pipeline_state_rejects_unknown_fields() -> None:
     with pytest.raises(ValueError):
         Segment.model_validate({**a_plan().model_dump(), "index": 0, "durationMs": 1000})
+
+
+def test_a_fresh_segment_and_job_have_no_render_degradation_recorded() -> None:
+    """T18I: absence, not a "clean" variant, is what says a segment/job needed nothing beyond
+    its first render attempt -- see RenderOutcome's own docstring."""
+    segment = a_plan().to_segment(0)
+    job = VideoJob(job_id="j", topic="t")
+    assert segment.render_outcome is None
+    assert job.degraded_segments == []
+
+
+def test_a_render_outcome_survives_the_same_serialisation_round_trip() -> None:
+    """T18I: degraded_segments crosses the same LangGraph checkpoint / HTTP boundary as the rest
+    of VideoJob (D14/T19) -- it must round-trip exactly like every other field here."""
+    outcome = RenderOutcome(
+        segment_index=1,
+        attempts=2,
+        finding_codes=["canvas_overflow"],
+        reauthored=True,
+        fallback_used=False,
+    )
+    segment = (
+        a_plan().to_segment(1).model_copy(update={"duration_ms": 4200, "render_outcome": outcome})
+    )
+    job = VideoJob(job_id="j", topic="t", segments=[segment], degraded_segments=[outcome])
+
+    restored = VideoJob.model_validate_json(job.model_dump_json())
+
+    assert restored == job
+    assert restored.segments[0].render_outcome == outcome
+    assert restored.degraded_segments == [outcome]
 
 
 def test_interfaces_does_not_import_core() -> None:

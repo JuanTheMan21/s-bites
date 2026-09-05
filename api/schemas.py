@@ -1,4 +1,4 @@
-"""Request bodies the API accepts, distinct from ``core.models.VideoJob`` (the response body).
+"""Request bodies the API accepts, distinct from ``core.video_job.VideoJob`` (the response body).
 
 A separate model rather than reusing ``VideoJob`` for the request too: ``job_id``, ``status``,
 ``created_at`` and ``segments`` are server-assigned, and ``VideoJob``'s own ``extra="forbid"``

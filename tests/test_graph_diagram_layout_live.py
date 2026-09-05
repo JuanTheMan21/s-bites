@@ -52,6 +52,43 @@ _DIAMOND: dict = {
     "traversal": [],
 }
 
+_FAN_OUT: dict = {
+    # T18H: reproduces the exact shape of the confirmed real-render bug (t18g-showcase-git
+    # segment 2) -- 3 same-rank captioned children of one root, only ever exercised previously in
+    # a compact SPLIT_HORIZONTAL canvas by chance. This pins the regression: only compact is
+    # parametrized for this one (the single/non-compact axis was never the confirmed failure).
+    "headline": "One commit, three children",
+    "layout": "graph",
+    "nodes": [
+        {"id": "root", "label": "Root commit", "caption": None, "anchor_phrase": "we start"},
+        {
+            "id": "c1",
+            "label": "Parent links",
+            "caption": "point to earlier commits",
+            "anchor_phrase": "the first child",
+        },
+        {
+            "id": "c2",
+            "label": "Feature branch",
+            "caption": "diverges from main",
+            "anchor_phrase": "the second child",
+        },
+        {
+            "id": "c3",
+            "label": "Hotfix branch",
+            "caption": "patches production",
+            "anchor_phrase": "the third child",
+        },
+    ],
+    "edges": [
+        {"from_id": "root", "to_id": "c1", "label": None},
+        {"from_id": "root", "to_id": "c2", "label": None},
+        {"from_id": "root", "to_id": "c3", "label": None},
+    ],
+    "positions": [],
+    "traversal": [],
+}
+
 _CYCLE: dict = {
     "headline": "A small state machine",
     "layout": "graph",
@@ -124,6 +161,29 @@ async def test_layered_layout_renders_cleanly(
     backend, tmp_path, payload: dict, compact: bool
 ) -> None:
     segment = _a_graph_segment(payload, compact=compact)
+    composition_dir = tmp_path / "comp"
+    dest = tmp_path / "clip.mp4"
+
+    result = await render_segment(
+        segment, backend, composition_dir=composition_dir, dest=dest, fps=FPS
+    )
+
+    assert result == dest
+    assert dest.exists() and dest.stat().st_size > 0
+
+    check = _run_check(composition_dir)
+    assert check.get("ok") is True, check
+    assert check["layout"]["errorCount"] == 0, check["layout"]["findings"]
+    assert check["contrast"]["errorCount"] == 0, check["contrast"]["findings"]
+
+
+async def test_three_same_rank_captioned_nodes_do_not_overlap_in_a_compact_canvas(
+    backend, tmp_path
+) -> None:
+    """The regression pin for the confirmed real-render bug this task exists to fix: 3 same-rank
+    captioned children of one root, in a compact SPLIT_HORIZONTAL canvas -- render_segment itself
+    (not just a standalone check() call) must pass its own validate_geometry gate."""
+    segment = _a_graph_segment(_FAN_OUT, compact=True)
     composition_dir = tmp_path / "comp"
     dest = tmp_path / "clip.mp4"
 

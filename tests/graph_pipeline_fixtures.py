@@ -33,10 +33,11 @@ from core.annotation_plan_schema import SceneAnnotations
 from core.block_schemas import TitleSlots
 from core.block_types import BlockType, MotifName, SceneLayout
 from core.graph import GraphContext
-from core.models import Importance, VideoJob, VisualIntent
+from core.models import Importance, VisualIntent
 from core.outline_schema import Outline, SegmentPlan
 from core.scene_plan_schema import PlannedBlock, SegmentScenePlan, VideoScenePlan
 from core.scripting_schema import Narration
+from core.video_job import VideoJob
 from interfaces import SkillPack
 from interfaces.llm_provider import T
 from tests.fakes import (

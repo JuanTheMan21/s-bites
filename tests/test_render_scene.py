@@ -22,7 +22,8 @@ from core.graph.nodes.render_scene import SEGMENT_CLIP_KEY, local_clip_path, ren
 from core.graph.nodes.synthesize import local_narration_path
 from core.graph.retry_policy import build_transient_retry_policy
 from core.graph.state import SegmentTask
-from core.models import Segment, Tier, VideoJob
+from core.models import Segment, Tier
+from core.video_job import VideoJob
 from interfaces import CompositionInvalid
 from tests.fakes import FakeLLMProvider, FakeRenderBackend, FakeSkillRegistry, FakeStorage
 from tests.fakes.tts_provider import FakeTTSProvider

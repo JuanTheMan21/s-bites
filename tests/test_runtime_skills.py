@@ -58,11 +58,12 @@ def shipped() -> SkillRegistry:
 # scene-authoring is at 1.5 (T18G: anchor_phrase on graph_diagram nodes/text_panel items/
 # code_diff lines, title key_terms, icon_panel guidance). visual-plan is at 1.3 (T18G: icon_panel
 # added to the block-choice table, plus a push against defaulting to text_panel/stat_callout).
-# annotation-authoring is at 1.1 (T18G: adds CURSOR/CHECK/WARNING choice examples). Every other
-# pack is still at its original 1.0. Keyed per-pack rather than one constant so a future version
-# bump anywhere only has to update this map, not the reasoning around it.
+# annotation-authoring is at 1.2 (T18G's 1.1 added CURSOR/CHECK/WARNING choice examples; T18I's
+# 1.2 adds target_kind (ITEM vs LINK) for line-shaped targets). Every other pack is still at its
+# original 1.0. Keyed per-pack rather than one constant so a future version bump anywhere only
+# has to update this map, not the reasoning around it.
 LATEST_VERSION = {
-    "annotation-authoring": "1.1",
+    "annotation-authoring": "1.2",
     "house-style": "1.0",
     "outline": "1.0",
     "scene-authoring": "1.5",

@@ -21,10 +21,8 @@ from core.models import (
     MIN_SEGMENTS,
     SECONDS_PER_SEGMENT,
     Importance,
-    JobStatus,
     Segment,
     Tier,
-    VideoJob,
     VisualIntent,
 )
 from core.outline_schema import Outline, SegmentPlan
@@ -33,6 +31,7 @@ from core.scene_schemas import ComposedBlock, ComposedScene
 from core.strict_schema import StrictSchema
 from core.synthesis import SynthesisResult, WordMark
 from core.tier_resolver import TierAssignment, TierPlan, resolve_tiers
+from core.video_job import JobStatus, VideoJob
 
 __all__ = [
     "ALLOWED_BLOCKS",

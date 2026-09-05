@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from api.schemas import JobSubmission
-from core.models import JobStatus, VideoJob
+from core.video_job import JobStatus, VideoJob
 from interfaces import ObjectNotFound
 
 router = APIRouter()

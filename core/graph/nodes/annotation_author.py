@@ -5,7 +5,7 @@ exists (T18D's catalog: every annotation's ``target_item_index`` came back null 
 """
 
 from core.annotation_plan_schema import SceneAnnotations
-from core.block_items import item_labels
+from core.block_items import item_labels, link_labels
 from core.graph.nodes.skill_prompt import load_step_prompt
 from core.graph.nodes.structured_retry import generate_with_bounded_retries
 from core.models import Segment
@@ -17,10 +17,17 @@ ANNOTATION_AUTHORING_PACK = "annotation-authoring"
 
 def _describe_block(index: int, block: ComposedBlock) -> str:
     labels = item_labels(block.block_type.value, block.payload or {})
-    if not labels:
+    links = link_labels(block.block_type.value, block.payload or {})
+    if not labels and not links:
         return f"Block {index} ({block.block_type.value}): {block.role} -- no numbered items."
-    numbered = "\n".join(f"  [{i}] {label}" for i, label in enumerate(labels))
-    return f"Block {index} ({block.block_type.value}): {block.role}\n{numbered}"
+    lines = [f"Block {index} ({block.block_type.value}): {block.role}"]
+    if labels:
+        lines.append("  items:")
+        lines.extend(f"    [{i}] {label}" for i, label in enumerate(labels))
+    if links:
+        lines.append("  links:")
+        lines.extend(f"    [{i}] {label}" for i, label in enumerate(links))
+    return "\n".join(lines)
 
 
 def _build_prompt(step: str, segment: Segment, blocks: list[ComposedBlock]) -> str:
@@ -43,6 +50,7 @@ async def author_annotations(
         ComposedAnnotation(
             annotation_type=a.annotation_type,
             target_block_index=a.target_block_index,
+            target_kind=a.target_kind,
             target_item_index=a.target_item_index,
             anchor_phrase=a.anchor_phrase,
             caption=a.caption,

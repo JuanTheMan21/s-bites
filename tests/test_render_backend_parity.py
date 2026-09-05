@@ -26,6 +26,11 @@ IMPLEMENTATIONS = ["fake", pytest.param("local", marks=pytest.mark.local_live)]
 FIXTURES = Path(__file__).parent / "fixtures" / "render_backend"
 GOOD_COMPOSITION = FIXTURES / "index.html"
 BROKEN_COMPOSITION = FIXTURES / "broken" / "index.html"
+# T18H: two real text blocks positioned to overlap for the whole duration, with a real (not
+# frozen) animation so hyperframes' own frozen-timeline sanity check does not also fire -- lint()
+# has nothing to flag here (the markup and schema are fine); only validate_geometry's real render
+# can see the two rendered boxes actually intersecting.
+OVERLAPPING_COMPOSITION = FIXTURES / "overlapping" / "index.html"
 
 
 @pytest.fixture(params=IMPLEMENTATIONS)
@@ -67,6 +72,33 @@ async def test_render_returns_the_destination_and_writes_something_there(
 async def test_lint_never_raises_and_returns_a_list(backend: RenderBackend) -> None:
     findings = await backend.lint(GOOD_COMPOSITION)
     assert isinstance(findings, list)
+
+
+async def test_validate_geometry_never_raises_and_returns_a_list(backend: RenderBackend) -> None:
+    findings = await backend.validate_geometry(GOOD_COMPOSITION)
+    assert isinstance(findings, list)
+
+
+@pytest.mark.local_live
+async def test_a_known_good_composition_validates_geometry_clean() -> None:
+    backend = PlaywrightHyperFramesRenderBackend()
+    try:
+        assert await backend.validate_geometry(GOOD_COMPOSITION) == []
+    finally:
+        await backend.aclose()
+
+
+@pytest.mark.local_live
+async def test_two_overlapping_text_blocks_are_caught_by_geometry_validation_but_not_lint() -> None:
+    """The whole point of T18H's second gate: this fixture is schema-valid (lint() passes) and
+    only a real render's own layout audit sees the two rendered boxes actually intersecting."""
+    backend = PlaywrightHyperFramesRenderBackend()
+    try:
+        assert await backend.lint(OVERLAPPING_COMPOSITION) == []
+        findings = await backend.validate_geometry(OVERLAPPING_COMPOSITION)
+        assert any("content_overlap" in f for f in findings), findings
+    finally:
+        await backend.aclose()
 
 
 @pytest.mark.local_live

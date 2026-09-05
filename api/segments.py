@@ -13,7 +13,8 @@ from fastapi.responses import JSONResponse, Response
 
 from api.artifact_response import job_or_404, serve_artifact
 from core.graph.nodes.synthesize import SEGMENT_AUDIO_KEY
-from core.models import Segment, VideoJob
+from core.models import Segment
+from core.video_job import VideoJob
 
 router = APIRouter()
 

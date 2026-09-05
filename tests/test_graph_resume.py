@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from core.block_schemas import TitleSlots
 from core.graph import build_graph
-from core.models import VideoJob
+from core.video_job import VideoJob
 from interfaces import ProviderMisconfigured
 from interfaces.llm_provider import T
 from tests.fakes import FakeStorage, FakeTTSProvider

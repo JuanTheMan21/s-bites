@@ -100,13 +100,52 @@ class PlaywrightHyperFramesRenderBackend(RenderBackend):
         # meant to run before the expensive path, not compete with it for concurrency slots.
         return await hyperframes_cli.lint(composition, timeout_s=self.timeout_s)
 
-    async def check(self, project_dir: Path, *, caption_zone: str | None = None) -> dict:
+    async def check(
+        self, project_dir: Path, *, caption_zone: str | None = None, contrast: bool = True
+    ) -> dict:
         """T18A's second, richer gate (motion, layout, WCAG contrast) -- not on the
         ``RenderBackend`` ABC (see ``hyperframes_check.py``'s docstring for why). No retry: like
         ``lint``, it is diagnostic and its own non-determinism (D96) must not be masked by a retry
         that just happens to land on the passing run.
         """
-        return await hyperframes_check.check(project_dir, caption_zone=caption_zone)
+        return await hyperframes_check.check(
+            project_dir, caption_zone=caption_zone, contrast=contrast
+        )
+
+    async def validate_geometry(self, composition: Path) -> list[str]:
+        # T18H: at_transitions/frame_check both measured off by default here -- a real, dense
+        # segment (t18g-showcase-git's own segment 2, 1025 lines) costs ~15s at samples=9 with
+        # both off, ~56s with --at-transitions added, for the SAME errorCount on that composition
+        # (a sustained crowding bug, not a brief transition-seam one). Every real-render bug this
+        # project has found so far has been sustained across many samples, not a one-frame
+        # transition artifact, so the ~4x cost was not buying anything on the one case measured --
+        # a decision to record at checkpoint, not a guess (D16/D99's own lesson about unmeasured
+        # constants). contrast is a separate concern (already covered by the local_live sweep) and
+        # materially slower still, so it stays off here regardless.
+        #
+        # The semaphore below shares this class's own concurrency budget with capture()/render()
+        # (the class docstring's own rule) -- `check` spawns its own headless-browser process tree
+        # the same way `render` does, and this method (unlike the diagnostic `check()` above) is
+        # wired into every real segment's render path, so leaving it unbounded would let it starve
+        # the very renders it gates (found by review, before this ever ran against a real job).
+        async with self._semaphore:
+            payload = await hyperframes_check.check(
+                composition.parent, at_transitions=False, frame_check=False, contrast=False
+            )
+        # `layout.findings` alone is not enough: if the browser check itself never ran to
+        # completion (a page crash, a JS exception mid-composition, a navigation timeout), the CLI
+        # does not raise or change the JSON's shape -- it records the failure as a `runtime`
+        # finding and still returns `layout: {findings: [], ...}`, indistinguishable from a
+        # composition that genuinely has no geometry problems. `lint()` (hyperframes_cli.py) has
+        # its own equivalent guard for exactly this "the tool didn't run" vs. "the tool found
+        # nothing" distinction; this folds `runtime` findings in for the same reason (found by
+        # review) rather than trusting an empty `layout.findings` on its own.
+        return [
+            f"[{finding.get('severity', 'error')}] {finding.get('code', 'unknown')}: "
+            f"{finding.get('message', '')}"
+            for section in (payload.get("runtime", {}), payload.get("layout", {}))
+            for finding in section.get("findings", [])
+        ]
 
     def _retryer(self) -> AsyncRetrying:
         return AsyncRetrying(

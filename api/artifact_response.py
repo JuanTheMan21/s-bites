@@ -12,7 +12,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from api.byte_range import ranged_response
-from core.models import VideoJob
+from core.video_job import VideoJob
 from interfaces import ObjectNotFound, Storage
 
 

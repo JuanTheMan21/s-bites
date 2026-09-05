@@ -485,6 +485,44 @@
         ],
         "title": "JobSubmission"
       },
+      "RenderOutcome": {
+        "properties": {
+          "segment_index": {
+            "type": "integer",
+            "title": "Segment Index"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "finding_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Finding Codes"
+          },
+          "reauthored": {
+            "type": "boolean",
+            "title": "Reauthored"
+          },
+          "fallback_used": {
+            "type": "boolean",
+            "title": "Fallback Used"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "segment_index",
+          "attempts",
+          "finding_codes",
+          "reauthored",
+          "fallback_used"
+        ],
+        "title": "RenderOutcome",
+        "description": "One segment's own render history: how many attempts it took, what geometry findings fired\nalong the way, and whether re-authoring or the safe fallback ended up doing the work.\n\nA segment with no ``RenderOutcome`` at all (the common case) rendered clean on the first\nattempt -- there is deliberately no \"success\" variant of this type; its ABSENCE from\n``VideoJob.degraded_segments`` already says that."
+      },
       "Segment": {
         "properties": {
           "index": {
@@ -573,6 +611,17 @@
             ],
             "title": "Clip Key",
             "description": "Storage key of this segment's final clip (rendered video + narration audio, muxed). Set only by core/graph/nodes/render_scene.py, once slots are filled."
+          },
+          "render_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RenderOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "T18I: set only when this segment's render needed more than one attempt -- a re-author, a fallback to a plain title card, or both. Null is the common case (clean on the first try) and is not itself a RenderOutcome variant; see that type's docstring."
           }
         },
         "additionalProperties": false,
@@ -692,6 +741,14 @@
             ],
             "title": "Subtitles Key",
             "description": "T18A: storage key of the SRT sidecar (mux/subtitles.py). Set alongside video_key by core/graph/nodes/finalize.py. May stay null on the same terms as an individual segment's word_marks -- nothing downstream requires it."
+          },
+          "degraded_segments": {
+            "items": {
+              "$ref": "#/components/schemas/RenderOutcome"
+            },
+            "type": "array",
+            "title": "Degraded Segments",
+            "description": "T18I: every segment whose render needed a re-author, a fallback, or both, collected by core/graph/nodes/finalize.py from each segment's own render_outcome. Empty means every segment rendered clean on the first attempt. status stays SUCCEEDED even when this is non-empty -- a degraded segment still produced a usable video; this is the signal that says so isn't the whole story, not a reason to call the job failed."
           },
           "error": {
             "anyOf": [

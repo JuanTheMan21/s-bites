@@ -16,8 +16,8 @@ from pathlib import Path
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from core.graph import build_graph
-from core.models import VideoJob
 from core.scene_schemas import ComposedScene
+from core.video_job import VideoJob
 from tests.fakes import FakeStorage, FakeTTSProvider
 from tests.graph_pipeline_fixtures import a_context, a_job, needs_ffmpeg, seeded_llm
 

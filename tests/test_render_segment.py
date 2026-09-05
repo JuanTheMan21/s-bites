@@ -60,6 +60,38 @@ async def test_a_lint_finding_raises_composition_invalid_before_any_capture_or_r
     assert render.renders == []
 
 
+async def test_a_geometry_finding_raises_composition_invalid_before_any_capture_or_render(
+    tmp_path,
+) -> None:
+    """T18H's second gate, the same "invalid compositions are caught before rendering" contract
+    lint already holds -- this one for a defect lint structurally cannot see (real overlap)."""
+    segment = an_authored_segment(0, BlockType.TEXT_PANEL, Tier.ANIMATED, duration_ms=DURATION_MS)
+    render = FakeRenderBackend(
+        geometry_findings=["[error] content_overlap: two text blocks overlap"]
+    )
+
+    with pytest.raises(CompositionInvalid, match="content_overlap"):
+        await render_segment(
+            segment, render, composition_dir=tmp_path / "comp", dest=tmp_path / "clip.mp4", fps=24
+        )
+
+    assert render.captures == []
+    assert render.renders == []
+
+
+async def test_a_geometry_warning_does_not_block_the_render(tmp_path) -> None:
+    segment = an_authored_segment(0, BlockType.STAT_CALLOUT, Tier.ANIMATED, duration_ms=DURATION_MS)
+    render = FakeRenderBackend(geometry_findings=["[warning] sweep_static: nothing moved"])
+    dest = tmp_path / "clip.mp4"
+
+    result = await render_segment(
+        segment, render, composition_dir=tmp_path / "comp", dest=dest, fps=24
+    )
+
+    assert result == dest
+    assert len(render.renders) == 1
+
+
 async def test_a_lint_warning_does_not_block_the_render(tmp_path) -> None:
     """T18A: found live -- a real render tripped hyperframes' own [warning]
     composition_file_too_large once captions pushed a template past its line-count nag, and

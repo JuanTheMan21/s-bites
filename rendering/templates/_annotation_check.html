@@ -36,17 +36,20 @@
 </style>
 {% endmacro %}
 
-{% macro script(prefix, caption, entrance_start, target_id, container_id, headline_id, caption_layer_id) %}
+{% macro script(prefix, caption, entrance_start, target_id, container_id, headline_id, caption_layer_id, is_line=false) %}
   (function () {
     var el = document.getElementById("{{ prefix }}-anno");
     {#- T18E: hfAnnotationPlace replaces the fixed "y: off.dy - 40" -- the real, confirmed bug
        (t18d_catalog.md) was this landing directly on top of the block's own headline; "above"
-       now measures the real element and clamps below the headline's own bottom edge instead. #}
+       now measures the real element and clamps below the headline's own bottom edge instead.
+       T18I: a line-shaped target ("parallel" leads the candidate order) needs "above"/"below"
+       kept as its own fallback too -- a dense scene can still exhaust "parallel". #}
     var pos = hfAnnotationPlace(
       "{{ target_id }}", "{{ container_id }}", "{{ prefix }}-anno",
-      "{{ headline_id }}", "{{ caption_layer_id }}", ["above", "below"],
+      "{{ headline_id }}", "{{ caption_layer_id }}",
+      {% if is_line %}["parallel", "above", "below", "center"]{% else %}["above", "below"]{% endif %},
     );
-    tl.set(el, { x: pos.x, y: pos.y, scale: 0, opacity: 0 }, 0);
+    tl.set(el, { x: pos.x, y: pos.y, rotate: pos.rotation, scale: 0, opacity: 0 }, 0);
     var ring = el.querySelector(".anno-check-ring");
     var path = document.getElementById("{{ prefix }}-anno-path");
     var len = path.getTotalLength();

@@ -40,6 +40,17 @@
     absolutely-positioned div at the edge's midpoint, not SVG <text>, because
     preserveAspectRatio="none" would stretch text non-uniformly the same way it stretches the
     traveler's circle (accepted there; not accepted for legibility of a number).
+
+  T18H (the real layered/rank-based algorithm this file's own T18E note above deferred, plus a
+  real render's own follow-up bug):
+  - `computeLayeredLayout` now caps how many same-rank nodes share the fixed-height cross axis
+    (the compact canvas's real, CSS-known 220/620px) before staggering the overflow into extra
+    rank-axis groups -- a real render put 3 same-rank nodes in a compact canvas and rendered two
+    of them overlapping, confirmed NOT an authored-position conflict.
+  - Each node's marker circle now carries its own id (`{prefix}-node-marker-{index}`), not just
+    its enclosing node div -- so `rendering/annotations.py` can point a CURSOR annotation at the
+    marker specifically rather than the whole marker+label+caption stack's own bounding box, whose
+    centre can land in label/caption text for a captioned node (confirmed in a real render).
 #}
 
 {% macro markup(prefix, payload, compact=false) %}
@@ -65,7 +76,7 @@
     {% for node in payload.nodes %}
     {% set pct = (loop.index0 / (n - 1) * 100) if n > 1 else 50 %}
     <div class="blk-graph-node blk-graph-node-chain" id="{{ prefix }}-node-{{ loop.index0 }}" style="left: calc({{ pct }}% - {{ '100px' if compact else '140px' }});">
-      <div class="blk-graph-marker voice-data">{{ "%02d" | format(loop.index) }}</div>
+      <div class="blk-graph-marker voice-data" id="{{ prefix }}-node-marker-{{ loop.index0 }}">{{ "%02d" | format(loop.index) }}</div>
       <div class="blk-graph-label">{{ node.label }}</div>
       {% if node.caption %}
       <div class="blk-graph-caption">{{ node.caption }}</div>
@@ -88,7 +99,7 @@
     </svg>
     {% for node in payload.nodes %}
     <div class="blk-graph-node blk-graph-node-free" id="{{ prefix }}-node-{{ loop.index0 }}">
-      <div class="blk-graph-marker voice-data">{{ "%02d" | format(loop.index) }}</div>
+      <div class="blk-graph-marker voice-data" id="{{ prefix }}-node-marker-{{ loop.index0 }}">{{ "%02d" | format(loop.index) }}</div>
       <div class="blk-graph-label">{{ node.label }}</div>
       {% if node.caption %}
       <div class="blk-graph-caption">{{ node.caption }}</div>
@@ -330,21 +341,102 @@
     // its caption into the caption band. Confirmed live, not hypothetical: a real T18G render's
     // own diamond diagram (4 ranks, a captioned merge node) did exactly this. The X axis keeps
     // its fuller range -- caption-band overlap is a Y-axis-only risk.
-    var Y_MIN_FRAC = 0.14, Y_MAX_FRAC = 0.62;
+    // T18H: Y_MIN_FRAC lowered from 0.14 -- confirmed live (a real render's 3-rank, fully-
+    // captioned "how binary search works" diagram) that the non-compact rank axis's own per-rank
+    // gap (rankStep, purely a function of maxRank, no idea how tall a captioned node's own
+    // marker+label+caption stack is) can be tighter than a node's real footprint, letting a
+    // shallower rank's own trailing caption reach into the next rank's territory -- a DIFFERENT
+    // axis than the same-rank cross-axis crowding fixed above, same root cause. Y_MAX_FRAC stays
+    // at 0.62 (the caption-band-safety margin the deepest rank still needs); only the unused
+    // headroom between the headline and the first rank is reclaimed.
+    var Y_MIN_FRAC = 0.08, Y_MAX_FRAC = 0.62;
     var X_MIN_FRAC = 0.14, X_MAX_FRAC = 0.82;
+    var rankMin = rankAxisIsX ? X_MIN_FRAC : Y_MIN_FRAC;
+    var rankMax = rankAxisIsX ? X_MAX_FRAC : Y_MAX_FRAC;
+    var rankStep = maxRank > 0 ? (rankMax - rankMin) / maxRank : (rankMax - rankMin);
+
+    // T18H: a real render (t18g-showcase-git segment 2) put 3 same-rank nodes in a compact canvas
+    // and rendered two of them overlapping -- confirmed NOT an authored-position conflict
+    // (payload.positions was empty); Y_MIN_FRAC/Y_MAX_FRAC above divide the SAME cross-axis range
+    // across however many nodes share a rank, with no idea how tall each node's own
+    // marker+label+caption stack actually is.
+    //
+    // rankAxisIsX is exactly the macro's own `compact` flag at every call site (script() passes
+    // `{{ "true" if compact else "false" }}` for this very parameter) -- using it here rather than
+    // a bare `compact` keeps this a pure function of its own arguments, with no dependency on a
+    // JS-scope variable that (unlike Jinja's `compact`) does not exist inside this function.
+    // crossAxisIsY (cross is Y whenever rank is X) is therefore also exactly "is this a compact
+    // canvas" -- the only case with a real, CSS-fixed cross-axis pixel budget to reason against
+    // (the canvas's own explicit height, 220px -- see .blk-graph-canvas above). Non-compact's own
+    // cross axis (X) is flex-determined width, not sized this precisely, so it keeps the old
+    // even-spread behavior untouched -- a targeted fix for the confirmed failure, not a guess
+    // about an untested one.
+    var crossAxisIsY = rankAxisIsX;
+    // Compact's cross axis gets its OWN, wider bounds than Y_MIN_FRAC/Y_MAX_FRAC above -- that
+    // pair's 0.62 ceiling exists so a deep-RANK node's caption stays clear of the caption band at
+    // the bottom of the full 1920x1080 frame (a real concern for the tall, non-compact SINGLE
+    // canvas, 620px, close to that band); the short compact canvas (220px) sits entirely inside
+    // its own flex panel, nowhere near the frame's caption band regardless of where in its own
+    // height a node sits, so there is real spare room here worth using before ever resorting to
+    // rank-axis staggering below.
+    var CROSS_Y_MIN_FRAC = 0.08, CROSS_Y_MAX_FRAC = 0.90;
+    var crossMin = crossAxisIsY ? CROSS_Y_MIN_FRAC : X_MIN_FRAC;
+    var crossMax = crossAxisIsY ? CROSS_Y_MAX_FRAC : X_MAX_FRAC;
+    var CROSS_PX = crossAxisIsY ? 220 : null;
+    // Conservative worst-case vertical footprint of one node's marker+label+(caption) stack --
+    // comfortably above the ~105px a 3-node compact rank actually had to share (the confirmed
+    // bug's own numbers), so this reliably forces splitting rather than trusting a guess to be
+    // exactly right.
+    var NODE_CROSS_PX = rankAxisIsX ? 170 : 230;
+    var NO_SPLIT = 1e9;
+    var maxFit = (crossAxisIsY && CROSS_PX)
+      ? Math.max(1, Math.floor(1 + (CROSS_PX * (crossMax - crossMin)) / NODE_CROSS_PX))
+      : NO_SPLIT;
+
+    // Only a rank that STILL overflows after the widened cross range above gets its excess
+    // promoted along the RANK axis instead (X, in every case that can actually trigger -- maxFit
+    // is only ever finite when crossAxisIsY/compact). The offset is capped at a fraction of
+    // rankStep -- confirmed live that an uncapped offset sized only to clear a same-rank sibling
+    // can overshoot into the score already reserved for the NEXT rank's own real node (a diamond's
+    // rank-1 sibling, pushed clear of its own rank-mate, collided with rank-2's "Merge" node
+    // instead -- a different collision, not fewer of them).
+    var RANK_AXIS_PX = 676; // #stage's real per-panel content width, split_horizontal (comment below)
+    var RANK_NODE_PX = rankAxisIsX ? 190 : 250; // node's own footprint along the rank axis + gap
+    var groupOffsetFrac = crossAxisIsY
+      ? Math.min(RANK_NODE_PX / RANK_AXIS_PX, rankStep * 0.6)
+      : 0;
+    // RANK_AXIS_PX derivation, real px not a guess: 1920 root - 140px #stage padding each side -
+    // 80px #split-row gap = 1560, halved for two equal flex panels = 780, minus 52px panel padding
+    // each side = 676px of real content width per panel
+    // (rendering/templates/_layout_split_horizontal.html's own hardcoded constants -- coupled to
+    // them the same bounded way CROSS_PX/NODE_CROSS_PX are coupled to .blk-graph-canvas's height).
+
     var positions = nodeIds.map(function () { return [0.5, 0.5]; });
     byRank.forEach(function (members, r) {
       var rankFrac = maxRank > 0 ? r / maxRank : 0.5;
-      var rankMin = rankAxisIsX ? X_MIN_FRAC : Y_MIN_FRAC;
-      var rankMax = rankAxisIsX ? X_MAX_FRAC : Y_MAX_FRAC;
-      var rankCoord = rankMin + rankFrac * (rankMax - rankMin);
-      var count = members.length;
-      members.forEach(function (u, i) {
-        var crossFrac = count > 1 ? i / (count - 1) : 0.5;
-        var crossMin = rankAxisIsX ? Y_MIN_FRAC : X_MIN_FRAC;
-        var crossMax = rankAxisIsX ? Y_MAX_FRAC : X_MAX_FRAC;
-        var crossCoord = crossMin + crossFrac * (crossMax - crossMin);
-        positions[u] = rankAxisIsX ? [rankCoord, crossCoord] : [crossCoord, rankCoord];
+      var baseRankCoord = rankMin + rankFrac * (rankMax - rankMin);
+
+      // When a rank has more members than fit at a safe cross-axis spacing, promote the overflow
+      // into staggered groups along the RANK axis instead -- alternating +/- offsets around the
+      // rank's own true position (the same nudge-search shape _annotations.html::nudged() already
+      // established), so no group drifts one-directionally toward a canvas edge. Each group in a
+      // split rank still has only maxFit members, so a rank with enough overflow members can still
+      // exhaust the clamp and re-collide at the canvas edge -- an accepted residual (D124), not a
+      // claim this covers every topology.
+      var groups = [];
+      for (var gi = 0; gi * maxFit < members.length; gi++) {
+        groups.push(members.slice(gi * maxFit, gi * maxFit + maxFit));
+      }
+      groups.forEach(function (group, gi) {
+        var dir = gi === 0 ? 0 : (gi % 2 === 1 ? 1 : -1);
+        var mag = Math.ceil(gi / 2);
+        var rankCoord = Math.min(0.95, Math.max(0.05, baseRankCoord + dir * mag * groupOffsetFrac));
+        var count = group.length;
+        group.forEach(function (u, i) {
+          var crossFrac = count > 1 ? i / (count - 1) : 0.5;
+          var crossCoord = crossMin + crossFrac * (crossMax - crossMin);
+          positions[u] = rankAxisIsX ? [rankCoord, crossCoord] : [crossCoord, rankCoord];
+        });
       });
     });
     return positions;
@@ -364,7 +456,40 @@
     ];
     var layered = computeLayeredLayout(nodeIds, layoutEdges, {{ "true" if compact else "false" }});
 
-    var positions = nodeIds.map(function (id, i) { return authored[id] || layered[i]; });
+    // T18H: an authored position bypasses computeLayeredLayout's own safety margins entirely --
+    // the fallback respects Y_MIN_FRAC/Y_MAX_FRAC (or the wider compact CROSS_Y bounds) by
+    // construction, but authored[id] used to be trusted as-is, with nothing checking it. Confirmed
+    // live: a real render authored y=0.92 for one node, well past the 0.62 ceiling the algorithm
+    // itself would never produce on its own, landing that node's label in the caption band.
+    //
+    // Clamping just that one node's authored (x,y) into bounds was the first fix tried here, and
+    // was ALSO confirmed live to trade one bug for another: the clamped node landed close enough
+    // to a DIFFERENT authored node (one that was already safely positioned) to occlude it instead
+    // -- an authored set can be internally inconsistent with a clamp in a way computeLayeredLayout,
+    // which reasons about every node's position together, is not. So the rule is coarser but
+    // actually safe: if ANY node's authored position falls outside these bounds, the whole
+    // authored set for this diagram is discarded in favor of the fallback for EVERY node --
+    // already verified collision-free across every topology this project's own live tests cover
+    // (diamond, cycle, fan-out, both layouts) -- rather than trying to salvage some authored values
+    // and not others. A fully-authored-and-safe position set (the common case) renders exactly as
+    // authored, unchanged.
+    // Mirrors CROSS_Y_MIN_FRAC/CROSS_Y_MAX_FRAC (compact) and Y_MIN_FRAC/Y_MAX_FRAC (non-compact)
+    // above, in this separate IIFE's own scope rather than computeLayeredLayout's -- found by
+    // review to have drifted once already (this branch still read the pre-widening 0.14 after
+    // Y_MIN_FRAC itself was lowered to 0.08 elsewhere in this file); keep both edits together.
+    {% if compact %}
+    var __posYMin = 0.08, __posYMax = 0.90;
+    {% else %}
+    var __posYMin = 0.08, __posYMax = 0.62;
+    {% endif %}
+    var __posXMin = 0.14, __posXMax = 0.82;
+    var __authoredUnsafe = Object.keys(authored).some(function (id) {
+      var p = authored[id];
+      return p[0] < __posXMin || p[0] > __posXMax || p[1] < __posYMin || p[1] > __posYMax;
+    });
+    var positions = nodeIds.map(function (id, i) {
+      return (!__authoredUnsafe && authored[id]) || layered[i];
+    });
 
     var canvas = document.getElementById("{{ prefix }}-canvas");
     var els = document.querySelectorAll("#{{ prefix }}-canvas .blk-graph-node-free");
@@ -372,6 +497,39 @@
       el.style.left = (positions[i][0] * 100) + "%";
       el.style.top = (positions[i][1] * 100) + "%";
     });
+
+    // T18H: even after the rank-axis widening above, a real 3-rank diagram with every node
+    // captioned can still leave adjacent ranks' own marker+label+caption stacks close enough to
+    // collide -- confirmed live (a real render's deepest-rank node marker covered a shallower
+    // rank's own trailing caption; the rank gap a 2-step spread produces is a function of rank
+    // COUNT, not of how tall a fully-captioned non-compact node's own stack actually is, the same
+    // root cause as the same-rank crowding fixed above, just not fully closed by widening alone).
+    // Rather than keep tuning rank-spacing constants for every future node-count/caption-length
+    // combination, this checks each node's OWN caption against every OTHER node's essential
+    // content (marker+label, never dropped) right after positions are set, and hides just the
+    // caption if it would collide -- the same "drop decorative trailing text rather than leave it
+    // colliding" call CODE_PANEL/CODE_DIFF's own hfDropIfPastCaptionBand already makes, reusing
+    // this file's own rect-overlap check (hfRectsOverlap, _annotations.html) rather than a new one.
+    if (typeof hfRectsOverlap === "function") {
+      var graphEssentialRects = [];
+      els.forEach(function (el) {
+        var mr = el.querySelector(".blk-graph-marker").getBoundingClientRect();
+        var lr = el.querySelector(".blk-graph-label").getBoundingClientRect();
+        var left = Math.min(mr.left, lr.left), top = Math.min(mr.top, lr.top);
+        var right = Math.max(mr.right, lr.right), bottom = Math.max(mr.bottom, lr.bottom);
+        graphEssentialRects.push({ x: left, y: top, w: right - left, h: bottom - top, el: el });
+      });
+      els.forEach(function (el) {
+        var caption = el.querySelector(".blk-graph-caption");
+        if (!caption) return;
+        var c = caption.getBoundingClientRect();
+        var box = { x: c.left, y: c.top, w: c.width, h: c.height };
+        var collides = graphEssentialRects.some(function (r) {
+          return r.el !== el && hfRectsOverlap(box, r);
+        });
+        if (collides) { caption.style.display = "none"; }
+      });
+    }
 
     // Measure each node's own visible marker circle, not the div it sits inside -- the div's CSS
     // centre and the circle's real centre disagree by however tall the label/caption are (T18E,

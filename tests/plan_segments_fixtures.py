@@ -11,8 +11,9 @@ from langgraph.graph import END, START, StateGraph
 from core.graph import GraphContext, GraphState
 from core.graph.nodes.plan import plan_segments
 from core.graph.retry_policy import build_transient_retry_policy
-from core.models import Importance, Segment, VideoJob, VisualIntent
+from core.models import Importance, Segment, VisualIntent
 from core.outline_schema import Outline, SegmentPlan
+from core.video_job import VideoJob
 from interfaces import SkillPack
 from tests.fakes import (
     FakeLLMProvider,

@@ -43,12 +43,12 @@ async def render_segment(
 
     Raises:
         ValueError: one of the three required fields above is unset.
-        CompositionInvalid: ``render.lint`` returned an ``[error]``-severity finding (T18A:
-            ``[warning]``/``[info]`` findings do not block the render -- see the inline comment
-            at the lint call for why). This project's "catch it
+        CompositionInvalid: ``render.lint`` or (T18H) ``render.validate_geometry`` returned an
+            ``[error]``-severity finding (T18A: ``[warning]``/``[info]`` findings do not block the
+            render -- see the inline comment at the lint call for why). This project's "catch it
             at write time, no repair loop" stance (D2), applied uniformly before all three tiers
-            rather than only before Tier 2, since lint is cheap and a broken composition is
-            equally wrong screenshotted as rendered.
+            rather than only before Tier 2, since both gates are cheap relative to a render and a
+            broken composition is equally wrong screenshotted as rendered.
     """
     missing = [
         name
@@ -79,7 +79,23 @@ async def render_segment(
     fatal = [f for f in findings if not f.startswith("[warning]") and not f.startswith("[info]")]
     if fatal:
         raise CompositionInvalid(
-            f"segment {segment.index}'s composition ({composition}) failed lint: {fatal}"
+            f"segment {segment.index}'s composition ({composition}) failed lint: {fatal}",
+            findings=fatal,
+        )
+
+    # T18H: a second, equally-fatal gate -- lint is static (one page load, schema-only) and
+    # structurally cannot see two elements' rendered boxes actually overlapping mid-animation,
+    # the recurring class of bug three sessions of real renders kept rediscovering by chance.
+    # Same severity filter, same failure path as lint above -- deliberately not a new mechanism.
+    geometry_findings = await render.validate_geometry(composition)
+    fatal_geometry = [
+        f for f in geometry_findings if not f.startswith("[warning]") and not f.startswith("[info]")
+    ]
+    if fatal_geometry:
+        raise CompositionInvalid(
+            f"segment {segment.index}'s composition ({composition}) failed geometry validation: "
+            f"{fatal_geometry}",
+            findings=fatal_geometry,
         )
 
     renderer = _TIER_RENDERERS[segment.tier]

@@ -59,3 +59,17 @@ class RenderBackend(ABC):
         Catching a bad composition here costs a second; catching it mid-render costs minutes
         of a job that is already running.
         """
+
+    @abstractmethod
+    async def validate_geometry(self, composition: Path) -> list[str]:
+        """Validate ``composition``'s REAL RENDERED geometry -- overlap, occlusion, caption-band
+        collision -- by actually loading it and sampling its timeline. Same contract shape as
+        ``lint``: findings, newest concern first, an **empty list means valid**, and this never
+        raises for a geometrically broken composition -- that is this method's expected input,
+        same reasoning as ``lint``'s own docstring.
+
+        Unlike ``lint`` (static, schema-only, no page load), this drives a real browser across
+        several points in the composition's duration -- it catches the class of bug ``lint``
+        structurally cannot see: two elements' rendered boxes actually intersecting at some
+        moment in the animation, not just malformed markup (T18H).
+        """

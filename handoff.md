@@ -209,3 +209,27 @@ checkpoint since T18B, still the user's own decision, not automatic.
   reflects "live" progress.
 - A React key built from a timestamp is not safe under real concurrency (D143) — use the item's
   stable position or a real unique id.
+
+---
+
+## Merge note (this session, T18I kickoff)
+
+Merged `feature/scene-composition` (T18G/T18H, plus a WIP slice of T18I) into `dev`, curated:
+
+- **Taken wholesale:** the geometric-correctness gate (`validate_geometry`), its finding
+  parsing (`rendering/geometry_findings.py`), all template fixes (arrowheads, caption-band drop,
+  graph layout, text-panel shrink), `AnnotationTargetKind` (ITEM/LINK) groundwork for
+  edge-parallel annotation placement, and the branch's own test suite.
+- **Re-homed, not dropped:** `VideoJob`/`JobStatus` stay in `core/models.py` rather than moving to
+  `core/video_job.py` as the branch had it — actually moved to `core/video_job.py` after all, once
+  `Segment.render_outcome` pushed `core/models.py` over the 200-line ceiling; `api/`'s six
+  importers and `cli.py` now import both from `core.video_job`. No behavioural change, no API
+  contract change — confirmed via `dump_openapi` diff.
+- **Treated as a starting point, not finished work:** `core/graph/nodes/scene_reauthor.py`,
+  `scene_fallback.py`, `core/render_outcome.py`, and `render_scene.py`'s retry rewrite were
+  committed WIP on the branch, never reviewed or checkpointed. This session's Phase 1 reviews and
+  finishes that logic rather than merging it as-is.
+
+Full task scope for this session: see `tasks.md`'s T18I entry, rewritten to cover geometry-gap
+closure, per-segment resilience, variety enforcement in code, and annotation placement/density —
+all from the user's own direct feedback on real rendered output.

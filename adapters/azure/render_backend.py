@@ -36,3 +36,9 @@ class ContainerAppsRenderBackend(RenderBackend):
         raise NotImplementedError(
             "ContainerAppsRenderBackend.lint: real Container Apps lint lands at T35 (D25)"
         )
+
+    async def validate_geometry(self, composition: Path) -> list[str]:
+        raise NotImplementedError(
+            "ContainerAppsRenderBackend.validate_geometry: real Container Apps geometry "
+            "validation lands at T35 (D25)"
+        )

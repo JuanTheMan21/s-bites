@@ -32,6 +32,7 @@ async def check(
     samples: int = DEFAULT_SAMPLES,
     at_transitions: bool = True,
     frame_check: bool = True,
+    contrast: bool = True,
     caption_zone: str | None = None,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> dict:
@@ -50,6 +51,8 @@ async def check(
         args.append("--at-transitions")
     if frame_check:
         args.append("--frame-check")
+    if not contrast:
+        args.append("--no-contrast")
     if caption_zone:
         args += ["--caption-zone", caption_zone]
     args.append(str(project_dir))

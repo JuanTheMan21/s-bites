@@ -6,7 +6,7 @@ nothing else asking for it yet), so a single small index file stands in for one.
 
 import json
 
-from core.models import VideoJob
+from core.video_job import VideoJob
 from interfaces import ObjectNotFound, Storage
 
 JOB_KEY = "jobs/{job_id}/job.json"

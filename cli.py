@@ -20,7 +20,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from config import build_adapters, close_adapters
 from core.graph import GraphContext, build_graph
-from core.models import DEFAULT_TARGET_DURATION_MS, VideoJob
+from core.models import DEFAULT_TARGET_DURATION_MS
+from core.video_job import VideoJob
 
 # Azure Speech S0's published rate (D48) -- used only for the estimated-cost line in the summary
 # below, never for anything that decides behaviour.
@@ -51,6 +52,17 @@ def _print_summary(job: VideoJob, *, elapsed_s: float) -> None:
         f"narration: {total_chars} characters (~${estimated_tts_usd:.3f} estimated TTS cost, "
         "Azure Speech S0 rate -- LLM cost is not itemized here; run /costs for the real total)"
     )
+    # T18I: the production failure story's own signal -- previously a geometry failure crashed
+    # the whole job with nothing telling anyone which segment or which finding. A clean job (the
+    # common case) prints nothing here; degraded_segments being non-empty is itself the news.
+    if job.degraded_segments:
+        print(f"\ndegraded segments: {len(job.degraded_segments)}")
+        for outcome in job.degraded_segments:
+            fallback_note = "fell back to title card" if outcome.fallback_used else "re-authored"
+            print(
+                f"  segment {outcome.segment_index}: {fallback_note} after {outcome.attempts} "
+                f"attempt(s) -- findings: {outcome.finding_codes}"
+            )
 
 
 async def _run(topic: str, *, target_duration_ms: int, job_id: str) -> VideoJob:
@@ -82,9 +94,20 @@ async def _run(topic: str, *, target_duration_ms: int, job_id: str) -> VideoJob:
         ) as saver:
             graph = build_graph(saver)
             config = {"configurable": {"thread_id": job.job_id}}
-            result = await graph.ainvoke(
-                {"job": job, "segments": {}}, config, context=context, durability="sync"
-            )
+            # T18I: a real bug, found running this task's own closing render -- passing a fresh
+            # {"job": ..., "segments": {}} input on EVERY invocation (as this always did) tells
+            # LangGraph to (re)initialize state, which silently overwrites an already-checkpointed
+            # run's progress with a blank one instead of resuming it -- the graph then reruns from
+            # plan_segments regardless of how far a prior attempt got. tests/test_graph_resume.py's
+            # own resume calls already do this correctly (`ainvoke(None, config, ...)`); this was
+            # simply never applied here. aget_state's own values are non-empty only once a run has
+            # actually reached its first checkpoint (after plan_segments), so this is the same
+            # "does a checkpoint already exist" signal every LangGraph resume pattern relies on.
+            existing = await graph.aget_state(config)
+            resuming = bool(existing.values)
+            print(f"{'resuming' if resuming else 'starting'} job {job.job_id}")
+            graph_input = None if resuming else {"job": job, "segments": {}}
+            result = await graph.ainvoke(graph_input, config, context=context, durability="sync")
         finished: VideoJob = result["job"]
 
         local_final = working_dir / finished.job_id / "final.mp4"

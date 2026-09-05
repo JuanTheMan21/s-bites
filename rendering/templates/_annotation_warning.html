@@ -34,18 +34,21 @@
 </style>
 {% endmacro %}
 
-{% macro script(prefix, caption, entrance_start, target_id, container_id, headline_id, caption_layer_id) %}
+{% macro script(prefix, caption, entrance_start, target_id, container_id, headline_id, caption_layer_id, is_line=false) %}
   (function () {
     var el = document.getElementById("{{ prefix }}-anno");
     {#- T18E: hfAnnotationPlace replaces the fixed "y: off.dy - 46" -- see _annotation_check.html's
-       identical comment. #}
+       identical comment. T18I: a line-shaped target leads with "parallel". The shake-and-settle
+       below still runs, now offset around pos.rotation as its own baseline (rather than 0) so a
+       tilted parallel placement shakes around its own tilt instead of snapping back to level. #}
     var pos = hfAnnotationPlace(
       "{{ target_id }}", "{{ container_id }}", "{{ prefix }}-anno",
-      "{{ headline_id }}", "{{ caption_layer_id }}", ["above", "below"],
+      "{{ headline_id }}", "{{ caption_layer_id }}",
+      {% if is_line %}["parallel", "above", "below", "center"]{% else %}["above", "below"]{% endif %},
     );
-    tl.set(el, { x: pos.x, y: pos.y, scale: 0, opacity: 0, rotate: -8, transformOrigin: "50% 100%" }, 0);
+    tl.set(el, { x: pos.x, y: pos.y, scale: 0, opacity: 0, rotate: pos.rotation - 8, transformOrigin: "50% 100%" }, 0);
     tl.to(el, { scale: 1, opacity: 1, duration: 0.25, ease: "power3.out" }, {{ entrance_start }});
-    tl.to(el, { rotate: 8, duration: 0.08, ease: "power1.inOut", yoyo: true, repeat: 3 }, {{ entrance_start + 0.25 }});
-    tl.set(el, { rotate: 0 }, {{ entrance_start + 0.57 }});
+    tl.to(el, { rotate: pos.rotation + 8, duration: 0.08, ease: "power1.inOut", yoyo: true, repeat: 3 }, {{ entrance_start + 0.25 }});
+    tl.set(el, { rotate: pos.rotation }, {{ entrance_start + 0.57 }});
   })();
 {% endmacro %}

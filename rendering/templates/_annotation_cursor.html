@@ -44,7 +44,7 @@
 </style>
 {% endmacro %}
 
-{% macro script(prefix, caption, entrance_start, target_id, container_id, headline_id, caption_layer_id) %}
+{% macro script(prefix, caption, entrance_start, target_id, container_id, headline_id, caption_layer_id, is_line=false) %}
   (function () {
     var el = document.getElementById("{{ prefix }}-anno");
     var pulse = document.getElementById("{{ prefix }}-anno-pulse");
@@ -52,7 +52,9 @@
        design (the glyph's tip lands exactly on the target's centre) but now clamps into the
        container's usable box, which is what a real render needed when the target sat near the
        bottom of a dense SEQUENCE_DIAGRAM and the caption printed into the caption band
-       (t18d_catalog.md, D121/D122). #}
+       (t18d_catalog.md, D121/D122). T18I: deliberately still ["tip"] even for a line-shaped
+       target (is_line, unused here) -- CURSOR's design is to land its tip on a point, and a
+       rotated pointer glyph reads as a bug, not a feature. #}
     var pos = hfAnnotationPlace(
       "{{ target_id }}", "{{ container_id }}", "{{ prefix }}-anno",
       "{{ headline_id }}", "{{ caption_layer_id }}", ["tip"],

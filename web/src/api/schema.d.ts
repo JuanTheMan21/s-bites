@@ -207,6 +207,27 @@ export interface components {
             target_duration_ms: number;
         };
         /**
+         * RenderOutcome
+         * @description One segment's own render history: how many attempts it took, what geometry findings fired
+         *     along the way, and whether re-authoring or the safe fallback ended up doing the work.
+         *
+         *     A segment with no ``RenderOutcome`` at all (the common case) rendered clean on the first
+         *     attempt -- there is deliberately no "success" variant of this type; its ABSENCE from
+         *     ``VideoJob.degraded_segments`` already says that.
+         */
+        RenderOutcome: {
+            /** Segment Index */
+            segment_index: number;
+            /** Attempts */
+            attempts: number;
+            /** Finding Codes */
+            finding_codes: string[];
+            /** Reauthored */
+            reauthored: boolean;
+            /** Fallback Used */
+            fallback_used: boolean;
+        };
+        /**
          * Segment
          * @description A segment as the pipeline knows it: the plan, plus everything measured since.
          *
@@ -261,6 +282,8 @@ export interface components {
              * @description Storage key of this segment's final clip (rendered video + narration audio, muxed). Set only by core/graph/nodes/render_scene.py, once slots are filled.
              */
             clip_key?: string | null;
+            /** @description T18I: set only when this segment's render needed more than one attempt -- a re-author, a fallback to a plain title card, or both. Null is the common case (clean on the first try) and is not itself a RenderOutcome variant; see that type's docstring. */
+            render_outcome?: components["schemas"]["RenderOutcome"] | null;
         };
         /**
          * Tier
@@ -326,6 +349,11 @@ export interface components {
              * @description T18A: storage key of the SRT sidecar (mux/subtitles.py). Set alongside video_key by core/graph/nodes/finalize.py. May stay null on the same terms as an individual segment's word_marks -- nothing downstream requires it.
              */
             subtitles_key?: string | null;
+            /**
+             * Degraded Segments
+             * @description T18I: every segment whose render needed a re-author, a fallback, or both, collected by core/graph/nodes/finalize.py from each segment's own render_outcome. Empty means every segment rendered clean on the first attempt. status stays SUCCEEDED even when this is non-empty -- a degraded segment still produced a usable video; this is the signal that says so isn't the whole story, not a reason to call the job failed.
+             */
+            degraded_segments?: components["schemas"]["RenderOutcome"][];
             /**
              * Error
              * @description T24: why this job is FAILED, truncated to 500 chars. Set only by api/runner.py from the caught exception's str(); cleared on resume (api/jobs.py) so a retried job never displays a stale reason.

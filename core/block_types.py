@@ -142,6 +142,18 @@ class AnnotationType(StrEnum):
     WARNING = "warning"
 
 
+class AnnotationTargetKind(StrEnum):
+    """T18I: what KIND of thing an annotation targets, not just which one. Split out because a
+    line-shaped target (a GRAPH_DIAGRAM edge, a SEQUENCE_DIAGRAM message arrow) needs a genuinely
+    different placement geometry (parallel to the line, ``hfAnnotationPlace``'s new "parallel"
+    candidate) than a point-shaped one (a node, a cell, a row) -- and there was previously no way
+    for the authoring call to say which one it meant. ``ITEM`` is the default so a scene stored by
+    an OLDER checkpoint (before this field existed) still validates unchanged."""
+
+    ITEM = "item"
+    LINK = "link"
+
+
 # What each VisualIntent's segment can plausibly become, once plan_visuals looks at the actual
 # narration rather than just the outline-time label. Deliberately generous, not a hard dispatch
 # table: strict-schema structured output has no way to make a per-item enum conditional on

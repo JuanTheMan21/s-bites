@@ -133,6 +133,7 @@
   {% endfor %}
 
   {% if payload.caption %}
+  if (typeof hfDropIfPastCaptionBand === "function") { hfDropIfPastCaptionBand("{{ prefix }}-caption"); }
   tl.fromTo("#{{ prefix }}-caption", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, {{ prefix }}_lineStart + 0.3);
   {% endif %}
 {% endmacro %}
