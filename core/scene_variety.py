@@ -27,6 +27,18 @@ _MAX_TYPE_FRACTION = 1 / 3
 # most videos before this.
 _MAX_SEQUENCE_DIAGRAM_FRACTION = 1 / 5
 
+# T18J: found in a real render, not guessed -- 4 of 15 segments came back as `title` (segments 0,
+# 4, 9, 11), and only segment 0 is the forced opener. The other three were regular content
+# segments with real explanatory narration, rendered as a single static headline+paragraph with
+# no progressive reveal -- exactly the user's own complaint ("this one can have some points
+# appearing instead of this plain visual throughout"). `runtime_skills/visual-plan`'s own table
+# already says `title` is for "the opening, or a genuine change of subject mid-video" and
+# explicitly NOT for "any segment with real content" -- the model was not following its own
+# stated rule, and nothing checked. A video may have at most one genuine subject-change moment
+# per ~10 segments before this reads as the model reaching for `title` as a generic "just show
+# the point" fallback rather than reserving it for what it is actually for.
+_MAX_TITLE_FRACTION = 1 / 10
+
 
 def _primary_type(plan: SegmentScenePlan) -> BlockType | None:
     return plan.blocks[0].block_type if plan.blocks else None
@@ -76,6 +88,16 @@ def check_variety(plan: VideoScenePlan) -> list[str]:
             "it reads as repetitive and is capped tighter than other types. Keep it only for the "
             "segment(s) where a back-and-forth exchange is genuinely the clearest way to explain "
             "the narration; give the rest a different block type."
+        )
+
+    title_count = counts.get(BlockType.TITLE, 0)
+    if title_count > max(1, total * _MAX_TITLE_FRACTION):
+        violations.append(
+            f"`title` is the primary block of {title_count} of {total} non-opening segments -- "
+            "title is for the opening or a genuine change of subject, never for a segment with "
+            "real explanatory content (that content needs to actually appear, progressively, "
+            "which title cannot do). Replace the extra title segments with text_panel, "
+            "icon_panel, or whichever block actually fits what that segment explains."
         )
 
     for prev, curr in itertools.pairwise(ordered):

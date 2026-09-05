@@ -837,6 +837,25 @@ scope the user added mid-session from watching real output again:
   both degraded segments needed a full retry-then-fallback cycle — expected to improve as Phase
   2/3's remaining geometry work reduces how often that cycle triggers at all, not by weakening it.
 
+**Status update (T18J, a later session, D155-D159):** the user reported five concrete defects with
+timestamps/screenshots against the D152 closing render. Three timing bugs fixed and verified
+against the exact job's own checkpoint data (a multi-block panel's headline entering too late,
+items rendering out of narration order, an unmatched anchor's bad flat-default fallback — all in
+`rendering/block_timing.py`/`rendering/compose.py`, D155). The geometry gate's real blind spot was
+found and fixed (`[warning]`-severity content-sizing findings were silently non-fatal — not a
+sample-density problem, measured directly against the two flagged compositions before touching
+anything, D156). Latency: removed the one genuinely decorative perpetual tween the user flagged,
+measured the frame budget's real trade-off and let the user choose (kept at 9500), raised
+concurrency after checking real free memory (D157). `project-reviewer` caught two more real bugs
+fixing the above (item-reorder broke annotation targeting; a newly-fatal finding wasn't retryable,
+D158) — both fixed, both verified by reproduction. The frontend went live this session and its
+first real run surfaced one more real bug: `title` was the primary block of 4 of 15 segments (only
+1 legitimately the forced opener) — fixed with a tighter cap, same shape as `sequence_diagram`'s
+(D159). **Genuinely still open, not diagnosed:** two of the five original complaints (annotation/
+cursor placement, a graph diagram called "a little messy") could not be checked against a render
+made with today's fixes — the only available render predates all of them. A fresh render is the
+prerequisite for any further work on those two.
+
 Original task text follows, kept for the parts still open above:
 **Scoped by the user directly at T18H's own checkpoint**, after watching four consecutive
 find-fix-reproduce cycles in one session (D124) and asking to stop chasing a fifth live rather than

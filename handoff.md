@@ -4,146 +4,198 @@
 History lives in `decisionlog.md`. **Written to be self-contained for a fresh session with zero
 memory of how this state was reached.**
 
-_Last updated: 2026-09-05 · T18I (video-quality fixes from the user's own direct complaints on
-real rendered output) advanced substantially this session, not yet closed · `project-reviewer` run
-and its findings fixed · not yet checkpointed/pushed_
+_Last updated: 2026-09-05 · T18J (five concrete defects the user reported with screenshots/
+timestamps against a real rendered video, plus the frontend's first live run) — substantial
+progress, not closed · `project-reviewer` run twice, all findings fixed · about to be pushed_
 
 ---
 
 ## Where we are
 
-**The two branches are reunited.** `feature/scene-composition` (T18G/T18H, a WIP T18I slice, all
-one week old) was merged into `dev` this session, curated: `VideoJob`/`JobStatus` moved to
-`core/video_job.py` (mechanical import fix across `api/`+`cli.py`, no API contract change —
-confirmed via `dump_openapi` diff), everything else taken wholesale after review. The WIP
-retry/fallback scaffolding (`scene_reauthor.py`/`scene_fallback.py`/`render_scene.py`'s rewrite)
-was reviewed rather than trusted and found complete and correct — see `tasks.md`'s T18I entry for
-the full account of what was already done vs. built fresh this session.
+**T18I closed out D149-D154 last session** (the branch merge, variety/annotation enforcement, the
+latency Tier.REVEAL fix) — see decisionlog for that history. **This session (T18J) started from
+five concrete defects the user reported with timestamps/screenshots against the D152/D154 closing
+render**, fixed three outright, diagnosed the geometry gate's real blind spot, did latency work,
+and — once the frontend went live — found and fixed one more real defect from the user's own first
+live render through it.
 
-**One real bug found live, fixed, re-verified**: `rendering/geometry_findings.py` was missing
-`text_occluded` from its retryable-finding set, so two segments in this session's own baseline
-render skipped the re-author step entirely and fell straight to the fallback. Fixed; a second
-render confirmed both segments now retry correctly.
+**Three timing defects, confirmed against the exact job's checkpoint before any fix (D155):**
+1. A `SPLIT_HORIZONTAL` panel's headline could wait until 80% through its segment, gated on the
+   block's own content anchor even though both panels are already visually present from the
+   layout's own entrance tween. Fixed in `rendering/compose.py::_build_renderable` — a multi-block
+   scene's headline now enters structurally, with its panel; single-block scenes are unaffected.
+2. Items rendered in authored order even when resolved anchors placed them in a different
+   narration order. Fixed: `text_panel`/`icon_panel`/`title` items are now reordered to match
+   (`core/scene_variety.py`'s `_SORTABLE_ITEM_FIELDS`, deliberately excluding `graph_diagram`/
+   `code_diff` where order is semantic).
+3. An unmatched anchor fell back to a flat 0.75s instant, sometimes before the block itself had
+   even entered. Fixed: `rendering/block_timing.py::_interpolate_missing` interpolates against
+   the block's own entrance/exit window instead.
 
-**New scope, from fresh direct user complaints mid-session (variety, sequence-diagram overuse,
-annotation density/coherence)** — all built, code-enforced, tested, and verified on a real render:
-`core/scene_variety.py`, `core/scene_content_normalize.py`, `core/annotation_normalize.py`, and a
-newly-real `core/graph/nodes/collect_scenes.py` (previously an empty join). `project-reviewer`
-found three real bugs in this new code (a rounding false-negative on the sequence_diagram cap, an
-ITEM/LINK index-space conflation in CURSOR coherence, a non-adjacent-segments-compared-as-adjacent
-gap) — all three fixed, each with a regression test reproducing the reviewer's own repro.
+**The geometry gate's real blind spot, measured against the two exact compositions the user
+flagged (D156):** NOT sample density (raising `--samples` and enabling `--at-transitions` were
+both tested directly against the real compositions and changed nothing). The actual bug:
+`render_segment.py` treated every `[warning]`-severity finding the same as `[info]` — never
+fatal — which silently waved through real `content_overlap` findings `hyperframes check` was
+already correctly detecting. Fixed: `rendering/geometry_findings.py::is_fatal_geometry_finding`
+promotes a `[warning]` to fatal when its code is in the existing content-sizing vocabulary.
+`caption_zone` and `motion` findings also now flow through, at zero measured added cost.
 
-**Verified, live, same topic before/after (D152 has the full numbers):**
+**Latency (D157):** removed the one genuinely decorative perpetual tween (the user's own
+observation — "them two cards floating up and down") from `SPLIT_HORIZONTAL`, verified safe via a
+real recomposed segment still passing the frozen-sweep guard. Measured the frame budget's real
+cost/benefit with a new `scripts/tier_budget_sweep.py` and put the trade-off to the user (a
+demoted segment loses the smooth entrance-timing work, not just ambient motion) — **user chose to
+keep `FRAME_BUDGET=9500`**, every segment fully animated. `RENDER_MAX_CONCURRENCY` raised 2→3 (not
+config's own default of 4) after checking actual free RAM (~4GB, with a known drop to ~2.4GB under
+load) rather than assuming CPU was the only constraint. Geometry re-author scoping (refill only
+the failing block, not the whole scene) was investigated and deliberately deferred — the flattened
+finding-string contract loses the block-attribution data a real fix would need; not a one-line
+patch, recorded rather than rushed.
 
-| | Before | After |
-|---|---|---|
-| `sequence_diagram` message counts | `[6,6,6,6,6,5,7]` | `[3,3,3,3,3]` — hard-capped now |
-| Segments with any annotation | 13 of 15 (87%) | 4 of 15 (27%) |
-| `text_occluded` triggers a retry | No | Yes |
+**`project-reviewer` caught two real bugs across two passes, both fixed and confirmed by
+reproduction (D158):**
+1. The item-reorder fix (above) silently broke annotation targeting whenever a reorder actually
+   fired — an annotation authored against pre-reorder item position kept targeting that same
+   numeric position after the reorder, marking the wrong item. Fixed by threading the permutation
+   through `RenderableBlock.item_permutation` and translating in `rendering/annotations.py`.
+   Verified by deliberately reverting the fix and confirming the exact mistargeting reproduces,
+   then restoring it.
+2. `caption_zone_collision` (newly reachable once the geometry fix started passing
+   `caption_zone`) was fatal but not in `_CONTENT_SIZING_CODES`, so a segment failing purely on
+   caption-band overflow skipped its retry and degraded unconditionally. Added.
 
-**Full regression, current state:** `pytest` 1047 passed / 1 skipped, `ruff check .` clean, both
-boundary greps clean (one docstring-text hit, not a real import), no `.py` over 200 lines,
-`openapi.json` unchanged (all this session's backend work is pipeline-internal), `web/`'s
-`tsc`/`eslint`/`vitest`/`build` all clean (unaffected — this session touched no frontend files).
+**The frontend went live this session — first real run, first real bug found live (D159).** Backend
++ frontend dev servers started and verified end-to-end through the real Vite proxy. **Caught after
+the fact: the backend was started without `--reload` and was never restarted after the D155-D158
+code fixes landed**, so the user's first real job (`436c209225f848b39db5e698ac3aac1a`) ran on
+pre-fix code. Cross-referencing the user's screenshots against that job's own segment data found a
+real, additional bug regardless of the stale-code issue: **4 of 15 segments rendered as `title`**
+(only 1 legitimately the forced opener) — a static headline+paragraph with no progressive reveal,
+used for regular content segments the skill pack's own guidance says `title` is explicitly not
+for. Fixed: `core/scene_variety.py` gained a `title`-specific cap (`1/10`, tighter than the general
+rule, same shape as the existing `sequence_diagram` cap), folded into the same bounded re-ask.
+Backend restarted with `--reload` immediately after being caught.
+
+**Full regression, current state:** `pytest` full suite green (see git log for exact counts per
+commit), `ruff check .` clean, both boundary greps clean, no `.py` over 200 lines, `openapi.json`
+unchanged across every commit this session (all work was backend/render-internal).
 
 ## Known gaps and open questions
 
 **New, found or left open this session:**
-- **The `sequence_diagram` FREQUENCY cap is a soft one-shot nudge, not a guarantee** — confirmed
-  live it can still miss after the one bounded re-ask (same documented shape as
-  `missed_block_opportunities`). If the user wants a hard guarantee, it needs the same
-  deterministic-downgrade treatment `scene_content_normalize.py` gives message *length*, not a
-  second LLM call.
-- **New `SceneLayout` members (`STACKED`, an asymmetric split) were scoped, not built** —
-  deprioritized this session in favor of the enforcement/correctness work above.
-- **Latency, D153/D154: root cause found and fixed, not yet re-measured on a real render.** The
-  18.1 min closing render's own per-node log showed one degraded segment cost 755s alone — more
-  than the other fourteen combined — because its fallback title card still rendered through the
-  full frame-by-frame Tier 2 pipeline its original tier assignment called for. First fix attempt
-  (D153) downgraded to `Tier.STATIC`; `project-reviewer` caught that a single held screenshot
-  reintroduces the exact "frozen for the whole segment" defect T18G's ambient title-card motion
-  was built to fix (`_block_title.html`'s own D120/D121 history). Corrected (D154) to
-  `Tier.REVEAL` — still far cheaper than Tier 2 (4 captures vs. one per frame over the whole
-  duration), but samples the ambient motion instead of freezing it.
-  `core/graph/nodes/render_scene.py`'s fallback branch downgrades `segment.tier` alongside the
-  scene swap; the two real attempts before it are untouched. `RenderOutcome` also gained
-  `original_tier` (D154) so a degraded segment's originally-assigned tier stays recoverable.
-  **Not yet proven on a real render** — the honest expectation is a meaningfully lower total for a
-  video with failures, not a specific promised number; re-measure before reporting a new figure as
-  fact. Does
-  not touch WHY segments fail geometry validation in the first place — that is still Phase 2/3's
-  open scope (measured content fit, a real position-collision resolver), and reducing failure rate
-  remains the more durable lever.
+- **Two of the user's five original defects (annotation/cursor placement "not nice," a graph
+  diagram called "a little messy") were NOT independently diagnosed** — the only real render
+  available to check them against (`436c209225f848b39db5e698ac3aac1a`) predates every code fix
+  from this session, so a placement complaint on it could be explained by bugs already fixed
+  (the annotation-reorder bug is a strong candidate) or could be a genuine separate issue. **A
+  fresh render on today's code is needed before any further placement work is scoped** — do not
+  guess at a fix without one.
+- **CURSOR's "tip lands on the target's own centre" design may itself read as visually rough** on
+  a `graph_diagram` node (the screenshot showed the cursor glyph overlapping the node marker) —
+  this is by design (`_annotation_cursor.html`'s own comment: the glyph's tip is meant to land on
+  the point), not a bug, but worth a design judgment call once a fresh render confirms it's still
+  happening: is the current glyph/angle just visually unrefined, or is "tip on centre" itself the
+  wrong choice for a small circular marker specifically.
+- **The `title` cap (`1/10`) and the `sequence_diagram` cap (`1/5`) are both soft, one-shot
+  nudges** — `plan_visuals` spends its single bounded re-ask on whichever violations exist, but
+  the second plan is taken as final even if it still misses (documented, same shape as
+  `missed_block_opportunities` since T18E). Confirmed live for `sequence_diagram` (D152); not yet
+  separately confirmed for the new `title` cap.
+- **Latency fixes from Phase 3 have not been re-measured on a real render this session** — the
+  idle-bob removal was verified safe (no new frozen-sweep finding) but not measured for actual
+  time saved; concurrency=3 has never run under real load.
+- **New `SceneLayout` members and the rest of the visual-polish plan (motif-driven typography,
+  syntax highlighting, icon two-toning, a `text_panel` redesign) were scoped but explicitly not
+  attempted this session** — flagged in the plan itself as the largest, least mechanical phase,
+  likely wanting its own session.
 - **No test yet for the whole-video annotation budget wired at the `collect_scenes` GRAPH level**
-  beyond `tests/test_collect_scenes_node.py`'s direct node test — no end-to-end graph test exercises
-  it through a real fan-out.
+  beyond `tests/test_collect_scenes_node.py`'s direct node test.
 
-**Carried forward, genuinely still open (T18I's original scope, `tasks.md` has the full text):**
+**Carried forward, genuinely still open:**
 - `hyperframes check`/`validate_geometry` still occasionally non-deterministically flaky (D96).
 - No coverage gate exists (D42). T10 (`RUNTIME_ENV=local`'s Ollama/Kokoro) still unclaimed.
-- `RENDER_MAX_CONCURRENCY=2` still unmeasured under real concurrent load.
 - `api/runner.py::WORKING_ROOT` still has no cleanup routine.
-- Frontend items from T37 (still open, not touched this session — out of this task's territory
-  per CLAUDE.md's invariant 5): `Pill`/`StatusPill`'s WCAG contrast gap (2.82-4.43:1), `StageTicker`
-  occasionally showing a repeated generic label instead of the real segment title, no automated
-  tests for `ClipTrack`/`ClipStrip`/`use-placeholder-cycle.ts`/`theme-store.ts`, ~516KB JS bundle
-  (not code-split).
+- `artifacts/_api_run/` and `artifacts/_cli_run/` both growing with every real render this
+  session added several more job directories to each; gitignored, safe to clean up locally.
+- Frontend items from T37 (out of this task's territory, per CLAUDE.md's invariant 5):
+  `Pill`/`StatusPill`'s WCAG contrast gap, `StageTicker`'s occasional generic label,
+  no automated tests for `ClipTrack`/`ClipStrip`/`use-placeholder-cycle.ts`/`theme-store.ts`,
+  ~516KB JS bundle (not code-split).
 
 ## Before the next session
 
-**T18I is not closed.** A `/checkpoint` has not run yet this session (this handoff is being
-written manually mid-session, not at a normal checkpoint boundary) — do one before starting new
-work, so decisionlog/tasks.md/handoff.md all agree and this gets pushed.
+**T18J is not closed** — real, named gaps above, most importantly the two placement complaints
+that need a fresh render to even diagnose properly.
+
+**The most useful thing to do first: generate one real video on today's fully-fixed code** (either
+via `cli.py` or the frontend, both work) and check, specifically: do the three D155 timing fixes
+hold up, does the geometry gate now catch what it should without over-blocking, is `title` no
+longer overused, and — the two genuinely open items — does annotation placement still look wrong,
+and does the graph diagram still look "messy." That render is what turns the two open complaints
+from a guess into a real diagnosis.
 
 Real remaining choices, not yet decided:
-1. Keep going on T18I (new `SceneLayout`s, a hard sequence-diagram-frequency guarantee, more live
-   geometry verification) vs. call the current state "good enough" and move to the deferred cloud
-   work (T34/T35, see the plan file this session started from,
-   `C:\Users\juant\.claude\plans\foamy-sparking-swing.md`, for the two-session split already
-   scoped) vs. T29-T33 (RAG, scheduled last per the backlog).
-2. `feature/scene-composition` is now merged — that standing note from every checkpoint since
-   T18B is finally retired.
+1. Continue T18J's visual-polish plan (motif-driven typography, new layouts, syntax highlighting)
+   vs. move to the deferred cloud work (T34/T35, see
+   `C:\Users\juant\.claude\plans\foamy-sparking-swing.md`) vs. T29-T33 (RAG).
+2. Whether the `title`/`sequence_diagram` caps need to become hard guarantees (deterministic
+   downgrade) rather than soft nudges, if they keep missing in practice.
 
 ## Environment state
 
 | | |
 |---|---|
-| Model | This session ran on Opus for the planning/discussion phase; `/model sonnet` was run explicitly before any build/Edit/Bash, per CLAUDE.md's mandatory self-check. Verify again at the start of the next session — this has now been the wrong-model failure mode multiple sessions running. |
+| Model | Session ran on Opus for planning; `/model sonnet` run explicitly before the build phase, per CLAUDE.md's mandatory self-check. Verify again at the start of the next session. |
 | `RUNTIME_ENV` | `azure`, unchanged. |
-| `RENDER_ENV` | `local` (D100), unchanged — real render, in-process. |
-| `QUEUE_ENV` | `local`, unchanged. |
-| Git | `dev`, at the tip of this session's commits (merge commit, then two follow-up commits for the new enforcement code and its review-fix pass). Not yet pushed to `origin/dev`. |
-| Azure spend | Two real ~15-18 min renders this session (`RUNTIME_ENV=azure`, real LLM+TTS+Storage) — check `/costs` before assuming the trial credit is untouched. |
-| Local artifacts | `artifacts/_cli_run/` now has two more job directories from this session's renders (`b7696e12...`, `91c3dbeb...`) plus their `checkpoints.sqlite` files — gitignored, safe to leave or clean up. |
+| `RENDER_ENV` | `local`, unchanged — real render, in-process. |
+| `FRAME_BUDGET` | `9500`, unchanged — user's explicit choice this session, see D157. |
+| `RENDER_MAX_CONCURRENCY` | `3` in this machine's own `.env` (gitignored) — raised from 2 after checking actual free RAM; `.env.example`'s own default stays `2`, unchanged, for other environments. |
+| Git | `dev`, at the tip of this session's commits, pushed to `origin/dev`. |
+| Backend/frontend servers | Both were left running at session end: `uvicorn api.main:app --reload` on `127.0.0.1:8000`, `npm run dev` (Vite) on `127.0.0.1:5173`. **Started with `--reload` this time** — the first backend start this session was NOT, which is exactly how a stale-code job got submitted (see D159). Check they're still up before assuming the frontend works; restart if not. |
+| Azure spend | Multiple real renders this session (`RUNTIME_ENV=azure`, real LLM+TTS+Storage): the D155/D156 closing-scope render, the tier-budget-sweep's real TTS pass, and the user's own API-submitted job. Check `/costs`. |
+| Local artifacts | `artifacts/_cli_run/` and `artifacts/_api_run/` both gained job directories this session (gitignored, safe to clean up). |
 
 ## Gotchas worth remembering
 
 **New this session:**
-- **A `dict`/`list` value change that a merge auto-resolves cleanly can still land two unrelated
-  classes' bodies interleaved** if the base and incoming sides both edited near the same class
-  boundary (`core/models.py`'s `VideoJob` fields ended up pasted mid-`Segment` by git's own
-  3-way merge) — always re-read a conflict-adjacent region after resolving markers, don't trust
-  that "no `<<<<<<<`  left" means the file is structurally sound.
-- **The quality hook's import-stripping gotcha bit this session three separate times** (once per
-  new cross-module call added in one `Edit` and used in a later one) — CLAUDE.md already documents
-  this; it is worth re-reading before a session with several small sequential edits to the same
-  new import, not just once at session start.
-- **A fraction-based threshold check needs an explicit floor for small `total`, and needs to avoid
-  `round()` if the general/sibling check it's modeled on doesn't round either** — a `round()` on a
-  cap silently loosens it for whichever totals happen to round up, invisible until someone runs the
-  actual numbers (this session's own `project-reviewer` catch, `core/scene_variety.py`).
-- **Two annotation "index spaces" on the same block (ITEM vs. LINK) must never be compared against
-  each other for ordering** — grouping by block alone when a block can carry both silently produces
-  a nonsense comparison. Group by `(block, kind)`, not `block`.
-- **A checkpointed job's `AsyncSqliteSaver` state is queryable directly** (`saver.aget({"configurable": {"thread_id": job_id}})` against `artifacts/_cli_run/<job_id>/checkpoints.sqlite`) for post-hoc analysis of exactly what a `cli.py` run produced — `cli.py` itself persists no `job.json` the way the API path does (`api/job_store.py`), so this is the only way to inspect a bare-CLI run's actual scene/annotation content after the fact.
+- **A backend process started without `--reload` silently keeps running old code through every
+  subsequent edit** — cost a full render cycle on stale code before being caught (D159), and was
+  only caught by cross-referencing user-reported screenshots against the job's own data, not by
+  anything that would have surfaced it automatically. Always start a long-lived dev server with
+  `--reload`/equivalent, and if one is already running when a session starts making code changes,
+  restart it rather than assume it's current.
+- **A pure function that changes item ORDER can silently break something else's item-index
+  assumptions** — the `resolve_item_starts` reorder fix broke annotation targeting because
+  `core/graph/nodes/annotation_author.py` authors indices against a different ordering than what
+  ends up on screen. Any function that reorders/filters/re-indexes a list needs an explicit check
+  for every OTHER place that list's original indices are referenced, not just its own callers.
+- **Enabling a new check/finding type is incomplete without also updating every classification
+  set that reads finding CODES** — `caption_zone_collision` was correctly fatal but silently
+  unretryable because `_CONTENT_SIZING_CODES` (a different set, same module) wasn't told about it.
+- **A geometry finding's severity (`[warning]` vs `[error]`) is not reliably tied to how visible
+  or real the defect is** — measured directly: the same `content_overlap` finding stayed
+  `[warning]` regardless of sample density or `--at-transitions`. Don't assume severity alone is a
+  safe fatal/non-fatal signal without checking the actual finding CODE too.
+- **A checkpointed job's `AsyncSqliteSaver` state is queryable directly**
+  (`saver.aget({"configurable": {"thread_id": job_id}})` against a job's own `checkpoints.sqlite`)
+  for post-hoc analysis of exactly what a run produced — works for both `cli.py`'s
+  `artifacts/_cli_run/` and the API's `artifacts/_api_run/` layouts. The API path additionally
+  persists a `job.json` via `api/job_store.py`, reachable through `GET /jobs/{id}` — a faster
+  check when only segment metadata (not the full scene/word_marks state) is needed.
+- **File birth/modify timestamps (`stat`) on a job's `checkpoints.sqlite` give real wall-clock
+  render duration** when nothing else recorded it explicitly — birth time = job start, last
+  modify = job completion.
 
 **Carried from earlier sessions, still true:**
 - `AsyncSqliteSaver.from_conn_string(path)` creates `path` on disk the instant it connects.
 - Every real invocation of this graph must pass `durability="sync"` explicitly.
 - `Storage.url()`'s scheme is the only safe way to branch redirect-vs-stream at the API layer.
 - `FakeLLMProvider`'s strict-FIFO queue breaks under real concurrency with mixed schema types —
-  `PhaseQueueLLMProvider` is the fix pattern; a fixture that deliberately uses one interchangeable
-  block type everywhere (for that reason) may need its LLM response queued twice if new
-  code-enforced rules (like this session's variety check) now correctly re-ask against it.
+  `PhaseQueueLLMProvider` is the fix pattern; a fixture using one interchangeable block type
+  everywhere may need its LLM response queued twice once a new code-enforced variety rule
+  correctly re-asks against it.
 - 200-line ceiling, enforced on write. Split by responsibility, don't compress.
 - `artifacts/` is gitignored. Nothing you need to keep goes there.
+- The quality hook strips an import added in one tool call and used only in a later one — add the
+  import in the same call as its first real usage, every time, no exceptions found yet.

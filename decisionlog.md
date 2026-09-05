@@ -3784,3 +3784,45 @@ WHAT (a new finding code) without checking who else classifies findings by code
 reported/reproduced defect.
 
 **Depends:** D155, D156.
+
+### D159 — `title` overuse mid-video, found in the first real API-path render the user watched:
+4 of 15 segments were `title`, only 1 of them the forced opener
+
+**The user's own screenshots, cross-referenced against that exact job's own checkpoint data, not
+a guess.** After the frontend went live, the user submitted one real job through it
+(`436c209225f848b39db5e698ac3aac1a`, TCP/detailed/with-code) and reported two segments ("ordered,
+reliable" and "Congestion control") as a flat, static visual for their whole duration where "some
+points appearing" would read better -- pointing at another segment in the same video that already
+does this well. Queried the job's own segment data directly: **4 of 15 segments came back as
+`BlockType.TITLE`** -- segment 0 (the forced opener, expected) plus segments 4, 9, and 11, all
+regular content segments with real explanatory narration. `TITLE` renders as one static
+headline+paragraph with no progressive reveal -- structurally incapable of the "points appearing"
+behavior the user is asking for, because it has no narration-anchored item list the way
+`text_panel`/`icon_panel` do.
+
+**The skill pack's own guidance already says not to do this.** `runtime_skills/visual-plan`'s
+block-choice table: `title` earns its place for *"The opening, or a genuine change of subject
+mid-video"* and explicitly not for *"Any segment with real content."* The model was not following
+its own stated rule at nearly 1-in-4 segments, and -- the pattern this whole session keeps
+finding -- nothing checked.
+
+**Fix, same shape as `sequence_diagram`'s own tighter cap (D151/D158):**
+`core/scene_variety.py::_MAX_TITLE_FRACTION = 1/10`, folded into `check_variety`'s existing single
+bounded re-ask in `plan_visuals` (no new LLM call). Deliberately tighter than the general
+third-of-the-video rule -- the skill's own framing ("a genuine change of subject") implies at most
+one or two such moments per video, not a fraction proportional to length the way ordinary block
+variety is. One mid-video title stays legitimate (tested directly); three did not.
+
+**This job predates every code fix from this same session (D155-D158)** -- the backend was
+running without `--reload` and was never restarted after those fixes landed, discovered only when
+the user's screenshots were cross-referenced against the job list and found to be the one job
+submitted before the restart. Restarted with `--reload` immediately after. The user's other two
+observations on this same video (an annotation/cursor placement complaint on a `graph_diagram`
+segment, described as "a little messy") could not be responsibly diagnosed against this job --
+`graph_diagram`'s nodes are never reordered (D158's own fix is scoped to
+`_SORTABLE_ITEM_FIELDS`, which excludes it), so that complaint is either pre-existing and
+unrelated to anything fixed today, or a CURSOR's own by-design tip-on-target placement simply
+reading as visually rough at that specific angle -- worth judging on a render made with today's
+code in place, not this one.
+
+**Depends:** D155-D158 (same session).
