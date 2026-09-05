@@ -803,7 +803,41 @@ showcase video was not produced.**
 **Depends:** T18G — met.
 
 ### T18I — Close the remaining geometry gaps T18H's gate found but did not fix, give the pipeline a
-real failure story, land a genuine full 7-minute render · `todo`
+real failure story, land a genuine full 7-minute render · `in progress`
+
+**Status update (this session, D151/D152):** started from a curated merge of
+`feature/scene-composition`, which turned out to already contain most of this task's original
+scope, built but never checkpointed/reviewed. Verified rather than rebuilt, then extended with new
+scope the user added mid-session from watching real output again:
+
+- **SINGLE-stacking and edge-parallel annotations (both bullets below): done, verified live.**
+  `core/scene_normalize.py::normalize_layout` and `_annotations.html`'s `"parallel"` candidate
+  were both already built on the branch; this session confirmed both are correctly wired and
+  produce clean output on a real render.
+- **The resilience three bullets (retry/fallback/signal): done, verified live, and one real bug
+  found and fixed in the process.** `core/graph/nodes/scene_reauthor.py`/`scene_fallback.py` plus
+  `render_scene.py`'s rewrite were reviewed (not trusted blindly) and found complete and correct.
+  The closing render found `rendering/geometry_findings.py` was missing `text_occluded` from its
+  retryable set — fixed, D151, re-confirmed on a second render.
+- **New scope folded in from fresh user complaints, all done and code-enforced:**
+  `core/scene_variety.py` (block-type variety, wired into `plan_visuals`'s existing re-ask),
+  `core/scene_content_normalize.py` (sequence-diagram messages hard-capped at 3),
+  `core/annotation_normalize.py` (per-scene density cap + CURSOR walk-order coherence, whole-video
+  annotation budget via the now-real `core/graph/nodes/collect_scenes.py`). `project-reviewer`
+  found and this session fixed three real bugs in this new code (a rounding false-negative on the
+  sequence_diagram cap, an ITEM/LINK index-space conflation in CURSOR coherence, and a
+  non-adjacent-segments-compared-as-adjacent gap) — see the git log for the fix commit.
+- **Genuinely still open:** the `sequence_diagram` FREQUENCY cap (how often it's chosen, as
+  opposed to how long it is) is a soft one-shot nudge, same as `missed_block_opportunities`
+  already was — confirmed live it can still miss. A hard guarantee here needs the same
+  deterministic-downgrade treatment the message-length cap got, not a second re-ask. New
+  `SceneLayout` members (`STACKED`, an asymmetric split) were scoped but not built this session —
+  deprioritized in favor of the correctness/enforcement work above. Latency: this session's
+  closing render ran 18.1 min against the ~15 min target for a 10-min-equivalent video, because
+  both degraded segments needed a full retry-then-fallback cycle — expected to improve as Phase
+  2/3's remaining geometry work reduces how often that cycle triggers at all, not by weakening it.
+
+Original task text follows, kept for the parts still open above:
 **Scoped by the user directly at T18H's own checkpoint**, after watching four consecutive
 find-fix-reproduce cycles in one session (D124) and asking to stop chasing a fifth live rather than
 keep going. Two distinct halves, both explicit user asks at the same checkpoint, folded into one
