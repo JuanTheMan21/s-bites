@@ -66,7 +66,11 @@ def check_variety(plan: VideoScenePlan) -> list[str]:
             )
 
     sequence_count = counts.get(BlockType.SEQUENCE_DIAGRAM, 0)
-    if sequence_count > max(1, round(total * _MAX_SEQUENCE_DIAGRAM_FRACTION)):
+    # No round() -- the same reasoning the general check above already uses raw-float for.
+    # round() would silently loosen this cap for any total whose fractional part rounds up
+    # (e.g. a 9-segment video: 2 of 9 is 22%, over the stated "one in five", but
+    # round(9 * 0.2) == 2 would let it through). Caught live, not guessed: project-reviewer.
+    if sequence_count > max(1, total * _MAX_SEQUENCE_DIAGRAM_FRACTION):
         violations.append(
             f"`sequence_diagram` is the primary block of {sequence_count} of {total} segments -- "
             "it reads as repetitive and is capped tighter than other types. Keep it only for the "
@@ -75,7 +79,13 @@ def check_variety(plan: VideoScenePlan) -> list[str]:
         )
 
     for prev, curr in itertools.pairwise(ordered):
-        if curr.continues_previous:
+        # curr.segment_index == prev.segment_index + 1: a strict-mode plan is never guaranteed
+        # to cover every index (visual_plan.py::_fallback_scene's own docstring, D74's
+        # precedent) -- two segments this list places next to each other are not necessarily
+        # adjacent in the real video if the model's plan skipped one in between. Caught by
+        # project-reviewer: comparing list-adjacent segments regardless of index gap could flag
+        # two segments as "back to back" with a real (fallback) segment sitting between them.
+        if curr.continues_previous or curr.segment_index != prev.segment_index + 1:
             continue
         prev_type, curr_type = _primary_type(prev), _primary_type(curr)
         if prev_type is not None and prev_type == curr_type:

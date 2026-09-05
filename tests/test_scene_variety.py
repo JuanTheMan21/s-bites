@@ -78,6 +78,26 @@ def test_consecutive_segments_sharing_a_type_are_flagged() -> None:
     assert any("segments 1 and 2" in v for v in violations)
 
 
+def test_a_gap_in_the_plans_own_indices_is_not_treated_as_adjacent() -> None:
+    """Caught live by project-reviewer: a strict-mode plan is never guaranteed to cover every
+    index (the same reason ``visual_plan.py::_fallback_scene`` exists), so segment 3's plan
+    might be missing entirely -- a real fallback segment sits between 2 and 4 in the actual
+    video, and comparing 2/4 as if they were back to back would be a false positive. Six total
+    segments keeps the general third-of-the-video fraction rule from also firing, isolating
+    the adjacency check on its own."""
+    plan = _plan(
+        {
+            2: BlockType.GRAPH_DIAGRAM,
+            4: BlockType.GRAPH_DIAGRAM,
+            5: BlockType.TEXT_PANEL,
+            6: BlockType.CODE_PANEL,
+            7: BlockType.ARRAY_GRID,
+            8: BlockType.STAT_CALLOUT,
+        }
+    )
+    assert check_variety(plan) == []
+
+
 def test_consecutive_repeat_is_allowed_when_marked_continues_previous() -> None:
     # Six real segments so two graph_diagram-led ones (33%) stays within the general third-of-
     # the-video cap -- isolating the consecutive-repeat check from the fraction check above.
@@ -107,6 +127,29 @@ def test_sequence_diagram_is_capped_tighter_than_the_general_rule() -> None:
             4: BlockType.CODE_PANEL,
             5: BlockType.ARRAY_GRID,
             6: BlockType.ICON_PANEL,
+        },
+    )
+    violations = check_variety(plan)
+    assert any("sequence_diagram" in v and "capped tighter" in v for v in violations)
+
+
+def test_sequence_diagram_cap_is_not_loosened_by_rounding() -> None:
+    """A 9-segment video (an ordinary length) with 2 sequence_diagram-led segments is 22.2%,
+    over the module's own stated "one in five" -- caught live by project-reviewer: an earlier
+    version used round(total * fraction) here, which rounds 9 * 0.2 == 1.8 up to 2 and silently
+    lets exactly this case through. The general type-fraction check three lines up never rounds;
+    this one must not either."""
+    plan = _plan(
+        {
+            1: BlockType.SEQUENCE_DIAGRAM,
+            2: BlockType.SEQUENCE_DIAGRAM,
+            3: BlockType.TEXT_PANEL,
+            4: BlockType.CODE_PANEL,
+            5: BlockType.ARRAY_GRID,
+            6: BlockType.ICON_PANEL,
+            7: BlockType.GRAPH_DIAGRAM,
+            8: BlockType.STAT_CALLOUT,
+            9: BlockType.CODE_DIFF,
         },
     )
     violations = check_variety(plan)

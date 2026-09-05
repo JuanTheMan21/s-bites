@@ -14,11 +14,12 @@ def _mark(
     *,
     block: int = 0,
     item: int = 0,
+    kind: AnnotationTargetKind = AnnotationTargetKind.ITEM,
 ) -> ComposedAnnotation:
     return ComposedAnnotation(
         annotation_type=annotation_type,
         target_block_index=block,
-        target_kind=AnnotationTargetKind.ITEM,
+        target_kind=kind,
         target_item_index=item,
         anchor_phrase="a phrase",
         caption=None,
@@ -68,6 +69,18 @@ def test_cursors_on_different_blocks_do_not_interfere_with_each_other() -> None:
     ]
     # Only two marks total, each on its own block -- neither is a same-block pair, so neither is
     # incoherent; the cap (two per scene) is what limits this, not the walk-order check.
+    assert normalize_annotations(marks) == marks
+
+
+def test_item_and_link_cursors_on_the_same_block_are_independent_index_spaces() -> None:
+    """Caught live by project-reviewer: an ITEM cursor and a LINK cursor share a block but NOT
+    a numbering space (core/block_items.py -- a GRAPH_DIAGRAM's nodes and edges are counted
+    separately), so a LINK at index 1 followed by an ITEM at index 0 is not "out of order" --
+    they are not comparable at all. An earlier version grouped by block alone and dropped both."""
+    marks = [
+        _mark(AnnotationType.CURSOR, block=0, item=1, kind=AnnotationTargetKind.LINK),
+        _mark(AnnotationType.CURSOR, block=0, item=0, kind=AnnotationTargetKind.ITEM),
+    ]
     assert normalize_annotations(marks) == marks
 
 

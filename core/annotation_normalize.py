@@ -13,7 +13,7 @@ single-annotation authoring rule can express.
 
 import itertools
 
-from core.block_types import AnnotationType
+from core.block_types import AnnotationTargetKind, AnnotationType
 from core.scene_schemas import ComposedAnnotation
 
 # The skill pack's own stated ceiling, verbatim ("at most one or two annotations per scene").
@@ -71,17 +71,24 @@ def normalize_annotations(annotations: list[ComposedAnnotation]) -> list[Compose
     """
     kept = annotations[:_MAX_ANNOTATIONS_PER_SCENE]
 
-    cursors_by_block: dict[int, list[ComposedAnnotation]] = {}
+    # Grouped by (block, target_kind), not block alone: ITEM and LINK are independently-numbered
+    # lists on the same block (core/block_items.py -- a GRAPH_DIAGRAM's nodes and its edges are
+    # two different index spaces), so an ITEM cursor at index 0 and a LINK cursor at index 1 are
+    # not "out of order" with each other at all -- they aren't even comparable. Caught live, not
+    # guessed: project-reviewer, confirmed it silently dropped two independently-valid
+    # annotations that happened to cross-space "decrease".
+    cursors_by_target: dict[tuple[int, AnnotationTargetKind], list[ComposedAnnotation]] = {}
     for annotation in kept:
         if annotation.annotation_type == AnnotationType.CURSOR:
-            cursors_by_block.setdefault(annotation.target_block_index, []).append(annotation)
+            key = (annotation.target_block_index, annotation.target_kind)
+            cursors_by_target.setdefault(key, []).append(annotation)
 
-    incoherent_blocks = {
-        block_index
-        for block_index, cursors in cursors_by_block.items()
+    incoherent_targets = {
+        target
+        for target, cursors in cursors_by_target.items()
         if len(cursors) > 1 and not _is_coherent_walk(cursors)
     }
-    if not incoherent_blocks:
+    if not incoherent_targets:
         return kept
 
     return [
@@ -89,6 +96,6 @@ def normalize_annotations(annotations: list[ComposedAnnotation]) -> list[Compose
         for annotation in kept
         if not (
             annotation.annotation_type == AnnotationType.CURSOR
-            and annotation.target_block_index in incoherent_blocks
+            and (annotation.target_block_index, annotation.target_kind) in incoherent_targets
         )
     ]
