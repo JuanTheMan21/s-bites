@@ -3483,3 +3483,44 @@ statement is that this session traded a small latency cost for a real correctnes
 2/3's remaining geometry work is what recovers the difference.
 
 **Depends:** D151.
+
+### D153 — The fallback title card downgrades to Tier.STATIC: the single largest latency cost in
+D152's closing render, found in the same log it produced
+
+**The user's own reaction to D152's numbers, verbatim: "18 minutes is not acceptable at all."**
+Right to push back — this session's own render log has the answer, not a guess. Per-node timing
+(`core/graph/node_timing.py`'s log lines) showed one segment (segment 2, a full retry-then-fallback
+cycle) took **755 seconds by itself**, against a render-fan-out phase of ~930s total across all 15
+segments — one degraded segment cost more wall time than the other fourteen combined.
+
+**Root cause: `render_scene.py`'s fallback swapped the SCENE but never the TIER.** A degraded
+segment's fallback (`scene_fallback.py::title_card_scene`) is a plain TITLE block — deliberately
+the simplest, most geometry-safe content in the library — but `render_segment.py` dispatches by
+`segment.tier`, and the fallback only ever updated `segment.scene`. So a segment originally
+assigned `Tier.ANIMATED` (this session's render had `FRAME_BUDGET=9500`, putting all 15 segments
+on Tier 2) still rendered its fallback through `rendering/animated.py::render_animated` — a full
+frame-by-frame capture over the segment's whole duration — when `rendering/static.py::render_static`
+(one screenshot, held) would have produced the identical visual result at a fraction of the cost.
+
+**Fix:** `render_scene.py`'s fallback branch now sets `segment.tier = Tier.STATIC` in the same
+`model_copy` that swaps in the fallback scene. The two REAL attempts before the fallback (initial,
+re-authored) are untouched — they still render at the segment's genuinely assigned tier, so the
+actual content gets a real shot at full quality before anything is given up on. Only the
+already-accepted-as-degraded final attempt is cheapened, and a title card sacrificing animation on
+top of already sacrificing its planned content costs nothing further a viewer would notice.
+
+**A side benefit, not the point of the fix but worth recording:** `cli.py`'s own tier-count
+summary (`Counter(segment.tier for segment in job.segments)`) now reports what actually rendered,
+not what was originally assigned — a degraded segment previously inflated the `T2=` count with a
+segment that, in truth, cost the pipeline nothing like a real Tier-2 render.
+
+**What this does and does not fix.** This cuts the cost of an ALREADY-degraded segment's own
+fallback step specifically — real, and it was the single biggest number in the log, but it does
+not touch why segments fail geometry validation in the first place (that is Phase 2/3's remaining
+scope: measured content fit, a real position-collision resolver). Re-running the exact D152
+scenario would still pay for two real render+validate attempts per failing segment before reaching
+the now-cheap fallback; the honest expectation is a meaningfully lower total, not a return to the
+13.6-minute pre-fix baseline, and the actual number should be re-measured on a real render before
+being promised as a fact rather than an estimate.
+
+**Depends:** D152.

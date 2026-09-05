@@ -32,7 +32,7 @@ from core.graph.nodes.scene_fallback import title_card_scene
 from core.graph.nodes.scene_reauthor import reauthor_scene
 from core.graph.nodes.synthesize import local_narration_path
 from core.graph.state import SegmentTask
-from core.models import Segment
+from core.models import Segment, Tier
 from core.render_outcome import RenderOutcome
 from core.scene_schemas import ComposedScene
 from interfaces import CompositionInvalid
@@ -135,7 +135,18 @@ async def render_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
             )
             attempts += 1
             fallback_scene = title_card_scene(segment, scene.motif)
-            segment = segment.model_copy(update={"scene": fallback_scene.model_dump()})
+            # T18I latency fix: downgraded to Tier.STATIC along with the scene swap, not just the
+            # scene -- a plain title card gains nothing from a full frame-by-frame animated
+            # capture over the segment's whole duration, and a real render showed this tier
+            # mismatch turning one degraded segment into the single largest cost in the entire
+            # job (one segment, three attempts at its original Tier 2, took longer than the other
+            # fourteen segments combined). The two REAL attempts above still render at the
+            # segment's originally assigned tier -- only the already-accepted-as-degraded final
+            # fallback is cheapened, since it has already sacrificed content richness; sacrificing
+            # animation on top of that costs nothing further a viewer would notice.
+            segment = segment.model_copy(
+                update={"scene": fallback_scene.model_dump(), "tier": Tier.STATIC}
+            )
             # Deliberately unguarded: if even the deterministic title card fails geometry
             # validation, that is a genuine bug in our own templates (TITLE is the simplest block
             # in the library), not a content problem -- it should propagate and be loud, not be

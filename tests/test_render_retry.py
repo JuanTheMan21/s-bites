@@ -121,6 +121,35 @@ async def test_a_reauthor_that_still_fails_falls_back_to_title_card(tmp_path: Pa
 
 
 @needs_ffmpeg
+async def test_the_fallback_title_card_downgrades_to_static_tier(tmp_path: Path) -> None:
+    """T18I latency fix: a real render found one degraded ANIMATED-tier segment (three real
+    attempts, all at Tier 2) cost more wall time alone than the other fourteen segments in the
+    same job combined. The final fallback attempt gains nothing from full frame-by-frame
+    animation -- a title card is Tier 0's own reference composition -- so it renders as
+    Tier.STATIC regardless of the segment's originally assigned tier, while the two real
+    attempts before it still render at the real tier, giving the actual content a genuine shot
+    at full quality before giving up on it."""
+    render = FakeRenderBackend(
+        geometry_findings_sequence=[
+            ["[error] canvas_overflow: too much content"],
+            ["[error] canvas_overflow: still too much"],
+            [],
+        ]
+    )
+    llm = FakeLLMProvider([a_payload_for(BlockType.TEXT_PANEL), no_annotations()])
+    segment = an_authored_segment(0, BlockType.TEXT_PANEL, Tier.ANIMATED, duration_ms=DURATION_MS)
+    context = _context(tmp_path, render=render, llm=llm)
+    _write_narration(context.working_dir)
+
+    result = await run_render_scene(segment, context)
+
+    assert result[0].render_outcome is not None
+    assert result[0].render_outcome.fallback_used is True
+    assert result[0].tier == Tier.STATIC
+    assert result[0].clip_key is not None
+
+
+@needs_ffmpeg
 async def test_a_segment_already_rendered_is_skipped_not_re_rendered(tmp_path: Path) -> None:
     """T18I resume idempotency: a segment with clip_key set and its local clip still on disk (a
     checkpoint resume of an already-completed segment) must not re-render or re-mux."""
