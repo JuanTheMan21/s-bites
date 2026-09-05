@@ -68,6 +68,7 @@ class RenderableBlock:
     item_starts: list[float] | None
     step_starts: list[float] | None
     annotations: list[RenderableAnnotation]
+    item_permutation: list[int] | None
 
 
 def _build_renderable(
@@ -102,7 +103,7 @@ def _build_renderable(
         anchor_ms = resolve_anchor(word_marks, block.anchor_phrase)
         entrance_start = anchor_ms / 1000 if anchor_ms is not None else structural_start
 
-    payload, item_starts = resolve_item_starts(
+    payload, item_starts, item_permutation = resolve_item_starts(
         block_type, payload, word_marks, entrance_start=entrance_start, end_s=duration_s
     )
     step_starts = resolve_step_starts(
@@ -117,6 +118,7 @@ def _build_renderable(
         item_starts=item_starts,
         step_starts=step_starts,
         annotations=[],
+        item_permutation=item_permutation,
     )
 
 

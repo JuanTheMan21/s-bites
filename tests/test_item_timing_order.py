@@ -136,7 +136,7 @@ def test_an_unmatched_item_interpolates_between_its_matched_neighbours() -> None
         ]
     )
 
-    _, starts = resolve_item_starts(
+    _, starts, _permutation = resolve_item_starts(
         "text_panel", payload, word_marks, entrance_start=0.0, end_s=10.0
     )
 
@@ -159,7 +159,7 @@ def test_every_item_unmatched_spreads_evenly_across_the_visible_window() -> None
     payload = _Payload([_Item("nothing matches") for _ in range(4)])
     word_marks = _word_marks("completely unrelated narration text here")
 
-    _, starts = resolve_item_starts(
+    _, starts, _permutation = resolve_item_starts(
         "text_panel", payload, word_marks, entrance_start=1.0, end_s=9.0
     )
 

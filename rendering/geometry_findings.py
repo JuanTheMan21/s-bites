@@ -31,12 +31,20 @@ import re
 # occlusion (a strikethrough over an eliminated value) already opts out via
 # `data-layout-allow-occlusion` before this code ever fires, so an unintentional one reaching
 # `validate_geometry` at all is a real content-sizing problem, not a false positive.
+#
+# T18J: `caption_zone_collision` added the same session `validate_geometry` first started
+# passing `caption_zone` at all (D156) -- caught by project-reviewer before it shipped
+# separately: enabling the check without adding its code here meant every segment failing
+# purely on caption-band overflow (exactly a content-density defect, the class this vocabulary
+# exists for) skipped the retry unconditionally, which is a worse outcome than not checking for
+# it at all.
 _CONTENT_SIZING_CODES = frozenset(
     {
         "canvas_overflow",
         "escaped_container",
         "content_overlap",
         "text_occluded",
+        "caption_zone_collision",
     }
 )
 

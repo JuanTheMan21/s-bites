@@ -3741,3 +3741,46 @@ carry more than a bare string list -- an interface change, not a one-line fix, a
 under this session's own time budget without properly designing it.
 
 **Depends:** D155, D156.
+
+### D158 — Two real bugs in D155/D156, both caught by `project-reviewer` before checkpoint, both
+confirmed by reproduction: annotation targeting broke on reorder, a new fatal finding wasn't
+retryable
+
+**Finding 1 (critical): the item-reorder fix (D155) silently broke annotation targeting whenever
+a reorder actually fired.** `core/graph/nodes/annotation_author.py` authors an annotation's
+`target_item_index` against a block's items in AUTHORED order -- the only order that exists at
+that point in the pipeline, before `rendering/block_timing.py::resolve_item_starts` ever runs.
+Once that function started reordering `text_panel`/`icon_panel` items to match narration order
+(D155), `rendering/annotations.py::_annotation_target_id` kept building element ids from the
+now-REORDERED list position, using the same numeric `target_item_index` the annotation was
+authored with. Reproduced directly: a 2-item panel, an annotation authored with
+`target_item_index=0` meaning "the important item," reversed narration order so the items swap --
+the annotation's script still targeted `b0-row-0`, now the OTHER item. **Fixed**:
+`resolve_item_starts` returns the permutation it applied (`payload, starts, permutation`);
+`RenderableBlock` carries it as `item_permutation`; `resolve_annotations` translates an ITEM-kind
+annotation's `target_item_index` through it before either the bounds check or `_annotation_target_id`
+ever see it. A second bug surfaced fixing the first: translating an already-out-of-range index via
+`permutation.index(...)` raised `ValueError` instead of being silently dropped the way the
+pre-existing "out of range" test expects -- guarded with a bounds check before the translation, not
+after. `tests/test_annotation_survives_item_reorder.py` proves the fix by reproduction: verified to
+fail with the exact mistargeting before the fix (temporarily reverted, confirmed
+`assert 'b0-row-0' == 'b0-row-1'` fails), pass after.
+
+**Finding 2 (moderate): `caption_zone_collision` (newly enabled by D156's own `caption_zone` flag)
+was fatal but not retryable.** `is_fatal_geometry_finding` correctly treats it as fatal
+(`CAPTION_ZONE`'s own `severity=error`), but `_CONTENT_SIZING_CODES` was never updated to include
+it, so `is_content_retryable` said no and every segment failing purely on caption-band overflow --
+exactly the content-density class this retry exists for -- skipped the one bounded re-author
+attempt and degraded straight to a fallback title card. This is a real regression D156 introduced
+without naming: enabling a new check without extending its companion classification set. Fixed:
+`caption_zone_collision` added to `_CONTENT_SIZING_CODES`.
+
+**Both findings share a lesson worth stating plainly: adding a new signal (a reorder, a new CLI
+flag) and stopping at "does it do the right new thing" is not enough -- every existing consumer of
+the data it changes needs to be checked, not assumed unaffected.** D155's reorder changed WHERE an
+item renders without checking who else reads item position (annotations did); D156's flag added a
+WHAT (a new finding code) without checking who else classifies findings by code
+(`is_content_retryable` did). Both are now fixed, both have regression tests built from the actual
+reported/reproduced defect.
+
+**Depends:** D155, D156.

@@ -152,9 +152,8 @@ def resolve_annotations(
     strict-mode structured output can be forced to stay in range -- the same defensive-default
     reasoning ``core/graph/nodes/visual_plan.py::_fallback_scene`` applies to a segment plan's own
     index); ``target_item_index`` outside the target block's real item/link count (T18I: a LINK
-    annotation on a block type absent from ``core.block_items._LINK_FIELD`` -- one with no
-    addressable links at all -- resolves ``link_count`` to 0 and is dropped the same way, no
-    separate check needed); or ``anchor_phrase`` not found in this segment's narration."""
+    annotation on a block type with no addressable links resolves ``link_count`` to 0 and is
+    dropped the same way); or ``anchor_phrase`` not found in this segment's narration."""
     grouped: dict[int, list[RenderableAnnotation]] = {}
     for i, annotation in enumerate(scene.annotations):
         if not 0 <= annotation.target_block_index < len(blocks):
@@ -166,7 +165,13 @@ def resolve_annotations(
             if is_link
             else item_count(target.block_type, target.payload)
         )
-        if not 0 <= annotation.target_item_index < count:
+        # T18J: authored against the PRE-reorder position -- translate through the same
+        # permutation resolve_item_starts applied, or a reordered scene mismarks the item.
+        target_item_index = annotation.target_item_index
+        permutation = target.item_permutation
+        if not is_link and permutation is not None and 0 <= target_item_index < len(permutation):
+            target_item_index = permutation.index(target_item_index)
+        if not 0 <= target_item_index < count:
             continue
         anchor_ms = resolve_anchor(word_marks, annotation.anchor_phrase)
         if anchor_ms is None:
@@ -183,7 +188,7 @@ def resolve_annotations(
                     target.block_type,
                     annotation.annotation_type.value,
                     annotation.target_kind,
-                    annotation.target_item_index,
+                    target_item_index,
                     target.payload,
                 ),
                 container_id=container_id,

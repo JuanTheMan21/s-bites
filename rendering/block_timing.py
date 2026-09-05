@@ -125,14 +125,24 @@ def resolve_item_starts(
     *,
     entrance_start: float,
     end_s: float,
-) -> tuple[T, list[float] | None]:
+) -> tuple[T, list[float] | None, list[int] | None]:
     """This block's own numbered items, timed against the narration -- and, for a sortable block
     type, reordered so visual order matches narration order. Returns the (possibly reordered)
-    payload alongside its item start times; a non-addressable block type returns ``payload``
-    unchanged and ``None``."""
+    payload, its item start times, and (T18J) the permutation applied -- ``permutation[new] ==
+    old`` for each item, or ``None`` when nothing was reordered (not sortable, one item, or
+    already in order). A non-addressable block type returns ``payload`` unchanged and ``(None,
+    None)`` for the other two.
+
+    The permutation matters beyond this function: an annotation's own ``target_item_index`` is
+    authored against the PRE-reorder position (``core/graph/nodes/annotation_author.py`` sees
+    items in authored order, before this function ever runs) -- caught by project-reviewer, who
+    confirmed live that without threading this permutation through to ``rendering/annotations.py``,
+    a reordered scene's annotation silently marks the wrong item. ``rendering/compose.py`` carries
+    this on ``RenderableBlock.item_permutation`` for exactly that translation.
+    """
     field = _ITEM_FIELDS.get(block_type)
     if field is None:
-        return payload, None
+        return payload, None, None
 
     items = list(getattr(payload, field))
     starts = _resolve_anchor_phrases(items, word_marks, entrance_start=entrance_start, end_s=end_s)
@@ -143,8 +153,9 @@ def resolve_item_starts(
             items = [items[i] for i in order]
             starts = [starts[i] for i in order]
             payload = payload.model_copy(update={field: items})
+            return payload, starts, order
 
-    return payload, starts
+    return payload, starts, None
 
 
 def resolve_step_starts(

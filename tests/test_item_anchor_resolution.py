@@ -65,7 +65,7 @@ def test_graph_diagram_nodes_resolve_via_anchor_phrase_not_label() -> None:
         }
     )
 
-    _, starts = resolve_item_starts(
+    _, starts, _permutation = resolve_item_starts(
         "graph_diagram", payload, word_marks, entrance_start=_ENTRANCE_START, end_s=_END_S
     )
 
@@ -91,7 +91,7 @@ def test_text_panel_items_resolve_via_anchor_phrase_not_text() -> None:
         }
     )
 
-    _, starts = resolve_item_starts(
+    _, starts, _permutation = resolve_item_starts(
         "text_panel", payload, word_marks, entrance_start=_ENTRANCE_START, end_s=_END_S
     )
 
@@ -118,7 +118,7 @@ def test_code_diff_lines_resolve_via_anchor_phrase_not_source_text() -> None:
         }
     )
 
-    _, starts = resolve_item_starts(
+    _, starts, _permutation = resolve_item_starts(
         "code_diff", payload, word_marks, entrance_start=_ENTRANCE_START, end_s=_END_S
     )
 
@@ -155,7 +155,7 @@ def test_unresolved_anchor_phrases_interpolate_across_the_visible_window() -> No
         }
     )
 
-    _, starts = resolve_item_starts(
+    _, starts, _permutation = resolve_item_starts(
         "graph_diagram", payload, word_marks, entrance_start=_ENTRANCE_START, end_s=_END_S
     )
 
