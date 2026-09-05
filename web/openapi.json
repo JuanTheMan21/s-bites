@@ -509,6 +509,11 @@
           "fallback_used": {
             "type": "boolean",
             "title": "Fallback Used"
+          },
+          "original_tier": {
+            "type": "integer",
+            "title": "Original Tier",
+            "description": "D154: the raw core.models.Tier value this segment was ASSIGNED before any fallback ran (0/1/2, matching Tier's own IntEnum values) -- plain int, not the enum itself, because core/models.py imports RenderOutcome and importing Tier back here would cycle. Segment.tier itself is downgraded in place once fallback_used (render_scene.py, so the cheap fallback actually dispatches through the cheap renderer), which would otherwise make 'what this segment would have gotten' unrecoverable from the pipeline's own record."
           }
         },
         "additionalProperties": false,
@@ -518,7 +523,8 @@
           "attempts",
           "finding_codes",
           "reauthored",
-          "fallback_used"
+          "fallback_used",
+          "original_tier"
         ],
         "title": "RenderOutcome",
         "description": "One segment's own render history: how many attempts it took, what geometry findings fired\nalong the way, and whether re-authoring or the safe fallback ended up doing the work.\n\nA segment with no ``RenderOutcome`` at all (the common case) rendered clean on the first\nattempt -- there is deliberately no \"success\" variant of this type; its ABSENCE from\n``VideoJob.degraded_segments`` already says that."

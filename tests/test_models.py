@@ -166,6 +166,7 @@ def test_a_render_outcome_survives_the_same_serialisation_round_trip() -> None:
         finding_codes=["canvas_overflow"],
         reauthored=True,
         fallback_used=False,
+        original_tier=2,
     )
     segment = (
         a_plan().to_segment(1).model_copy(update={"duration_ms": 4200, "render_outcome": outcome})

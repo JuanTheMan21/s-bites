@@ -117,18 +117,24 @@ async def test_a_reauthor_that_still_fails_falls_back_to_title_card(tmp_path: Pa
     assert outcome.reauthored is True
     assert outcome.fallback_used is True
     assert outcome.finding_codes == ["canvas_overflow", "canvas_overflow"]
+    assert outcome.original_tier == int(Tier.STATIC)
     assert result[0].clip_key is not None
 
 
 @needs_ffmpeg
-async def test_the_fallback_title_card_downgrades_to_static_tier(tmp_path: Path) -> None:
-    """T18I latency fix: a real render found one degraded ANIMATED-tier segment (three real
-    attempts, all at Tier 2) cost more wall time alone than the other fourteen segments in the
-    same job combined. The final fallback attempt gains nothing from full frame-by-frame
-    animation -- a title card is Tier 0's own reference composition -- so it renders as
-    Tier.STATIC regardless of the segment's originally assigned tier, while the two real
-    attempts before it still render at the real tier, giving the actual content a genuine shot
-    at full quality before giving up on it."""
+async def test_the_fallback_title_card_downgrades_to_reveal_tier(tmp_path: Path) -> None:
+    """T18I latency fix (D153, corrected D154): a real render found one degraded ANIMATED-tier
+    segment (three real attempts, all at Tier 2) cost more wall time alone than the other
+    fourteen segments in the same job combined. The final fallback attempt downgrades to
+    Tier.REVEAL, not Tier.STATIC -- a single held screenshot reintroduces the "frozen for the
+    whole segment" defect T18G's ambient title-card motion was built to fix (project-reviewer
+    caught this against the first version of this fix); REVEAL's 4-capture crossfade is still
+    far cheaper than a full frame-by-frame Tier 2 render while sampling that motion, not
+    freezing it. Asserts the actual dispatch, not just the reported tier: geometry validation
+    gates BEFORE tier dispatch in render_segment.py, so the two failing real attempts never reach
+    a renderer at all -- only the fallback's successful validate_geometry call does, and it must
+    go through capture() (Tier.REVEAL's dispatch), never render() (what Tier.ANIMATED, the
+    segment's original tier, would have dispatched through if the downgrade silently failed)."""
     render = FakeRenderBackend(
         geometry_findings_sequence=[
             ["[error] canvas_overflow: too much content"],
@@ -145,8 +151,11 @@ async def test_the_fallback_title_card_downgrades_to_static_tier(tmp_path: Path)
 
     assert result[0].render_outcome is not None
     assert result[0].render_outcome.fallback_used is True
-    assert result[0].tier == Tier.STATIC
+    assert result[0].render_outcome.original_tier == int(Tier.ANIMATED)
+    assert result[0].tier == Tier.REVEAL
     assert result[0].clip_key is not None
+    assert len(render.renders) == 0
+    assert len(render.captures) == 1
 
 
 @needs_ffmpeg

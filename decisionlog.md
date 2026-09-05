@@ -3524,3 +3524,46 @@ the now-cheap fallback; the honest expectation is a meaningfully lower total, no
 being promised as a fact rather than an estimate.
 
 **Depends:** D152.
+
+### D154 — D153 corrected: fallback downgrades to Tier.REVEAL, not Tier.STATIC; `RenderOutcome`
+gains `original_tier` — both caught by `project-reviewer`, not assumed safe
+
+**D153's claim that downgrading a fallback title card to `Tier.STATIC` "costs nothing further a
+viewer would notice" was checked, not just asserted — and was wrong.** `rendering/templates/
+_block_title.html`'s own D120/D121 history documents that a title card's entrance animation is
+only ~1.25s, so at the segment's real duration (often 20-28s, `SECONDS_PER_SEGMENT`) a single held
+frame is visually dead for the rest of the segment — and records T18G's fix for exactly that: an
+ambient underline glow tweening for the whole duration, staggered `key_terms` chip entrances. A
+`Tier.STATIC` capture (one screenshot, held) never plays any of it, silently reintroducing the
+specific defect T18G was built to close, for the specific block type that carries the fix.
+
+**Corrected to `Tier.REVEAL`.** Four captures crossfaded (`rendering/reveal.py`) — still
+dramatically cheaper than Tier 2's full frame-by-frame capture over the whole duration (4 browser
+screenshots vs. one per frame), but samples the ambient motion at different points rather than
+freezing it. Neither as expensive as the tier it replaces nor as dead as the tier that would have
+been cheapest.
+
+**A second, lower-severity finding fixed in the same pass:** `RenderOutcome` had no way to recover
+which tier a degraded segment was originally assigned, once `render_scene.py`'s fallback branch
+overwrote `segment.tier` in place — "what this segment would have gotten" became unrecoverable
+from the pipeline's own record the moment a segment degraded. Added `RenderOutcome.original_tier:
+int` (plain int, not `core.models.Tier` — `core/models.py` already imports `RenderOutcome`, so
+importing `Tier` back into `core/render_outcome.py` would cycle; caught before it was ever run,
+not after an import error). Captured at `render_scene`'s own entry, before any mutation.
+
+**A test written for the wrong reason still caught a wrong assumption.** The tightened test added
+alongside D153 asserted "two real attempts dispatch through `render()`, the fallback through
+`capture()`" — that premise was itself false: `rendering/render_segment.py`'s own flow gates tier
+dispatch behind `lint`/`validate_geometry`, so a FAILING attempt never reaches a renderer at all;
+only the one attempt that ultimately passes validation ever calls `render()` or `capture()`. The
+test's assertion (`len(render.renders) == 2`) caught this immediately (`0 == 2`) the first time it
+ran — corrected to what the architecture actually does (`len(render.renders) == 0`,
+`len(render.captures) == 1`), which is still a real, meaningful assertion: it proves the dispatch
+went through `Tier.REVEAL`'s own path, not `Tier.ANIMATED`'s, which is exactly what "the downgrade
+silently failed to take effect" would look like if it ever regressed.
+
+`openapi.json`'s only diff is the new required `original_tier` field on the already-optional
+`RenderOutcome` schema — additive, confirmed via `dump_openapi` + regenerated
+`web/src/api/schema.d.ts`, clean `tsc -b --noEmit`.
+
+**Depends:** D153.

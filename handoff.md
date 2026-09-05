@@ -41,7 +41,7 @@ gap) — all three fixed, each with a regression test reproducing the reviewer's
 | Segments with any annotation | 13 of 15 (87%) | 4 of 15 (27%) |
 | `text_occluded` triggers a retry | No | Yes |
 
-**Full regression, current state:** `pytest` 1046 passed / 1 skipped, `ruff check .` clean, both
+**Full regression, current state:** `pytest` 1047 passed / 1 skipped, `ruff check .` clean, both
 boundary greps clean (one docstring-text hit, not a real import), no `.py` over 200 lines,
 `openapi.json` unchanged (all this session's backend work is pipeline-internal), `web/`'s
 `tsc`/`eslint`/`vitest`/`build` all clean (unaffected — this session touched no frontend files).
@@ -56,10 +56,24 @@ boundary greps clean (one docstring-text hit, not a real import), no `.py` over 
   second LLM call.
 - **New `SceneLayout` members (`STACKED`, an asymmetric split) were scoped, not built** —
   deprioritized this session in favor of the enforcement/correctness work above.
-- **Latency**: the closing render ran 18.1 min against a ~15 min target for a 10-min-equivalent
-  video, because both degraded segments needed a full retry-then-fallback cycle (each a real
-  render+validate round trip). Expected to shrink as the geometry-gap-closure work below reduces
-  how often that cycle fires at all — the fix is fewer failures, not weaker recovery.
+- **Latency, D153/D154: root cause found and fixed, not yet re-measured on a real render.** The
+  18.1 min closing render's own per-node log showed one degraded segment cost 755s alone — more
+  than the other fourteen combined — because its fallback title card still rendered through the
+  full frame-by-frame Tier 2 pipeline its original tier assignment called for. First fix attempt
+  (D153) downgraded to `Tier.STATIC`; `project-reviewer` caught that a single held screenshot
+  reintroduces the exact "frozen for the whole segment" defect T18G's ambient title-card motion
+  was built to fix (`_block_title.html`'s own D120/D121 history). Corrected (D154) to
+  `Tier.REVEAL` — still far cheaper than Tier 2 (4 captures vs. one per frame over the whole
+  duration), but samples the ambient motion instead of freezing it.
+  `core/graph/nodes/render_scene.py`'s fallback branch downgrades `segment.tier` alongside the
+  scene swap; the two real attempts before it are untouched. `RenderOutcome` also gained
+  `original_tier` (D154) so a degraded segment's originally-assigned tier stays recoverable.
+  **Not yet proven on a real render** — the honest expectation is a meaningfully lower total for a
+  video with failures, not a specific promised number; re-measure before reporting a new figure as
+  fact. Does
+  not touch WHY segments fail geometry validation in the first place — that is still Phase 2/3's
+  open scope (measured content fit, a real position-collision resolver), and reducing failure rate
+  remains the more durable lever.
 - **No test yet for the whole-video annotation budget wired at the `collect_scenes` GRAPH level**
   beyond `tests/test_collect_scenes_node.py`'s direct node test — no end-to-end graph test exercises
   it through a real fan-out.

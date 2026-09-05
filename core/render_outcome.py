@@ -10,7 +10,7 @@ printed by ``cli.py``'s own summary -- this is the "which segment, on which find
 job failed" signal the user asked for directly, after T18H's own gate was found to have none.
 """
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RenderOutcome(BaseModel):
@@ -29,3 +29,12 @@ class RenderOutcome(BaseModel):
     finding_codes: list[str]
     reauthored: bool
     fallback_used: bool
+    original_tier: int = Field(
+        description="D154: the raw core.models.Tier value this segment was ASSIGNED before any "
+        "fallback ran (0/1/2, matching Tier's own IntEnum values) -- plain int, not the enum "
+        "itself, because core/models.py imports RenderOutcome and importing Tier back here would "
+        "cycle. Segment.tier itself is downgraded in place once fallback_used (render_scene.py, "
+        "so the cheap fallback actually dispatches through the cheap renderer), which would "
+        "otherwise make 'what this segment would have gotten' unrecoverable from the pipeline's "
+        "own record."
+    )

@@ -226,6 +226,11 @@ export interface components {
             reauthored: boolean;
             /** Fallback Used */
             fallback_used: boolean;
+            /**
+             * Original Tier
+             * @description D154: the raw core.models.Tier value this segment was ASSIGNED before any fallback ran (0/1/2, matching Tier's own IntEnum values) -- plain int, not the enum itself, because core/models.py imports RenderOutcome and importing Tier back here would cycle. Segment.tier itself is downgraded in place once fallback_used (render_scene.py, so the cheap fallback actually dispatches through the cheap renderer), which would otherwise make 'what this segment would have gotten' unrecoverable from the pipeline's own record.
+             */
+            original_tier: number;
         };
         /**
          * Segment

@@ -80,6 +80,7 @@ async def render_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
     context = runtime.context
     job_id = state["job_id"]
     segment = state["segment"]
+    original_tier = segment.tier
 
     segment_dir = context.working_dir / job_id / "segments" / str(segment.index)
     composition_dir = segment_dir / "composition"
@@ -135,17 +136,22 @@ async def render_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
             )
             attempts += 1
             fallback_scene = title_card_scene(segment, scene.motif)
-            # T18I latency fix: downgraded to Tier.STATIC along with the scene swap, not just the
-            # scene -- a plain title card gains nothing from a full frame-by-frame animated
-            # capture over the segment's whole duration, and a real render showed this tier
-            # mismatch turning one degraded segment into the single largest cost in the entire
-            # job (one segment, three attempts at its original Tier 2, took longer than the other
-            # fourteen segments combined). The two REAL attempts above still render at the
-            # segment's originally assigned tier -- only the already-accepted-as-degraded final
-            # fallback is cheapened, since it has already sacrificed content richness; sacrificing
-            # animation on top of that costs nothing further a viewer would notice.
+            # T18I latency fix (D153, corrected D154): downgraded to Tier.REVEAL, not Tier.STATIC
+            # -- a real render showed one degraded segment's fallback, still rendering at its
+            # original Tier 2, costing more wall time alone than the other fourteen segments in
+            # the job combined, and a plain title card needs none of that. Tier.STATIC was tried
+            # first and reviewed: it reintroduces the exact "frozen for the whole segment" defect
+            # `_block_title.html`'s own D120/D121 history documents and T18G specifically built
+            # ambient motion (an underline glow tweening for the full duration, staggered chip
+            # entrances) to fix -- a single held screenshot never plays any of it. Tier.REVEAL
+            # (4 captures crossfaded, `rendering/reveal.py`) is still dramatically cheaper than a
+            # full frame-by-frame Tier 2 capture -- 4 browser screenshots instead of one per frame
+            # over the whole duration -- while still sampling that ambient motion at different
+            # points, so the fallback is neither frozen nor as expensive as the tier it replaces.
+            # The two REAL attempts above are untouched -- only the already-accepted-as-degraded
+            # final fallback is cheapened.
             segment = segment.model_copy(
-                update={"scene": fallback_scene.model_dump(), "tier": Tier.STATIC}
+                update={"scene": fallback_scene.model_dump(), "tier": Tier.REVEAL}
             )
             # Deliberately unguarded: if even the deterministic title card fails geometry
             # validation, that is a genuine bug in our own templates (TITLE is the simplest block
@@ -166,6 +172,7 @@ async def render_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
             finding_codes=codes,
             reauthored=reauthored,
             fallback_used=fallback_used,
+            original_tier=int(original_tier),
         )
         if attempts > 1
         else None
