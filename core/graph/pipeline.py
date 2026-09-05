@@ -9,7 +9,9 @@ ordering structurally: ``assign_tiers`` needs *every* segment's measured duratio
 until the TTS fan-out converges; ``plan_visuals`` (T18B) needs every segment's narration and tier
 to plan the whole video's visuals in one call, so it sits right after ``assign_tiers`` and before
 the scene-authoring fan-out -- ``author_scene`` therefore cannot run until every segment has a
-scene *plan*; and ``render_scene`` (which composes and renders a segment's *authored* scene)
+scene *plan*; ``collect_scenes`` (T18I: no longer empty -- see ``core/graph/nodes/
+collect_scenes.py``) needs every segment's own authored annotations to enforce the whole-video
+annotation budget; and ``render_scene`` (which composes and renders a segment's *authored* scene)
 cannot run until that scene's blocks are filled either.
 """
 
@@ -23,6 +25,7 @@ from core.graph.node_timing import timed
 from core.graph.nodes import (
     assign_tiers,
     author_scene,
+    collect_scenes,
     finalize,
     plan_segments,
     plan_visuals,
@@ -59,19 +62,6 @@ def _fan_out_to_rendering(state: GraphState) -> list[Send]:
         Send("render_scene", SegmentTask(job_id=state["job"].job_id, segment=segment))
         for segment in state["segments"].values()
     ]
-
-
-async def _collect_scenes(state: GraphState) -> dict:
-    """A deliberately empty join, between ``author_scene``'s fan-out and ``render_scene``'s.
-
-    LangGraph only converges a superstep's concurrent ``Send`` tasks at a *named node* -- the same
-    reason ``assign_tiers`` sits between the first two fan-outs -- but unlike ``assign_tiers``,
-    nothing needs computing here: each segment renders independently of every other, so there is
-    no cross-segment step the way tier assignment is one. This node exists purely so
-    ``render_scene``'s fan-out has a converged, complete ``segments`` dict (every slot filled) to
-    read, not because it does anything to that dict itself.
-    """
-    return {}
 
 
 def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> CompiledStateGraph:
@@ -115,8 +105,9 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None) -> CompiledStat
         input_schema=SegmentTask,
         retry_policy=build_transient_retry_policy(),
     )
-    # No policy: purely structural, returns {} unconditionally, cannot fail (see its docstring).
-    builder.add_node("collect_scenes", timed("collect_scenes", _collect_scenes))
+    # No policy: pure, in-process bookkeeping over already-authored content -- no LLMProvider
+    # call, no I/O, nothing here can raise the way an adapter call could.
+    builder.add_node("collect_scenes", timed("collect_scenes", collect_scenes))
     # Transient-only: render_scene makes no LLMProvider call, so there is no StructuredOutputError
     # to isolate -- only RenderFailed (retryable) and CompositionInvalid (our own gate, matches
     # neither policy, propagates immediately).

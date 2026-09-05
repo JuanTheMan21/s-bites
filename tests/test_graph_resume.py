@@ -97,14 +97,19 @@ async def test_a_kill_during_narration_does_not_repeat_completed_segments(tmp_pa
         # plan_segments already completed and checkpointed before the kill (D68), so resume never
         # re-invokes it and no outline or narration response is needed here. assign_tiers,
         # plan_visuals, and author_scene, by contrast, never ran at all -- the kill happened
-        # upstream of all three -- so the resumed run still makes plan_visuals' one call plus one
-        # scene-authoring fill call and one annotations call per segment (T18E).
+        # upstream of all three -- so the resumed run still makes plan_visuals' calls (two, per
+        # scene_plan's own docstring) plus one scene-authoring fill call and one annotations call
+        # per segment (T18E).
         context = a_context(
             tmp_path,
             tts=fake_tts,
             storage=fake_storage,
             llm=PhaseQueueLLMProvider(
-                [scene_plan(job.segment_count), *author_scene_responses(job.segment_count)]
+                [
+                    scene_plan(job.segment_count),
+                    scene_plan(job.segment_count),
+                    *author_scene_responses(job.segment_count),
+                ]
             ),
         )
 

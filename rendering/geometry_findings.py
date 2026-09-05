@@ -21,11 +21,22 @@ import re
 # T18H/D124's own real-render vocabulary -- extend this only with a code actually observed in a
 # real render's own findings, never on a guess (this module's own docstring: a code absent here
 # defaults to NOT retryable, which is the safe direction to be wrong in).
+#
+# T18I (this session's own closing render, not a guess either): two segments failed with
+# ['content_overlap', 'text_occluded'] and skipped the retry entirely -- `text_occluded` was
+# absent here, so `is_content_retryable` returned False on a finding that is exactly as
+# content-shaped as the other three (something's text is hidden behind other content because
+# there was too much of it) and went straight to the fallback title card instead of getting the
+# one bounded re-author attempt that might have fixed it. `array_grid`'s own INTENTIONAL
+# occlusion (a strikethrough over an eliminated value) already opts out via
+# `data-layout-allow-occlusion` before this code ever fires, so an unintentional one reaching
+# `validate_geometry` at all is a real content-sizing problem, not a false positive.
 _CONTENT_SIZING_CODES = frozenset(
     {
         "canvas_overflow",
         "escaped_container",
         "content_overlap",
+        "text_occluded",
     }
 )
 

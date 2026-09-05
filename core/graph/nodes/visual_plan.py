@@ -21,6 +21,7 @@ from core.models import Segment
 from core.scene_normalize import normalize_layout
 from core.scene_plan_schema import SegmentScenePlan, VideoScenePlan
 from core.scene_schemas import ComposedBlock, ComposedScene
+from core.scene_variety import check_variety
 from interfaces import LLMProvider, SkillRegistry
 
 VISUAL_PLAN_PACK = "visual-plan"
@@ -97,18 +98,27 @@ async def plan_video_visuals(
     )
 
 
-def _reask_appendix(missed: dict[int, BlockType], segments: list[Segment]) -> str:
+def _reask_appendix(
+    missed: dict[int, BlockType], variety_violations: list[str], segments: list[Segment]
+) -> str:
     by_index = {s.index: s for s in segments}
-    lines = [
-        "## Revise",
-        "These segments' own narration clearly calls for a block type the plan above never uses "
-        "anywhere in the video. Keep everything else about your plan; for each segment named "
-        "below, make that block type its primary block:",
-    ]
-    lines.extend(
-        f"- Segment {index} ({by_index[index].title}): use `{block_type.value}`."
-        for index, block_type in missed.items()
-    )
+    lines = ["## Revise"]
+    if missed:
+        lines.append(
+            "These segments' own narration clearly calls for a block type the plan above never "
+            "uses anywhere in the video. Keep everything else about your plan; for each segment "
+            "named below, make that block type its primary block:"
+        )
+        lines.extend(
+            f"- Segment {index} ({by_index[index].title}): use `{block_type.value}`."
+            for index, block_type in missed.items()
+        )
+    if variety_violations:
+        lines.append(
+            "The plan above also breaks this video's own variety rules. Fix each of these "
+            "while keeping every other segment's plan unchanged:"
+        )
+        lines.extend(f"- {violation}" for violation in variety_violations)
     return "\n".join(lines)
 
 
@@ -125,8 +135,13 @@ async def plan_visuals(state: GraphState, runtime: Runtime[GraphContext]) -> dic
     T18E: if the first plan leaves a segment's own narration clearly calling for a block type used
     nowhere in the video (``core/block_triggers.py`` -- T18D's real-render matrix found TIMELINE
     rendered zero times across six topics, D121/D122), this makes exactly ONE bounded re-ask with
-    a corrective appendix. The second plan is taken as final even if it still misses -- no third
-    call, and no deterministic override of the model's own choice.
+    a corrective appendix. T18I folds a second check into that SAME re-ask rather than adding a
+    third call: ``core/scene_variety.py`` enforces, in code, the variety rules the skill pack has
+    stated in prose since T18C (no block type leading more than a third of the video, no two
+    consecutive segments sharing a primary block type) -- a real render surfaced these as still
+    routinely broken despite the prose. One appendix can name both kinds of problem at once; the
+    second plan is taken as final either way -- no third call, and no deterministic override of
+    the model's own choice.
     """
     context = runtime.context
     segments = state["segments"]
@@ -134,8 +149,9 @@ async def plan_visuals(state: GraphState, runtime: Runtime[GraphContext]) -> dic
 
     plan = await plan_video_visuals(context.llm, context.skills, ordered)
     missed = missed_block_opportunities(ordered, plan)
-    if missed:
-        appendix = _reask_appendix(missed, ordered)
+    variety_violations = check_variety(plan)
+    if missed or variety_violations:
+        appendix = _reask_appendix(missed, variety_violations, ordered)
         plan = await plan_video_visuals(context.llm, context.skills, ordered, appendix=appendix)
 
     by_index: dict[int, SegmentScenePlan] = {p.segment_index: p for p in plan.segments}

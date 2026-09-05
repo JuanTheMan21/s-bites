@@ -3336,3 +3336,95 @@ for findings 1 and 2. No closing real render reached completion this session -- 
 is not delivered; see finding 5 and the next task.
 
 **Depends:** T18G -- met.
+
+### D151 — T18I resumed: variety, sequence-diagram length, and annotation density/coherence
+enforced in code, plus a live-render-confirmed retryable-finding bug
+
+**Context.** This session opened with the user's own direct, specific complaints about real
+rendered output: overlapping/colliding elements, hard-to-read diagrams, the same two or three
+visual templates recurring "which gets old fast," a sequence diagram (their words: "couple of
+vertical columns with multiple horizontal parallel lines... used too much, in all videos... 3
+lines max, not more"), and three separate annotation problems -- density firing inconsistently
+("for one sentence and not for the other"), CHECK sitting on top of graph nodes rather than
+parallel to text, and CURSOR "clicks on some node and not another" with no visible walk logic.
+
+**Merge first.** `feature/scene-composition` (T18G/T18H, a WIP T18I slice) was found to contain
+most of the geometric-correctness machinery already, never merged into `dev` -- the videos being
+called buggy were made by the branch that never received the fixes. Curated merge into `dev`
+(handoff.md's own merge note has the full account): `VideoJob`/`JobStatus` moved to
+`core/video_job.py` (the branch's own choice, once `Segment.render_outcome` pushed
+`core/models.py` over 200 lines); the WIP retry/fallback scaffolding
+(`scene_reauthor.py`/`scene_fallback.py`/`render_outcome.py`/`render_scene.py`'s rewrite) was
+reviewed rather than trusted blindly, and found to already be a complete, well-reasoned
+implementation of exactly what this session's Phase 1 needed -- bounded one-shot re-author with
+feedback, deterministic LLM-free title-card fallback, `VideoJob.degraded_segments` as the
+production failure signal, and an explicit, documented narrow exception to D2's "no repair loop"
+stance. No rebuild was needed there; it was verified live instead (below).
+
+**A real, live bug found by this session's own closing-scope render, not by review.** The very
+first real render after the merge produced two segments with findings
+`['content_overlap', 'text_occluded']` and neither one triggered a re-author attempt --
+`rendering/geometry_findings.py::_CONTENT_SIZING_CODES` did not include `text_occluded`, so
+`is_content_retryable` returned `False` on a finding exactly as content-shaped as the other three
+(text hidden behind other content because there was too much of it), skipping straight to the
+fallback title card. Fixed by adding `text_occluded` to the retryable set. `array_grid`'s own
+INTENTIONAL occlusion (a strikethrough over an eliminated value) already opts out via
+`data-layout-allow-occlusion` before `validate_geometry` ever sees it, so an *unintentional* one
+reaching the gate at all is genuinely a content-sizing problem, confirming this was safe to widen.
+
+**Three new enforcement modules, all following the project's own established shape: a rule stated
+in a prompt is a request; a rule enforced in code is a fact** (the same reasoning `duration_ms`
+being a required parameter makes Invariant 1 a type error rather than a plea).
+
+1. `core/scene_variety.py::check_variety` -- the skill pack has stated "no block type leads more
+   than a third of the video" and "no two consecutive segments share a primary type" since T18C;
+   neither was ever checked. Folded into `plan_visuals`'s EXISTING one bounded re-ask (alongside
+   `missed_block_opportunities`) rather than adding a third LLM call -- one appendix now names
+   both kinds of problem when both fire. A `max(1, ...)` floor on every fraction check exists
+   because a 1-2-real-segment video (or test fixture) cannot possibly keep any type under a third
+   of itself; without it the check is a permanent false positive on short videos, not a real
+   variety signal. `SEQUENCE_DIAGRAM` gets an additional, tighter cap (a fifth, not a third) --
+   the user's own complaint that it specifically is overused even when nothing else is.
+2. `core/scene_content_normalize.py::normalize_block_payload` -- `SequenceDiagramSlots.messages`
+   asked for "roughly six to eight," unenforceable in strict mode (D29's own precedent: `enum`
+   survives strict-mode schemas, list-length keywords do not). Rather than a re-ask (a message
+   COUNT is not a quality judgment the model can get more right on a second try, unlike a
+   geometry finding), this deterministically truncates to the user's own stated ceiling of 3,
+   keeping the model's own first 3 (its own narration-order priority). Wired into
+   `scene_author.py::fill_block`'s return, so `scene_reauthor.py`'s reuse of the same function
+   benefits automatically. The schema's own Field description updated to state the real cap.
+3. `core/annotation_normalize.py` -- two functions, two different scopes. `normalize_annotations`
+   (per-scene, wired into `annotation_author.py::author_annotations`'s return) caps density at
+   the skill pack's own stated "one or two," and -- a shape no prose rule could express at all --
+   drops an entire group of CURSOR marks on the same block if they do not target strictly
+   increasing item indices in authored (== narration) order: exactly the user's reported "clicks
+   on some node and not another" pattern. `cap_video_annotation_budget` (whole-video, wired into
+   a NEW real job for the previously-empty `_collect_scenes` join, now `core/graph/nodes/
+   collect_scenes.py::collect_scenes`) enforces the skill pack's OTHER stated rule -- "most scenes
+   should have none at all" -- which no per-scene mechanism could ever check, by clearing every
+   annotation past a 40%-of-segments budget, keeping the earliest annotated segments as a simple,
+   deterministic tie-break. Both functions carry the same `max(1, ...)` floor reasoning as (1),
+   confirmed necessary by a test this session wrote before assuming otherwise (a genuine
+   `cap_video_annotation_budget` bug caught by `test_no_update_returned_when_nothing_needs_capping`
+   before this floor existed).
+
+**What was found already correct, not rebuilt.** Edge-parallel annotation placement (the user's
+"doesn't sit parallel to text" complaint) -- `AnnotationTargetKind.LINK`, `hfAnnotationPlace`'s
+`"parallel"` candidate with proper on-screen-angle rotation and its own direction-aware nudge
+search -- was already fully implemented and wired through every annotation template on
+`feature/scene-composition`. `core/scene_normalize.py::normalize_layout` (SINGLE's multi-block
+stacking, the branch's own D124 finding 5) was likewise already built and wired into
+`visual_plan.py`. Neither needed new work this session, only verification via the merge and the
+live render.
+
+**Test discipline paid off twice in the same afternoon.** `tests/graph_pipeline_fixtures.py`'s
+shared `scene_plan()` fixture (every segment planned as TITLE, for fill-call interchangeability
+under concurrent fan-out) legitimately trips the new consecutive-repeat rule by its own design --
+fixed by queuing the plan twice (the fixture's own honest re-ask, not a weakened check) rather
+than making the fixture artificially varied and losing the interchangeability property several
+other tests depend on. And `cap_video_annotation_budget`'s missing floor (above) was caught by a
+test written for this exact function before the closing render could have surfaced it any other
+way.
+
+**Depends:** T18H -- met. Carries T18I forward; the geometry-gap-closure and closing-render halves
+of T18I's original scope (`tasks.md`) are still open.

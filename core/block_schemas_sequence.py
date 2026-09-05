@@ -40,8 +40,11 @@ class SequenceDiagramSlots(StrictSchema):
         "appear."
     )
     messages: list[SequenceMessage] = Field(
-        description="The exchange, in narration order. Roughly six to eight messages -- more "
-        "than that will not fit above the caption band."
+        description="The exchange, in narration order. At most 3 messages -- a real, watched "
+        "render found more than that reads as hard to follow (this project's own user, on a TCP "
+        "handshake). Choose the 3 that matter most; a longer exchange needs a different block, "
+        "not more lines here. core/scene_content_normalize.py truncates to the first 3 if this "
+        "is ignored, so a longer answer loses its own tail rather than failing outright."
     )
 
 

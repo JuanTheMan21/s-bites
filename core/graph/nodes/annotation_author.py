@@ -4,6 +4,7 @@ exists (T18D's catalog: every annotation's ``target_item_index`` came back null 
 ``plan_visuals``-time ordering -- D121/D122).
 """
 
+from core.annotation_normalize import normalize_annotations
 from core.annotation_plan_schema import SceneAnnotations
 from core.block_items import item_labels, link_labels
 from core.graph.nodes.skill_prompt import load_step_prompt
@@ -40,13 +41,19 @@ async def author_annotations(
     llm: LLMProvider, skills: SkillRegistry, segment: Segment, blocks: list[ComposedBlock]
 ) -> list[ComposedAnnotation]:
     """Annotations for one already-filled scene, each naming a real block/item index -- or none,
-    which is the common case (the runtime skill pack's own "sparingly" guidance)."""
+    which is the common case (the runtime skill pack's own "sparingly" guidance).
+
+    T18I: ``normalize_annotations`` enforces, in code, what the skill pack has only ever asked
+    for in prose -- a per-scene density cap, and (a shape prose cannot express at all) that two
+    or more CURSOR marks on the same block walk it in narration order rather than jumping around
+    it. See ``core/annotation_normalize.py``.
+    """
     step_prompt = await load_step_prompt(skills, ANNOTATION_AUTHORING_PACK)
     prompt = _build_prompt(step_prompt.step, segment, blocks)
     plan = await generate_with_bounded_retries(
         llm, prompt, SceneAnnotations, system=step_prompt.house_style
     )
-    return [
+    authored = [
         ComposedAnnotation(
             annotation_type=a.annotation_type,
             target_block_index=a.target_block_index,
@@ -57,3 +64,4 @@ async def author_annotations(
         )
         for a in plan.annotations
     ]
+    return normalize_annotations(authored)

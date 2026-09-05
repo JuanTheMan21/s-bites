@@ -92,7 +92,10 @@ def a_job() -> VideoJob:
 
 def scene_plan(segment_count: int) -> VideoScenePlan:
     """The whole-video visual plan every run consumes -- one TITLE block per segment. Segment
-    0's own entry is included for shape but ignored by ``plan_visuals`` (forced regardless)."""
+    0's own entry is included for shape but ignored by ``plan_visuals`` (forced regardless).
+    Deliberately identical throughout (interchangeable fill payloads, this module's own
+    docstring) -- which trips ``core/scene_variety.py``'s repeat rule on purpose, so
+    ``seeded_llm`` queues this twice rather than making the shape artificially varied."""
     return VideoScenePlan(
         motif=MotifName.TERMINAL,
         segments=[
@@ -135,8 +138,13 @@ def author_scene_responses(segment_count: int) -> list[TitleSlots | SceneAnnotat
 
 def seeded_llm(segment_count: int) -> PhaseQueueLLMProvider:
     """The full call sequence a run makes: one Outline (plan_segments' outline call), one
-    Narration per segment (its scripting calls), one VideoScenePlan (plan_visuals' single call),
-    then ``author_scene_responses`` for the fan-out that follows."""
+    Narration per segment (its scripting calls), one VideoScenePlan (plan_visuals' single call --
+    T18I: queued TWICE, since ``scene_plan``'s every-segment-is-TITLE shape deliberately trips
+    ``core/scene_variety.py``'s own consecutive-repeat rule, the same way it always would for any
+    plan this repetitive in production; ``plan_visuals`` re-asks once and takes the second
+    answer -- see ``scene_plan``'s own docstring for why the shape stays TITLE-for-everything
+    rather than becoming variety-compliant instead of fixing the call count), then
+    ``author_scene_responses`` for the fan-out that follows."""
     outline = Outline(
         segments=[
             SegmentPlan(
@@ -150,7 +158,13 @@ def seeded_llm(segment_count: int) -> PhaseQueueLLMProvider:
     )
     narrations = [Narration(text=f"Narration {i}.") for i in range(segment_count)]
     return PhaseQueueLLMProvider(
-        [outline, *narrations, scene_plan(segment_count), *author_scene_responses(segment_count)]
+        [
+            outline,
+            *narrations,
+            scene_plan(segment_count),
+            scene_plan(segment_count),
+            *author_scene_responses(segment_count),
+        ]
     )
 
 

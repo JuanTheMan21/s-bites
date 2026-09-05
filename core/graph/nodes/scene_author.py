@@ -31,6 +31,7 @@ from core.graph.nodes.skill_prompt import load_step_prompt
 from core.graph.nodes.structured_retry import generate_with_bounded_retries
 from core.graph.state import SegmentTask
 from core.models import Segment
+from core.scene_content_normalize import normalize_block_payload
 from core.scene_schemas import ComposedBlock, ComposedScene
 from interfaces import LLMProvider, SkillRegistry
 
@@ -82,7 +83,7 @@ async def fill_block(
         block_schema_for(block.block_type),
         system=step_prompt.house_style,
     )
-    return payload.model_dump()
+    return normalize_block_payload(block.block_type, payload.model_dump())
 
 
 async def author_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> dict:
