@@ -4325,3 +4325,90 @@ who didn't know why it was there). Added
 `test_run_passes_start_new_session_on_posix_but_not_windows`, asserting the actual kwarg
 `asyncio.create_subprocess_exec` receives on each platform, so this coupling is pinned by a
 machine-checked property rather than by a docstring someone has to keep reading.
+
+### D183 -- T38's "workforce/single-tenant, the company tenant" premise is false, and is reopened
+rather than worked around: the Azure account (`skillbites911@gmail.com`) is a personal Microsoft
+account, its tenant (`skillbites911gmail.onmicrosoft.com`, "Default Directory") contains exactly one
+user, and the user is Global Administrator of it by default. Single-tenant sign-in needs a
+directory with more than one member to mean anything, which this tenant structurally cannot have.
+
+**Rejected:** building single-tenant sign-in against this tenant anyway and treating the one-user
+limitation as an acceptable demo constraint; also rejected, a real company tenant invented or
+provisioned solely to satisfy the task's literal wording.
+
+**Reasoning:** a search of all 4,327 lines of `decisionlog.md` as it stood found no D-record for the
+"company tenant" choice -- it was one line of `tasks.md` prose with no recorded reasoning, so
+CLAUDE.md's own rule ("if you believe a past decision should be reopened, say so explicitly") governs
+rather than "always follow a past decision." The user, asked directly, described their actual
+deployment target as a company using `@ust.com` with an app registration and an AD group gating
+access -- i.e. the same shape as single-tenant, just not buildable against this Azure account. The
+resolution adopted (D184) makes tenancy a configuration value rather than a code fork, so the
+distinction this decision reopens collapses to one env var at deploy time and costs nothing later.
+
+### D184 -- Entra ID tenancy is a runtime configuration value (`ENTRA_TENANT_ID` +
+`ENTRA_ALLOWED_TENANTS`), not a code branch. `ENTRA_TENANT_ID=common` (this deployment's real
+setting) accepts any Microsoft identity; `ENTRA_TENANT_ID=<tenant-guid>` with
+`ENTRA_ALLOWED_TENANTS` set to that same guid is an ordinary single-tenant enterprise app. The
+token-validation code in `api/token_verifier.py` is byte-identical between the two.
+
+**Rejected:** a `SINGLE_TENANT` boolean or an `if company_mode:` branch selecting between two
+validation code paths; also rejected, hardcoding `common` permanently and dropping the
+single-tenant lever the task actually asked for.
+
+**Reasoning:** Microsoft's own documentation (fetched live this session, not recalled) states that
+tenant-independent (`/common`) validation is a strict superset of single-tenant validation -- it
+performs every check single-tenant does, plus the signing-key-issuer check and the `tid`/`iss`
+cross-check that only matter when more than one tenant's keys are in play. Building the general
+form and pinning it with config is therefore the documented way to write this, not a workaround.
+This is also what makes D183's reopening costless: the "company tenant" shape T38 originally asked
+for is fully available, just one config change away, whenever a real multi-user tenant exists to
+point it at.
+
+### D185 -- Ownership is enforced by the storage key (`jobs/{owner_id}/{job_id}/...`), never an
+`if job.owner_id != principal.owner_id` check on any route.
+
+**Rejected:** loading a job by id alone and comparing owners in each of the eleven job-scoped
+routes, returning 404 on mismatch.
+
+**Reasoning:** D173 already chose a Blob key prefix over a database for job records; this task is
+the first to actually need per-owner isolation and simply extends that key shape one segment
+further, rather than opening a new design question. The payoff is structural rather than
+disciplinary: a route that forgets the check is not a subtle bug waiting to be found, because
+there is no check to forget -- `JobStore.load` cannot address another owner's record at all, so a
+wrong owner hits the same `ObjectNotFound` -> 404 path as a genuinely absent job. `owner_id` on
+`VideoJob` defaults to `None` (not required) specifically so pre-T38A job records and LangGraph
+checkpoints still deserialize under the model's existing `extra="forbid"`.
+
+### D186 -- The task text's "drop the SAS URL's expiry to minutes" is followed in spirit, not
+literally: streamed media (`/video`, segment `/clip`, segment `/audio`) gets 900s (15 min);
+one-shot downloads (`/subtitles`, `/scorm`, `/segments/.../scene`) get 300s (5 min). The interface
+default of 3600s is untouched.
+
+**Rejected:** a single flat "a few minutes" value applied to every artifact route alike, as the
+task text's literal wording suggested.
+
+**Reasoning:** a browser `<video>` element re-requests byte ranges as the viewer scrubs, so a SAS
+that expires in five minutes can die mid-playback of a video someone is still watching -- and
+`adapters/azure/storage.py`'s `CLOCK_SKEW` back-dates the mint time by five more minutes, eating
+most of an already-short window before it starts counting. Splitting by how an artifact is actually
+consumed (streamed and scrubbed vs. fetched once) satisfies the real security goal -- a much
+shorter-lived unauthenticated bearer capability than the pre-T38A 3600s default -- without breaking
+the one thing a viewer is most likely to be doing with the deployed frontend.
+
+### D187 -- State-changing routes (`POST /jobs`, `POST /jobs/{id}/resume`, `POST /auth/session`)
+require the `Authorization: Bearer` header and explicitly refuse the session cookie
+(`api/auth.py::mutating_principal`), even though the cookie is accepted for every read.
+
+**Rejected:** accepting either credential uniformly across all routes, matching the read path's
+`current_principal`.
+
+**Reasoning:** found during the build, not by review or live testing -- the session cookie is
+necessarily `SameSite=None` (the deployed frontend and API are different origins), which means a
+browser attaches it to cross-site requests too. A JSON-bodied POST is incidentally protected by a
+CORS preflight an attacker's origin fails, but `POST /jobs/{id}/resume` takes no body at all: a
+plain cross-site HTML form targeting it would ride the victim's cookie and re-run their job on
+their own credit, with nothing about the request looking unusual to the browser. Splitting the
+dependency by read/write is one extra type alias and costs nothing on routes that were always
+going to be called through `openapi-fetch` (which sets the header unconditionally) -- it only
+removes a capability (triggering a mutation from an arbitrary page) that no legitimate caller ever
+needed.

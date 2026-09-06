@@ -36,6 +36,15 @@ class VideoJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     job_id: str
+    owner_id: str | None = Field(
+        default=None,
+        description="T38A: who submitted this job -- '{tid}.{oid}' from their Entra token, or "
+        "'dev.local' under AUTH_ENV=none. Also the storage-key prefix every artifact of this job "
+        "sits under (api/job_store.py), which is what makes ownership structural rather than a "
+        "check each route has to remember. Defaults to None only so job records and LangGraph "
+        "checkpoints written before T38A still load under this model's extra='forbid'; a job "
+        "submitted through the API always has one.",
+    )
     topic: str = Field(description="The prompt as the user typed it.")
     target_duration_ms: int = DEFAULT_TARGET_DURATION_MS
     status: JobStatus = JobStatus.QUEUED

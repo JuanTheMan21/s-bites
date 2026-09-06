@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
 from api.artifact_response import job_or_404
+from api.auth import CurrentPrincipal
 from interfaces import ObjectNotFound
 from scorm.package import build_scorm_package
 
@@ -15,8 +16,8 @@ router = APIRouter()
 
 
 @router.get("/jobs/{job_id}/scorm")
-async def get_scorm_package(job_id: str, request: Request) -> Response:
-    job = await job_or_404(request, job_id)
+async def get_scorm_package(job_id: str, request: Request, principal: CurrentPrincipal) -> Response:
+    job = await job_or_404(request, job_id, principal.owner_id)
     if job.video_key is None:
         raise HTTPException(404, f"job {job_id!r} has no finished video yet")
 

@@ -5,6 +5,7 @@ import { computeMilestones } from './milestone-rules'
 function job(overrides: Partial<JobView>): JobView {
   return {
     jobId: 'j',
+    ownerId: null,
     topic: 'x',
     targetDurationMs: 420_000,
     status: 'succeeded',

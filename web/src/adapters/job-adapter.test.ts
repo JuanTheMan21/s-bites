@@ -98,3 +98,16 @@ describe('toJobView', () => {
     expect(toJobView(withoutScene).segments[0]!.hasScene).toBe(false)
   })
 })
+
+describe('toJobView owner mapping (T38A)', () => {
+  it('carries owner_id through as ownerId', () => {
+    expect(toJobView({ ...baseDto, owner_id: 'tenant.object' }).ownerId).toBe('tenant.object')
+  })
+
+  it('tolerates a job record written before owners existed', () => {
+    // owner_id is nullable on the backend precisely so job.json blobs and LangGraph checkpoints
+    // predating T38A still load. The frontend has to survive the same value.
+    expect(toJobView({ ...baseDto, owner_id: null }).ownerId).toBeNull()
+    expect(toJobView(baseDto).ownerId).toBeNull()
+  })
+})

@@ -33,6 +33,7 @@ from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.app import create_app
+from api.token_verifier import EntraConfig, EntraTokenVerifier
 from config import build_adapters
 
 load_dotenv()
@@ -57,11 +58,41 @@ def _required_int(name: str) -> int:
         raise RuntimeError(f"{name} must be an integer, got {value!r}") from exc
 
 
+def _build_verifier() -> EntraTokenVerifier | None:
+    """``AUTH_ENV`` selects the identity stack, exactly as ``QUEUE_ENV``/``EVENTS_ENV``/
+    ``RENDER_ENV`` select theirs.
+
+    ``ENTRA_TENANT_ID`` is what makes this the same code in both worlds: ``common`` accepts any
+    Microsoft identity (all this project's own personal-MSA tenant can do, since that directory
+    has exactly one user in it), while a tenant GUID paired with ``ENTRA_ALLOWED_TENANTS`` is an
+    ordinary single-tenant enterprise app -- the shape a company deployment would use, where only
+    that company's directory may sign in.
+    """
+    if os.environ.get("AUTH_ENV", "none").strip().lower() != "entra":
+        return None
+    client_id = os.environ.get("ENTRA_CLIENT_ID", "").strip()
+    if not client_id:
+        raise RuntimeError("AUTH_ENV=entra requires ENTRA_CLIENT_ID (the app registration's id).")
+    allowed = {
+        tid.strip() for tid in os.environ.get("ENTRA_ALLOWED_TENANTS", "").split(",") if tid.strip()
+    }
+    return EntraTokenVerifier(
+        EntraConfig(
+            tenant_id=os.environ.get("ENTRA_TENANT_ID", "common").strip() or "common",
+            client_id=client_id,
+            allowed_tenants=frozenset(allowed),
+            required_scope=os.environ.get("ENTRA_REQUIRED_SCOPE", "").strip(),
+            required_app_role=os.environ.get("ENTRA_REQUIRED_APP_ROLE", "").strip(),
+        )
+    )
+
+
 app = create_app(
     build_adapters(),
     frame_budget=_required_int("FRAME_BUDGET"),
     fps=_required_int("FPS"),
     run_worker=os.environ.get("RUN_INPROC_WORKER", "true").strip().lower() != "false",
+    verifier=_build_verifier(),
 )
 
 # The Vite dev server (default :5173) and its production origin are otherwise blocked outright --

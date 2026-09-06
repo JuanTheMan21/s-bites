@@ -36,26 +36,34 @@ from typing import Protocol, TypeVar, Generic, Literal, Self, TypeAlias
 # Prefer X | None over Optional[X] (3.10+), and collections.abc over typing for containers
 from collections.abc import Sequence, Mapping, Callable
 
+
 def find_user(user_id: int | str) -> dict[str, str] | None: ...
+
 
 # Protocol for a structural shape inside core/ that doesn't need a full ABC
 class Rankable(Protocol):
     def rank_key(self) -> float: ...
 
+
 def top_n(items: Sequence[Rankable], n: int) -> list[Rankable]:
     return sorted(items, key=lambda x: x.rank_key(), reverse=True)[:n]
+
 
 # Generic class
 T = TypeVar("T")
 
+
 class Cache(Generic[T]):
     def __init__(self) -> None:
         self._data: dict[str, T] = {}
+
     def get(self, key: str) -> T | None:
         return self._data.get(key)
 
+
 # Literal for a closed set of string values (e.g. RUNTIME_ENV)
 RuntimeEnv: TypeAlias = Literal["local", "azure"]
+
 
 # Self for fluent builders
 class Builder:
@@ -63,8 +71,10 @@ class Builder:
         ...
         return self
 
+
 # Exhaustiveness checking on a closed enum/Literal
 from typing import assert_never
+
 
 def handle(env: RuntimeEnv) -> str:
     if env == "local":
@@ -94,6 +104,7 @@ Relevant anywhere the pipeline fans out concurrent adapter calls (TTS, LLM, rend
 import asyncio
 from asyncio import TaskGroup, Semaphore
 
+
 # Structured concurrency (3.11+) - prefer over asyncio.gather when any task can fail
 async def process_batch(items: list[int]) -> list[int]:
     async with TaskGroup() as tg:
@@ -101,13 +112,16 @@ async def process_batch(items: list[int]) -> list[int]:
     return [t.result() for t in tasks]
     # a single failing task cancels the rest and raises ExceptionGroup - no silent partial results
 
+
 # Semaphore for bounded fan-out (the pattern behind AZURE_OPENAI_MAX_CONCURRENCY)
 class RateLimiter:
     def __init__(self, max_concurrent: int) -> None:
         self._semaphore = Semaphore(max_concurrent)
+
     async def process(self, item: str) -> str:
         async with self._semaphore:
             return await expensive_call(item)
+
 
 # Timeout a single call rather than letting a hung adapter block the graph
 async def fetch_with_timeout(coro, timeout: float):
@@ -117,11 +131,13 @@ async def fetch_with_timeout(coro, timeout: float):
     except TimeoutError:
         raise ProviderUnavailable("timed out") from None
 
+
 # Async context manager for a resource that needs guaranteed cleanup
 class AsyncResource:
     async def __aenter__(self) -> Self:
         self._conn = await connect()
         return self
+
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         await self._conn.close()
 ```
@@ -139,12 +155,14 @@ offline). Fixtures and fakes are how that holds.
 import pytest
 from collections.abc import Iterator
 
+
 # Fixture with cleanup - the fake-adapter pattern this project's tests rely on
 @pytest.fixture
 def fake_tts_provider() -> Iterator[TTSProvider]:
     provider = FakeTTSProvider()
     yield provider
     provider.reset()
+
 
 # Parametrize over the interesting cases, not one test per case
 @pytest.mark.parametrize(
@@ -155,14 +173,17 @@ def fake_tts_provider() -> Iterator[TTSProvider]:
 def test_tier_resolution(duration_ms: int, expected_tier: int) -> None:
     assert resolve_tier(duration_ms) == expected_tier
 
+
 # Async test
 @pytest.mark.asyncio
 async def test_synthesize_returns_measured_duration(fake_tts_provider: TTSProvider) -> None:
     result = await fake_tts_provider.synthesize("hello", Path("out.wav"))
     assert result.duration_ms > 0
 
+
 # Mock only at the adapter boundary - never mock core/ business logic itself
 from unittest.mock import AsyncMock
+
 
 async def test_retries_on_rate_limit() -> None:
     mock_client = AsyncMock()

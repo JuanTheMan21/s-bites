@@ -10,6 +10,7 @@ export { ApiError } from '@/api/errors'
 export function toJobView(dto: VideoJobDto): JobView {
   const {
     job_id,
+    owner_id,
     topic,
     target_duration_ms,
     status,
@@ -21,6 +22,7 @@ export function toJobView(dto: VideoJobDto): JobView {
   } = dto
   return {
     jobId: job_id,
+    ownerId: owner_id ?? null,
     topic,
     targetDurationMs: target_duration_ms,
     status,

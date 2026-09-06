@@ -99,7 +99,15 @@ class JobRunner:
             raise
 
     async def _run_one_settling_the_receipt(self, queued: QueuedJob) -> None:
-        job = await self._store.load(queued.job_id)
+        # T38A: job records are stored under their owner's prefix, so a job_id alone can no longer
+        # find one. The owner rides along in the queue payload -- a field QueuedJob has always had
+        # and that was always `{}` until now, so this needed no JobQueue signature change and no
+        # adapter-parity work. A message enqueued before T38A has no owner_id; it fails loudly
+        # here rather than being silently skipped.
+        owner_id = queued.payload.get("owner_id")
+        if not owner_id:
+            raise ValueError(f"queued job {queued.job_id!r} carries no owner_id in its payload")
+        job = await self._store.load(owner_id, queued.job_id)
         job = job.model_copy(update={"status": JobStatus.RUNNING})
         await self._store.save(job)
 

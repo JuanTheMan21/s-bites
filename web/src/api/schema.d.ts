@@ -4,6 +4,51 @@
  */
 
 export interface paths {
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whoami
+         * @description Who the caller is, as this API sees them. The frontend uses it to confirm the session
+         *     cookie actually took, which is otherwise invisible to it (the cookie is ``HttpOnly``).
+         */
+        get: operations["whoami_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Session
+         * @description Exchange a bearer token for the session cookie the browser-native URLs need.
+         *
+         *     ``bearer_only=True``: this is the one route that must never accept the cookie it issues.
+         *     Otherwise a cross-site request could silently refresh a session the user believes has lapsed.
+         */
+        post: operations["create_session_auth_session_post"];
+        /** End Session */
+        delete: operations["end_session_auth_session_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs": {
         parameters: {
             query?: never;
@@ -207,6 +252,18 @@ export interface components {
             target_duration_ms: number;
         };
         /**
+         * Principal
+         * @description The authenticated caller. ``owner_id`` is the only field anything downstream depends on.
+         */
+        Principal: {
+            /** Owner Id */
+            owner_id: string;
+            /** Name */
+            name?: string | null;
+            /** Username */
+            username?: string | null;
+        };
+        /**
          * RenderOutcome
          * @description One segment's own render history: how many attempts it took, what geometry findings fired
          *     along the way, and whether re-authoring or the safe fallback ended up doing the work.
@@ -326,6 +383,11 @@ export interface components {
             /** Job Id */
             job_id: string;
             /**
+             * Owner Id
+             * @description T38A: who submitted this job -- '{tid}.{oid}' from their Entra token, or 'dev.local' under AUTH_ENV=none. Also the storage-key prefix every artifact of this job sits under (api/job_store.py), which is what makes ownership structural rather than a check each route has to remember. Defaults to None only so job records and LangGraph checkpoints written before T38A still load under this model's extra='forbid'; a job submitted through the API always has one.
+             */
+            owner_id?: string | null;
+            /**
              * Topic
              * @description The prompt as the user typed it.
              */
@@ -399,6 +461,64 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    whoami_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Principal"];
+                };
+            };
+        };
+    };
+    create_session_auth_session_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Principal"];
+                };
+            };
+        };
+    };
+    end_session_auth_session_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_jobs_jobs_get: {
         parameters: {
             query?: never;

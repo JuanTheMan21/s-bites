@@ -39,7 +39,10 @@ async def test_a_job_store_failure_before_the_try_block_still_releases_the_recei
     store = JobStore(adapters.storage)  # no job record ever saved -- store.load() below 404s
     runner = JobRunner(adapters, store, adapters.events, frame_budget=0, fps=24)
 
-    receipt = await queue.enqueue("job-1", {})
+    # A real owner_id in the payload (T38A) so the load below still fails for the reason this
+    # test is about -- no job record -- rather than on the missing-owner guard, which is a
+    # different failure with a different meaning.
+    receipt = await queue.enqueue("job-1", {"owner_id": "dev.local"})
     queued = await queue.dequeue(timeout_s=1.0)
     assert queued is not None
 

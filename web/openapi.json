@@ -5,6 +5,53 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/auth/me": {
+      "get": {
+        "summary": "Whoami",
+        "description": "Who the caller is, as this API sees them. The frontend uses it to confirm the session\ncookie actually took, which is otherwise invisible to it (the cookie is ``HttpOnly``).",
+        "operationId": "whoami_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Principal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/session": {
+      "post": {
+        "summary": "Create Session",
+        "description": "Exchange a bearer token for the session cookie the browser-native URLs need.\n\n``bearer_only=True``: this is the one route that must never accept the cookie it issues.\nOtherwise a cross-site request could silently refresh a session the user believes has lapsed.",
+        "operationId": "create_session_auth_session_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Principal"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "End Session",
+        "operationId": "end_session_auth_session_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
     "/jobs": {
       "get": {
         "summary": "List Jobs",
@@ -485,6 +532,42 @@
         ],
         "title": "JobSubmission"
       },
+      "Principal": {
+        "properties": {
+          "owner_id": {
+            "type": "string",
+            "title": "Owner Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "type": "object",
+        "required": [
+          "owner_id"
+        ],
+        "title": "Principal",
+        "description": "The authenticated caller. ``owner_id`` is the only field anything downstream depends on."
+      },
       "RenderOutcome": {
         "properties": {
           "segment_index": {
@@ -697,6 +780,18 @@
           "job_id": {
             "type": "string",
             "title": "Job Id"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id",
+            "description": "T38A: who submitted this job -- '{tid}.{oid}' from their Entra token, or 'dev.local' under AUTH_ENV=none. Also the storage-key prefix every artifact of this job sits under (api/job_store.py), which is what makes ownership structural rather than a check each route has to remember. Defaults to None only so job records and LangGraph checkpoints written before T38A still load under this model's extra='forbid'; a job submitted through the API always has one."
           },
           "topic": {
             "type": "string",

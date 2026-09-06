@@ -1,3 +1,4 @@
+import { getAccessToken } from '../auth/token'
 import { apiClient } from './client'
 import { artifactUrls } from './artifact-urls'
 import { ApiError } from './errors'
@@ -47,7 +48,13 @@ export const resumeJob = (jobId: string): Promise<VideoJobDto> =>
  * response (it declares `unknown`), so a plain `fetch` is exactly as typed as the generated
  * client would be, with less indirection. */
 export async function getSegmentScene(jobId: string, index: number): Promise<unknown> {
-  const response = await fetch(artifactUrls.segmentScene(jobId, index))
+  // Easy to miss: this bypasses `apiClient`, so the bearer middleware in `client.ts` never runs
+  // for it. It gets its credentials explicitly instead (T38A).
+  const token = await getAccessToken()
+  const response = await fetch(artifactUrls.segmentScene(jobId, index), {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    credentials: 'include',
+  })
   if (!response.ok) {
     let body: unknown
     try {

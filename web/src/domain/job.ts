@@ -53,6 +53,11 @@ export interface SegmentView {
 
 export interface JobView {
   jobId: string
+  /** Who submitted it (T38A). Never used to decide what to show -- the API only ever returns
+   * jobs the caller owns, so filtering on this in the client would be re-implementing an
+   * authorisation decision the backend has already made, badly. It is here to key per-user
+   * client state (`features/achievements/seen-store.ts`) and for display. */
+  ownerId: string | null
   topic: string
   targetDurationMs: number
   status: JobStatus

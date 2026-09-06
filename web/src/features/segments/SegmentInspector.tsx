@@ -30,6 +30,8 @@ export function SegmentInspector({ jobId, segment, onClose }: Props) {
           {segment.clipKey && (
             <video
               controls
+              // See VideoPlayer.tsx: without this the cookie is not sent and the clip 401s.
+              crossOrigin="use-credentials"
               className="w-full rounded-md border border-ink-300/25 bg-ink-900"
               src={artifactUrls.segmentClip(jobId, segment.index)}
             />

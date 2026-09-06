@@ -1163,22 +1163,74 @@ CONCURRENCY=1` is a conservative starting number, not tuned against real sustain
 budget's $50/month amount is a placeholder.
 **Depends:** T34 — met.
 
-### T38 — Identity, per-user ownership, the shareable link · `todo`
-Microsoft Entra ID sign-in (workforce/single-tenant — the company tenant, per user decision),
-token validation in the API, an `owner_id` recorded on every job at submission and enforced on all
-eight job-scoped routes (`/jobs`, `/jobs/{id}`, `/jobs/{id}/resume`, `/jobs/{id}/events`, and the
-four artifact/segment/scorm routes) — a wrong owner gets a 404, not a 403, so a job's existence
-isn't leaked. `web/`'s own `seen-store.ts` already documents "no auth/user model in this backend
-at all yet"; this is what closes that gap. Two details the architecture writeup flags as easy to
-get wrong: the browser's `EventSource` cannot send an `Authorization` header, so the SSE endpoint
-needs a different auth mechanism than the rest of the REST surface; the Blob SAS URL
-`api/artifact_response.py` already hands back for downloads currently lives for an hour, which
-should drop to minutes once it's a bearer capability guarding real per-user content. Frontend
-deployed to Azure Static Web Apps — this is the task that produces the link the user can actually
-send someone.
-**DoD:** two different signed-in users each submit a job and can only ever see, list, or download
-their own.
-**Depends:** T35.
+### T38A — Identity and per-user ownership · `done`
+**Split from T38 during this task's own planning** (the user's explicit choice, to keep each half
+a normal-sized session) — T38A is identity + ownership + local verification; T38B (below) is the
+Static Web Apps deploy and the public link.
+
+**T38's original premise was false, and was reopened rather than worked around (D183-D184):** the
+task text specified "workforce/single-tenant — the company tenant, per user decision", but the
+actual Azure account is a personal Microsoft account whose tenant contains exactly one user —
+single-tenant sign-in cannot mean anything against a directory of one, and no decisionlog entry
+existed to justify the original choice. Resolved by making tenancy a runtime config value rather
+than a code fork: `ENTRA_TENANT_ID=common` (this deployment's real setting) accepts any Microsoft
+identity; `ENTRA_TENANT_ID=<guid>` + `ENTRA_ALLOWED_TENANTS=<same guid>` is an ordinary
+single-tenant enterprise app, the shape the user's actual employer would use. The validation code
+is identical either way (Microsoft's tenant-independent validation is a documented strict superset
+of single-tenant validation) — this is a config change away from the originally-specified shape
+whenever a real multi-tenant deployment exists to point it at.
+
+**What shipped:** `api/token_verifier.py` + `api/entra_keys.py` (the full documented token
+validation algorithm — signing-key issuer check, `tid`/`iss` cross-check, `alg` pinning, audience/
+scope/app-role checks — verified against locally-minted RS256 tokens and live against Microsoft's
+real `/common` keys endpoint); `api/auth.py` (the `Principal` dependency, split into
+`current_principal` for reads and `mutating_principal` for writes — see below); `owner_id` on
+`core/video_job.py::VideoJob` (nullable, so pre-existing records still deserialize);
+**ownership enforced by the storage key itself** (`api/job_store.py`, D185) rather than an `if`
+check on any route — a wrong owner cannot address another owner's job record at all, so it hits
+the same 404 path a genuinely absent job does, on all eleven job-scoped routes without exception;
+`owner_id` threaded to the worker via `QueuedJob.payload` (existed since T34, always `{}` until
+now — zero interface or adapter-parity change); SAS expiry split by consumption pattern rather
+than one flat "minutes" value (D186, streamed media 900s, one-shot downloads 300s — the task
+text's literal wording would have broken mid-playback scrubbing); the session cookie
+(`HttpOnly; Secure; SameSite=None`) that authenticates the seven browser-native URLs
+`EventSource`/`<video src>`/`<a href download>` cannot attach a header to; the full frontend MSAL
+integration (`web/src/auth/`, `web/src/adapters/auth-adapter.ts`, `SignInGate`/`AccountMenu`).
+
+**One real bug found and fixed during the build itself, not by review (D187):** `POST
+/jobs/{id}/resume` takes no request body, so the necessarily `SameSite=None` session cookie
+created a CSRF hole — a cross-site HTML form could trigger it with a victim's cookie riding along,
+with no CORS preflight to stop it. Fixed by requiring the bearer header specifically on every
+state-changing route and refusing the cookie there, even though reads still accept it.
+
+**DoD, partially verified:** structurally proven via fakes (`tests/test_api_ownership.py`, every
+one of the eleven routes, both that a non-owner gets 404 and that the 404 is indistinguishable
+from a genuinely absent job) and live-verified up to the point of an actual sign-in (all 12 real
+routes return 401 unauthenticated against a running server; a forged `alg: none` token is
+rejected; clicking "Sign in with Microsoft" in a real browser reaches an actual Microsoft login
+page, validating the whole registration end to end). **Signing in as two real Microsoft accounts
+and confirming cross-visibility was not completed this session** — flagged in `handoff.md` as the
+one remaining DoD step for a human to actually do.
+**Depends:** T35 — met.
+
+### T38B — Static Web Apps deploy and the public link · `todo`
+**Split from T38 alongside T38A** (see above) — this is what produces the link the user can
+actually send someone; nothing in T38A needed a deployed frontend to verify.
+
+Add a Static Web Apps resource to `infra/main.bicep` (two placeholder comments already name this
+task — `main.bicep:3-5` and the `WEB_ORIGINS` line); build and deploy `web/` for production (no
+frontend step exists yet in `scripts/deploy_cloud.sh`, and no `.github/workflows/` exists for the
+SWA GitHub Actions path either); once the SWA hostname is known, add it to the deployed API's
+`WEB_ORIGINS` and as a **second** SPA redirect URI on the `s-bites Studio` app registration T38A
+created (`az ad app update`, not a new registration — query parameters aren't allowed in the URI
+for this sign-in audience); set the deployed frontend's build-time `VITE_ENTRA_*` values to match
+T38A's local ones. Also the natural time to add a `USER` directive to the `Dockerfile` (still root
+as of T38A) now that the deployment is genuinely public-facing, and to decide what D141's
+`Copy Link` UI feature should mean now that a shared `/jobs/:jobId` URL correctly 404s for anyone
+but the owner.
+**DoD:** two different signed-in users each submit a job through the deployed public URL and can
+only ever see, list, or download their own.
+**Depends:** T38A — met.
 
 ---
 

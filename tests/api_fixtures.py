@@ -3,6 +3,10 @@ FastAPI app, so the app under test is exactly what production runs -- only the s
 underneath differ.
 """
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from api.app import create_app
 from config import Adapters
 from tests.fakes import (
     FakeEventChannel,
@@ -36,3 +40,42 @@ def fake_adapters(*, segment_count: int = API_TEST_SEGMENT_COUNT) -> Adapters:
         render=FakeRenderBackend(),
         events=FakeEventChannel(),
     )
+
+
+class StubVerifier:
+    """Stands in for ``EntraTokenVerifier`` in tests about what happens *after* a token is known
+    to be good -- ownership, sessions, 401s. The token string simply *is* the owner id, so a test
+    can sign in as anyone without a tenant, a network call, or a signing key.
+
+    The real verifier's own algorithm is tested against locally-minted RSA tokens in
+    ``tests/test_token_verifier.py``; mixing the two concerns would make both harder to read.
+    """
+
+    async def verify(self, token: str) -> dict[str, str]:
+        tid, _, oid = token.partition(".")
+        return {"tid": tid, "oid": oid, "name": token, "preferred_username": f"{token}@example"}
+
+    async def aclose(self) -> None:
+        return None
+
+
+def authenticated_app() -> FastAPI:
+    """An app with authentication switched on, backed by ``StubVerifier``."""
+    return create_app(
+        fake_adapters(),
+        frame_budget=FRAME_BUDGET,
+        fps=FPS,
+        run_worker=False,
+        verifier=StubVerifier(),
+    )
+
+
+def bearer(owner_id: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {owner_id}"}
+
+
+def https_client(app: FastAPI) -> TestClient:
+    """The session cookie is ``Secure``, deliberately and permanently -- ``SameSite=None``
+    requires it. A cookie jar will not send a Secure cookie over plain http, so any test that
+    exercises the cookie has to speak https, exactly as a real browser does."""
+    return TestClient(app, base_url="https://testserver")
