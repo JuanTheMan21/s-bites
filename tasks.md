@@ -1116,23 +1116,52 @@ tests/test_job_queue_parity.py tests/test_event_channel_parity.py` green (12/12)
 namespace; full offline `pytest` green; `ruff` clean; boundary/line-count checks clean.
 **Depends:** T23, T28 — met.
 
-### T35 — Container image, IaC, first real cloud render · `todo`
-Package the pipeline (already Linux-portable after T34 — see the gotcha below) into one container
-image; Bicep templates for the resources named in the architecture writeup (Container Apps
-environment, ACR, the API and worker container apps, Static Web Apps, Key Vault, a subscription
-budget); deploy to a dedicated resource group; run one real job end to end with nothing executing
-on a developer machine, and measure its real cloud latency against the local baseline. That
-measurement is what decides whether a future task ever needs to split rendering across a pool of
-containers (deferred, not designed away — the render backend interface already makes that a new
-implementation later, not a rewrite).
-**Gotcha found during T34 planning, not yet fixed:** `adapters/local/hyperframes_process.py`'s
-stalled-process kill shells out to Windows `taskkill /T /F`; on Linux this silently no-ops
-(`except OSError: pass`), leaving orphaned Chrome/Node children running on every render timeout —
-a real portability bug this task must fix before the image is trustworthy under sustained load.
-**DoD:** a real job produced end to end in the cloud, nothing executing locally; the image contains
-both browsers (Playwright's Chromium *and* HyperFrames' Chrome Headless Shell, per D15) plus
-vendored GSAP, since the scaffold's CDN pull will not survive a locked-down container.
-**Depends:** T34.
+### T35 — Container image, IaC, first real cloud render · `done`
+Fixed the Linux `taskkill` portability bug first (`adapters/local/hyperframes_process.py`'s
+`_kill_tree` now branches on `sys.platform`: Windows unchanged, POSIX uses
+`os.killpg(os.getpgid(...), SIGKILL)` against a process group `run()` now isolates via
+`start_new_session=True`). One `Dockerfile` (Python 3.11-slim + Node 24 + ffmpeg + both browsers —
+Playwright's Chromium and HyperFrames' own Chrome Headless Shell — plus vendored GSAP, already in
+place since a prior task); `infra/main.bicep` (managed identity, ACR, Key Vault, Log Analytics, a
+Consumption-profile Container Apps environment, two Container Apps — `api` pinned at
+`minReplicas: 1`, `worker` scaling 0→3 on Service Bus queue depth via KEDA); `infra/budget.bicep`
+(subscription-scope, three alert thresholds); `scripts/deploy_cloud.sh` orchestrating all of it.
+Deployed to a new dedicated resource group (`rg-sbites-cloud`, eastus). **Static Web Apps and the
+subscription budget's real value moved to T38** — nothing in this task needs a deployed frontend,
+and the budget's own alerting is wired but its amount/thresholds are placeholders until real usage
+data exists.
+
+**Six real bugs found live during the deployment itself, all fixed, `decisionlog.md` D178-D182 has
+the full reasoning for each:** a wrong `AcrPull` role GUID recalled from memory rather than looked
+up (D-adjacent, caught immediately by the first deployment attempt); `az acr build`'s local
+tar-packing hanging indefinitely on this project's own 34k-file `artifacts/` directory (D178, fixed
+by staging a minimal build context); the Container Apps environment silently capping every
+container at 2 vCPU/4GiB without an explicit `workloadProfiles` declaration (D179, plus a real
+operational trap — an environment created without one can't have it added after the fact, only
+recreated); bash `source .env` silently truncating both connection-string secrets at their first
+semicolon (D180, fixed via `python-dotenv` instead); `az containerapp update --image` silently
+no-op'ing when the image string is unchanged even though the tag's real content changed (D181, now
+forces `--revision-suffix`); and a missing `unzip` (HyperFrames' Chrome Headless Shell install
+needs it, `python:3.11-slim` doesn't ship it) plus a missing `scorm/` package in the staged build
+context (`api/scorm.py`'s own import), both found as real container crash logs, not guessed.
+**Two more found by `project-reviewer` after the deployment already worked, both fixed before
+checkpoint:** the POSIX kill fix's own safety depends entirely on `run()`'s `start_new_session`
+kwarg, which no test had actually pinned (D182 — a regression there would SIGKILL the container's
+own process, not just the orphan); and `deploy_cloud.sh`'s own re-run path wasn't actually safe
+against a Key Vault soft-delete collision or the budget's immutable start date (D181).
+
+**DoD, verified for real:** a job (`how a hash table works`, 4 segments) submitted through the
+deployed API's public FQDN was claimed and entirely processed by the worker (scaled up from zero
+via KEDA), reaching `status: succeeded` with a real `video_key` in ~5 minutes wall-clock —
+comparable to this project's own local/T34 baseline for an equivalent short job, not materially
+worse. Confirmed via the artifact endpoint's real 307 redirect to a live Blob SAS URL, not just the
+job record. `pytest` green, `ruff` clean, boundary/line-count checks clean (this task touches no
+`core/` file at all).
+**Known gaps, not fixed, deliberately deferred:** the image runs as root (no `USER` directive) —
+fine for a POC, worth hardening before this is a long-lived production image; `RENDER_MAX_
+CONCURRENCY=1` is a conservative starting number, not tuned against real sustained load; the
+budget's $50/month amount is a placeholder.
+**Depends:** T34 — met.
 
 ### T38 — Identity, per-user ownership, the shareable link · `todo`
 Microsoft Entra ID sign-in (workforce/single-tenant — the company tenant, per user decision),

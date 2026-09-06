@@ -4218,3 +4218,110 @@ helper function with no reason to live inside the class, the same "split by resp
 `tests/test_runner_receipt_safety.py`, constructed directly against `JobRunner` and `FakeJobQueue`
 (no graph, no ffmpeg, no FastAPI) since the property under test is receipt bookkeeping, not
 anything the graph does.
+
+## 2026-09-06 · T35 — Container image, IaC, first real cloud render
+
+### D178 -- `az acr build`'s remote build context is staged in a clean temp directory containing
+only the packages the Dockerfile actually `COPY`s, never the repo root directly.
+
+**Rejected:** pointing `az acr build` straight at the repo root (`.`), relying on `.dockerignore`
+to prune it, the same way a local `docker build` would.
+
+**Reasoning:** found live -- the first real attempt hung indefinitely at "Packing source code into
+tar to upload," with zero progress for 5+ minutes. Confirmed the cause before working around it:
+`artifacts/` alone holds 34,000+ files accumulated across this whole project's dev history, and
+`az acr build`'s local packing step walks the entire tree *before* `.dockerignore` gets a chance to
+prune anything -- a 34k-entry directory makes that walk pathological regardless of what ends up
+excluded from the final upload. Fixed by staging a temp directory containing exactly what
+`api/main.py`'s own import graph reaches (confirmed by grepping every `from X.`/`import X` in the
+app code, not guessed) plus the Dockerfile/manifests, cutting the real context from ~40k files to
+164. `scripts/deploy_cloud.sh` does this staging itself, not as a one-off shortcut.
+
+### D179 -- The Container Apps managed environment declares an explicit Consumption
+`workloadProfiles` entry; omitting it silently caps every container at 2 vCPU / 4GiB.
+
+**Rejected:** the first version of `infra/main.bicep`, which created the managed environment with
+no `workloadProfiles` property at all, relying on "Workload profiles (v2) is the default for new
+environments" (true of the *type* of environment ARM creates, not of whether a workload profile is
+actually attached to it).
+
+**Reasoning:** found live -- the first real deployment failed with
+`ContainerAppInvalidResourceTotal`, rejecting the worker's requested 4 vCPU / 8GiB with the exact
+CPU:memory combination table this project's own architecture writeup (§V) had already documented
+as the *Consumption-only (legacy)* ceiling. Omitting `workloadProfiles` silently produces that
+legacy behavior rather than a real Workload-profiles-v2 Consumption profile, with no warning at
+declare time -- only at container-creation time, and only if something actually requests more than
+the hidden 2/4 ceiling. Fixed by declaring `workloadProfiles: [{name: 'Consumption',
+workloadProfileType: 'Consumption'}]` explicitly and setting `workloadProfileName: 'Consumption'`
+on both Container Apps. **Real operational trap found in the same session:** once an environment is
+created *without* a workload profile, Azure refuses to add one after the fact
+(`EnvironmentNotCreatedWithWorkloadProfile`) -- the environment (and anything already deployed
+into it) had to be deleted and recreated from scratch, not patched.
+
+### D180 -- `scripts/deploy_cloud.sh` builds Bicep deployment parameters from `.env` via
+`python-dotenv`, never bash `source .env`.
+
+**Rejected:** the first version -- `set -a; source .env; set +a`, then bash variable substitution
+into a heredoc-written JSON parameters file.
+
+**Reasoning:** found live, the hard way -- a real deployed container crashed with `ValueError:
+Connection string missing required connection details` (Azure Storage's own SDK, unable to parse
+what it was given). Traced back past Key Vault, past the Bicep deployment, to the parameters file
+itself: bash's `source` parses `KEY=value1;value2;value3` as *three separate commands* separated
+by `;`, silently keeping only the text before the first semicolon as the variable's value and
+running the rest as bogus standalone assignments -- no error, no warning. Both the Storage and
+Service Bus connection strings are exactly this shape (`DefaultEndpointsProtocol=https;
+AccountName=...;AccountKey=...;...`), so both were silently truncated to ~30 characters before ever
+reaching Azure. `python-dotenv` is already a project dependency (`config.py`'s own parser) and
+handles embedded semicolons correctly by construction; building the whole parameters JSON in Python
+via `dotenv_values()` + `json.dump` sidesteps bash quoting fragility entirely rather than patching
+this one instance of it. **General lesson, matching this project's own repeated one (D89/D106/
+D109/D119/D124/D172/D174): a value that "looks fine" in a shell variable is not proof it survived
+the pipeline it's about to cross -- checking the length/shape of what a downstream system actually
+receives is what caught this, printing `$VAR` on its own would not have (bash's own truncated value
+looks identical to a correctly-quoted one when echoed back by the same shell that broke it).**
+
+### D181 -- `az containerapp update --image` requires an explicit `--revision-suffix` to actually
+roll out a rebuilt image under an unchanged tag; `az deployment` re-runs need to tolerate their own
+prior partial state (a soft-deleted Key Vault, an existing budget).
+
+**Rejected:** treating `az containerapp update --image <acr>/s-bites:latest` (no suffix) as
+sufficient after every rebuild; treating one real deployment attempt as proof the whole script is
+"safe to re-run from scratch" as its own header comment claimed.
+
+**Reasoning:** found live and by `project-reviewer`, not assumed. Container Apps dedupes revision
+creation on the literal image *string*, not the tag's resolved digest -- passing
+`sbitescloudgixkvw.azurecr.io/s-bites:latest` twice in a row, even after a genuinely different
+image was pushed to that tag, silently kept serving the old revision with no error, which is what
+made the `scorm/` fix (D-adjacent, below) initially look like it hadn't worked at all. Fixed with
+`--revision-suffix "rev$(date +%s)"` on every update. Separately, `project-reviewer` caught two
+real re-run gaps this session's own single successful deployment never exercised: the Key Vault
+name is deterministic
+(`kv-sbites-${take(uniqueString(resourceGroup().id), 6)}`), so recovering from a partial failure by
+deleting and recreating the same-named resource group -- an ordinary recovery step -- collides with
+a soft-deleted vault of the identical name still reserved tenant-wide (Key Vault's soft-delete
+cannot be disabled); and the budget's `timePeriod.startDate` (derived from `utcNow()`) is immutable
+once set, so a re-run in a later calendar month would fail updating it. Both fixed in
+`scripts/deploy_cloud.sh`: a `az keyvault list-deleted` + purge pass before every deploy, and an
+existence check before the budget deployment that skips rather than attempts an illegal update.
+
+### D182 -- `adapters/local/hyperframes_process.py::_kill_tree`'s new POSIX branch has a dedicated
+test pinning `run()`'s own `start_new_session=True`, not just `_kill_tree` in isolation.
+
+**Rejected:** the coverage as first written -- `tests/test_hyperframes_process_kill_tree.py`
+exercised `_kill_tree` directly against a fake `Process`, proving the function's own logic correct
+but never proving the precondition its safety depends on.
+
+**Reasoning:** found by `project-reviewer`, not live -- this is exactly the class of gap that never
+surfaces until it's already a production incident. `_kill_tree`'s POSIX path
+(`os.killpg(os.getpgid(proc.pid), signal.SIGKILL)`) is only safe because `run()` puts the
+HyperFrames child into its *own* process group first (`start_new_session=True`). Without that one
+kwarg, the child inherits the *same* group as the Python process running it -- meaning a stalled
+render's timeout would `SIGKILL` the entire api or worker container process, not just the orphaned
+render. That is a strictly worse failure than the leak this task exists to fix, and nothing in the
+original test suite would have caught a future refactor silently dropping the kwarg (a `run()`
+subprocess-spawning helper extracted for reuse, a platform-conditional dict "simplified" by someone
+who didn't know why it was there). Added
+`test_run_passes_start_new_session_on_posix_but_not_windows`, asserting the actual kwarg
+`asyncio.create_subprocess_exec` receives on each platform, so this coupling is pinned by a
+machine-checked property rather than by a docstring someone has to keep reading.

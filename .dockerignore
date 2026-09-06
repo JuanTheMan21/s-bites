@@ -1,0 +1,16 @@
+# The frontend (T38's own Static Web Apps deploy) and everything offline/dev-only. Neither the
+# api nor the worker Container App needs any of this to run.
+web/
+node_modules/
+.venv/
+artifacts/
+renders/
+.git/
+.claude/
+__pycache__/
+*.pyc
+*.png
+tests/
+.env
+.env.example
+*.md

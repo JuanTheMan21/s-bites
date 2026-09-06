@@ -13,7 +13,9 @@ that has not run ``npm install`` yet, so this module degrades rather than hard-f
 
 import asyncio
 import contextlib
+import os
 import shutil
+import signal
 import sys
 from pathlib import Path
 
@@ -60,6 +62,10 @@ async def run(
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # POSIX only -- puts the child in its own process group so `_kill_tree` can kill the
+            # whole group (node plus whatever chrome-headless-shell it spawned) on a timeout.
+            # Windows's kill path (taskkill /T) walks the PID tree instead and needs nothing here.
+            **({} if sys.platform == "win32" else {"start_new_session": True}),
         )
     except Exception as exc:
         raise translate(exc, context=context) from exc
@@ -69,8 +75,8 @@ async def run(
     except Exception as exc:
         # A retry after a timeout would otherwise start a second hyperframes process pointed at
         # the same destination while this one is still running -- kill the whole tree, not just
-        # the top PID, since npx wraps node in a small process tree on Windows and Process.kill()
-        # alone leaves node (and any chrome-headless-shell it spawned) running.
+        # the top PID, since npx wraps node in a small process tree and Process.kill() alone
+        # leaves node (and any chrome-headless-shell it spawned) running.
         await _kill_tree(proc)
         raise translate(exc, context=context) from exc
 
@@ -81,20 +87,34 @@ async def run(
 
 
 async def _kill_tree(proc: asyncio.subprocess.Process) -> None:
-    """Best-effort kill of ``proc`` and everything it spawned."""
-    try:
-        killer = await asyncio.create_subprocess_exec(
-            "taskkill",
-            "/T",
-            "/F",
-            "/PID",
-            str(proc.pid),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await killer.wait()
-    except OSError:
-        pass  # taskkill unavailable or the process already exited -- proc.kill() below still tries
+    """Best-effort kill of ``proc`` and everything it spawned.
+
+    **Found by review, not by any test, while planning T35's container image:** the POSIX branch
+    below did not exist until now. Without it, a stalled render on Linux never actually killed
+    anything but the top-level process -- `OSError` from the Windows-only `taskkill` call was
+    caught and silently swallowed, and the fallback `proc.kill()` only ever reached the direct
+    child, leaving node (and any chrome-headless-shell it spawned) running forever. Every render
+    timeout in a container leaked one more orphaned Chrome process. `run()`'s own
+    `start_new_session=True` on POSIX is what makes `os.killpg` below actually reach the whole
+    tree rather than just `proc`'s own PID.
+    """
+    if sys.platform == "win32":
+        try:
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/T",
+                "/F",
+                "/PID",
+                str(proc.pid),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.wait()
+        except OSError:
+            pass  # taskkill unavailable, or the process already exited
+    else:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     with contextlib.suppress(ProcessLookupError):
         proc.kill()
     with contextlib.suppress(Exception):
