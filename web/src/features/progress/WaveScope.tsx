@@ -15,7 +15,18 @@ const SAMPLE_COUNT = 160
 const SCOPE_BG = '#0a0a0d'
 const BRIGHT_COLOR = '#ff9a52'
 const BRIGHT_GLOW = 'rgba(255, 138, 76, 0.55)'
-const DIM_COLOR = 'rgba(255, 255, 255, 0.14)'
+// A real user reported one job's whole progress panel as "just a black box" with only the
+// playhead dot moving -- no console errors at all, ruling out D172's canvas-failure fallback
+// (that path always logs before falling back). Root cause: NOT a crash, a visibility defect.
+// Early in a job (low fillPct -- the common case right after submission, before real per-segment
+// progress exists), the ENTIRE canvas is drawn from this dim/"not yet reached" color, at THREE
+// layers whose own `alpha` multipliers (1, 0.5, 0.3, drawFrame() below) compound with this
+// color's own alpha -- 0.14 base gave effective opacities of 0.14/0.07/0.042 against the
+// `#0a0a0d` background, imperceptible on an ordinary screen. Two jobs "the same prompt, two
+// browsers" looked different only because one had progressed further (a real fillPct) than the
+// other at the moment observed -- not a browser bug. Raised so even the faintest (0.3-multiplier)
+// layer stays visibly a wave, not a rectangle.
+const DIM_COLOR = 'rgba(255, 255, 255, 0.38)'
 
 /** One layer's path: top edge is the wave's envelope-shaped magnitude above centre, bottom edge
  * mirrors it below -- a filled silhouette, not a stroked line, so it reads as one continuous
@@ -207,16 +218,18 @@ export function WaveScope({ seed, fillPct }: Props) {
   }, [canvasFailed])
 
   if (canvasFailed) {
+    // scaleX + transform-origin, not an animated `width` -- a layout property triggers reflow on
+    // every tick, `transform` is compositor-only. Full-width div, scaled down from the left edge.
     return (
       <div className="relative h-[88px] w-full overflow-hidden rounded-md" style={{ background: SCOPE_BG }}>
         <div
           aria-hidden
-          className="absolute inset-y-0 left-0"
+          className="absolute inset-y-0 left-0 w-full origin-left"
           style={{
-            width: `${Math.min(100, Math.max(0, fillPct))}%`,
+            transform: `scaleX(${Math.min(100, Math.max(0, fillPct)) / 100})`,
             background: BRIGHT_COLOR,
             boxShadow: `0 0 14px 2px ${BRIGHT_GLOW}`,
-            transition: 'width 0.2s linear',
+            transition: 'transform 0.2s linear',
           }}
         />
       </div>
