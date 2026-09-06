@@ -1,7 +1,9 @@
 // T35 — resource-group-scope IaC for the cloud-deployed worker/API split.
+// T38B added the Static Web App resource below. Entra app registrations still aren't here --
+// `az ad app` isn't a Bicep-managed resource type, so that stays in scripts/deploy_cloud.sh
+// (T38A already created the registration by hand; T38B's own new redirect URI is a script step).
 //
-// Deliberately NOT here: Static Web Apps and Entra app registrations (T38 — nothing in this
-// task needs a deployed frontend), a subscription budget (a short `az consumption budget create`
+// Deliberately NOT here: a subscription budget (a short `az consumption budget create`
 // step in scripts/deploy_cloud.sh instead -- that's a subscription-scope resource, a separate
 // `targetScope` from everything below, and not worth the split for one resource).
 //
@@ -49,6 +51,18 @@ param azureServiceBusSubscription string = 'api'
 
 param frameBudget int = 9500
 param fps int = 24
+
+// T38B: identity. `authEnv` defaults to 'none' so this template still deploys a working (if
+// unauthenticated) stack if these are left unset -- but this project's own deploy script always
+// passes 'entra' plus the four values below, sourced from the same .env T38A populated. None of
+// these are secret: a SPA client id and a tenant id are public by design (the app registration's
+// own redirect-URI allowlist is what actually constrains use, not keeping the id private).
+param authEnv string = 'none'
+param entraTenantId string = 'common'
+param entraClientId string = ''
+param entraAllowedTenants string = ''
+param entraRequiredScope string = 'Jobs.ReadWrite'
+param entraRequiredAppRole string = ''
 
 @description('Full image reference, e.g. myacr.azurecr.io/s-bites:latest. Placeholder until the real image is built and pushed.')
 param containerImage string = 'mcr.microsoft.com/k8se/quickstart:latest'
@@ -192,6 +206,12 @@ var sharedEnv = [
   { name: 'AZURE_SERVICE_BUS_QUEUE', value: azureServiceBusQueue }
   { name: 'AZURE_SERVICE_BUS_TOPIC', value: azureServiceBusTopic }
   { name: 'AZURE_SERVICE_BUS_SUBSCRIPTION', value: azureServiceBusSubscription }
+  { name: 'AUTH_ENV', value: authEnv }
+  { name: 'ENTRA_TENANT_ID', value: entraTenantId }
+  { name: 'ENTRA_CLIENT_ID', value: entraClientId }
+  { name: 'ENTRA_ALLOWED_TENANTS', value: entraAllowedTenants }
+  { name: 'ENTRA_REQUIRED_SCOPE', value: entraRequiredScope }
+  { name: 'ENTRA_REQUIRED_APP_ROLE', value: entraRequiredAppRole }
   { name: 'AZURE_OPENAI_API_KEY', secretRef: 'openai-key' }
   { name: 'AZURE_SPEECH_KEY', secretRef: 'speech-key' }
   { name: 'AZURE_STORAGE_CONNECTION_STRING', secretRef: 'storage-conn' }
@@ -242,7 +262,10 @@ resource apiApp 'Microsoft.App/containerApps@2025-01-01' = {
           resources: { cpu: json('0.5'), memory: '1Gi' }
           env: union(sharedEnv, [
             { name: 'RUN_INPROC_WORKER', value: 'false' }
-            { name: 'WEB_ORIGINS', value: 'http://localhost:5173' } // placeholder; T38 replaces with the real Static Web Apps origin
+            // T38B: wired to the Static Web App resource's own output in this same deployment,
+            // so there's no manual "come back and set this once you know the URL" step. Local
+            // dev against a deployed backend stays possible alongside it.
+            { name: 'WEB_ORIGINS', value: 'https://${staticSite.properties.defaultHostname},http://localhost:5173' }
           ])
         }
       ]
@@ -298,7 +321,30 @@ resource workerApp 'Microsoft.App/containerApps@2025-01-01' = {
   dependsOn: [acrPullAssignment, keyVaultSecretsUserAssignment]
 }
 
+// T38B: the deployed frontend. Free tier, no linked backend -- the SPA calls the Container Apps
+// API cross-origin via its own build-time VITE_API_BASE (web/src/api/base-url.ts), so none of the
+// Standard-tier "bring your own Functions API" integration applies here. No repositoryUrl/branch
+// either: this project deploys via `scripts/deploy_cloud.sh` + the SWA CLI, not GitHub Actions
+// (there's no .github/workflows/ and nothing else here has one).
+//
+// `location` is NOT the shared `location` param -- confirmed live against this subscription
+// (`az provider show --namespace Microsoft.Web`) that Microsoft.Web/staticSites is only available
+// in Central US, East US 2, West US 2, West Europe, and East Asia. eastus is not on that list,
+// despite every other resource in this file living there. East US 2 is the same physical metro
+// area (Virginia) as the rest of this deployment, and static content itself is served from a
+// global CDN regardless of which region the resource is created in, so this is a region
+// parameter, not an architecture decision -- a resource group's own location doesn't constrain
+// where its children live.
+resource staticSite 'Microsoft.Web/staticSites@2024-11-01' = {
+  name: 'swa-sbites-${suffix}'
+  location: 'eastus2'
+  sku: { name: 'Free', tier: 'Free' }
+  properties: {}
+}
+
 output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
 output apiFqdn string = apiApp.properties.configuration.ingress.fqdn
 output keyVaultName string = keyVault.name
+output staticWebAppName string = staticSite.name
+output staticWebAppUrl string = 'https://${staticSite.properties.defaultHostname}'

@@ -1213,23 +1213,68 @@ and confirming cross-visibility was not completed this session** — flagged in 
 one remaining DoD step for a human to actually do.
 **Depends:** T35 — met.
 
-### T38B — Static Web Apps deploy and the public link · `todo`
+### T38B — Static Web Apps deploy and the public link · `done`
 **Split from T38 alongside T38A** (see above) — this is what produces the link the user can
 actually send someone; nothing in T38A needed a deployed frontend to verify.
 
-Add a Static Web Apps resource to `infra/main.bicep` (two placeholder comments already name this
-task — `main.bicep:3-5` and the `WEB_ORIGINS` line); build and deploy `web/` for production (no
-frontend step exists yet in `scripts/deploy_cloud.sh`, and no `.github/workflows/` exists for the
-SWA GitHub Actions path either); once the SWA hostname is known, add it to the deployed API's
-`WEB_ORIGINS` and as a **second** SPA redirect URI on the `s-bites Studio` app registration T38A
-created (`az ad app update`, not a new registration — query parameters aren't allowed in the URI
-for this sign-in audience); set the deployed frontend's build-time `VITE_ENTRA_*` values to match
-T38A's local ones. Also the natural time to add a `USER` directive to the `Dockerfile` (still root
-as of T38A) now that the deployment is genuinely public-facing, and to decide what D141's
-`Copy Link` UI feature should mean now that a shared `/jobs/:jobId` URL correctly 404s for anyone
-but the owner.
+**The public URL: `https://lively-meadow-05448450f.6.azurestaticapps.net`.**
+
+**What shipped:** a `Microsoft.Web/staticSites` resource in `infra/main.bicep` (Free tier, no
+linked backend — the SPA calls the Container Apps API cross-origin via its own build-time
+`VITE_API_BASE`), with `WEB_ORIGINS` wired to the new resource's own `defaultHostname` output in
+the same deployment so there's no manual post-deploy step; `scripts/deploy_cloud.sh` step 5/6
+(build `web/` for production, deploy via `npx @azure/static-web-apps-cli`) and step 6/6 (add the
+SWA origin as a second SPA redirect URI on the `s-bites Studio` app registration T38A created, via
+a read-then-union `az rest PATCH`, since Graph replaces rather than appends); `web/public/
+staticwebapp.config.json` for SPA fallback routing.
+
+**D188: the Static Web App's region is hardcoded to `eastus2`, independent of every other
+resource's shared `location` param** — confirmed live that `Microsoft.Web/staticSites` isn't
+available in `eastus`, where everything else in this deployment lives (the same trap class as
+D179's `workloadProfiles` requirement). Costs nothing functionally: SWA serves content via a
+global CDN regardless of the resource's own region.
+
+**The real finding of this session, caught only by checking live behavior after redeploying
+(D189): T38A's fully-shipped auth code was silently inactive on the live deployment**, because
+`infra/main.bicep` never had the six Entra env vars (`AUTH_ENV` et al.) — `api/main.py` defaults
+`AUTH_ENV` to `"none"` when unset, so `GET /jobs` on the real deployed API was returning real job
+data to anyone, unauthenticated, the whole time since T38A's own checkpoint. Fixed: all six are
+now real Bicep parameters wired into `sharedEnv`, none secret (a SPA client id and tenant id are
+public by design).
+
+**D190: fixing D189 by redeploying just the Bicep step reset both Container Apps to the
+placeholder image** (no `containerImage` override → `main.bicep`'s own placeholder default, which
+has no `uvicorn` binary — both apps crash-looped). Fixed generally, not just for this one
+incident: `deploy_cloud.sh` now detects an existing built image in the resource group's ACR and
+passes it explicitly whenever one exists, so any future Bicep-only re-run stays safe.
+
+**Two real bugs found by `project-reviewer`, both fixed before checkpoint:** the ACR
+"existing image" guard above originally checked only the CLI's exit status, which is `0` whether
+or not the specific `latest` tag exists — fixed to check actual returned content; the redirect-URI
+union logic crashed with `TypeError` on a fresh app registration with no SPA platform configured
+at all (Graph returns `null`, not `[]`) — fixed with `... or []`.
+
+**Verified live through the real public URL, not just localhost:** all 11 job-scoped routes +
+`/auth/me` return 401 unauthenticated against the real deployed API; CORS preflight from the real
+SWA origin succeeds; a hard refresh on the deployed `/jobs/xyz` returns the app, not a 404
+(proving `staticwebapp.config.json` took effect in the real build); clicking "Sign in with
+Microsoft" from the real deployed origin reaches an actual Microsoft login page with the correct
+`redirect_uri`, no `AADSTS` error — validating the whole registration chain end to end from
+production.
+
+**Not verified this session, the one remaining DoD step: an actual completed sign-in by two real
+Microsoft accounts through the public URL.** Every mechanical piece is proven; nobody has clicked
+through an actual sign-in yet. Flagged in `handoff.md` as the next thing to do.
+
+**Explicitly deferred again, the user's own explicit choice both times:** the Dockerfile's `USER`
+directive (still root) — bundling a live Playwright/HyperFrames/ffmpeg render-verification into an
+already-large infra session was judged not worth it twice now. D141's `Copy Link` UI feature was
+also left exactly as-is; nothing in this task's DoD required redesigning what a shared
+`/jobs/:jobId` link should mean now that it 404s for non-owners.
 **DoD:** two different signed-in users each submit a job through the deployed public URL and can
-only ever see, list, or download their own.
+only ever see, list, or download their own — **structurally verified** (ownership enforcement,
+auth enforcement, CORS, and the sign-in chain all proven live); **the actual two-human sign-in
+itself was not completed this session**.
 **Depends:** T38A — met.
 
 ---
@@ -1422,3 +1467,64 @@ seam (`web/eslint.config.js`): `features/`, `components/`, `routes/` may not imp
 **Verification:** submit a real job from the UI and watch the whole run — the ticker gone, the
 waveform visibly alive throughout *including* the phases with no per-segment signal, and degraded
 segments visibly marked.
+
+### T18M — Fallback-rate root cause, blank-stage timing, fallback card content, in-browser
+playback · `todo`
+**Scoped from a real 15-segment cloud render the user watched after T38B's checkpoint**
+(`eaebea14d7484ef19a82fcd7881f94d3`, "teach me about differential and integral calculus") — full
+diagnosis, evidence, and exact file:line citations are in
+`C:\Users\juant\.claude\plans\t38-final-stretch-of-serialized-pelican.md`; decisionlog D191 has the
+short version. Not built yet — diagnosed and planned only, per the user's explicit instruction to
+do the actual work in its own session.
+
+**Branch split is load-bearing, stated explicitly by the user, and recorded as its own memory
+(`branch-split-cloud-vs-dev.md`): items 1-3 are video-pipeline work and belong on `dev`; item 4
+needs the deployed stack and stays on `cloud`, merged in only after 1-3 land on `dev`.**
+
+1. **Fallback rate 4/15 (27%) — user's explicit target is close to zero, not just improved
+   (`fallback-rate-must-be-near-zero.md`).** One concrete cause found: `clipped_text` is missing
+   from `rendering/geometry_findings.py::_CONTENT_SIZING_CODES` — the third time a real
+   content-sizing code has been omitted from that vocabulary (after `text_occluded` at T18I,
+   `caption_zone_collision` at T18J). Add it, and make the next omission visible (log any
+   unrecognised finding code). Two other failing segments exhausted all 3 retries on the same
+   code every time and currently cannot be diagnosed at all — the failing scene and full finding
+   text are discarded when `render_scene.py` falls back, `RenderOutcome` keeps only codes. Preserve
+   them. Do not guess at a fix for those two beyond what the preserved data actually shows.
+2. **A confirmed 10-second blank stage** (video seconds ~48-58 on the evidence job, matching a
+   complaint the user had already raised before this session traced it). Root cause is precise:
+   `rendering/renderable.py`'s `entrance_start` for a single-block scene is the resolved
+   narration-anchor time with no upper bound anywhere in the chain. Fix: cap it.
+3. **Fallback title cards are a static wall of text** — `core/graph/nodes/scene_fallback.py`
+   hardcodes `key_terms=[]`, so the chip-staging animation T18G's F3 built has nothing to stage.
+   Fix chosen by the user: derive `key_terms` deterministically from the segment's own narration
+   (verbatim fragments as both text and anchor, so resolution can never fail) — no LLM call, no
+   reuse of `text_panel`.
+4. **In-browser playback is broken — a real T38A regression.** `VideoPlayer.tsx`'s
+   `crossOrigin="use-credentials"` requires the whole redirect chain, including the Blob Storage
+   SAS target, to answer with CORS headers; confirmed live that the storage account has zero CORS
+   rules. Fix: a CORS rule on the existing (Bicep-unmanaged) storage account, added as an
+   idempotent `scripts/deploy_cloud.sh` step.
+
+**DoD:** a re-run of the same topic measures a fallback rate close to zero (report the number, do
+not just claim improvement); no segment shows an empty stage; every fallback card has narration
+-derived chips appearing over time; the video plays in the browser on the real deployed SWA URL.
+**Depends:** T18L, T38B — met.
+
+---
+
+## Iteration 7 — Deferred hardening, not yet its own iteration name
+
+### T39 — Container hardening and render-concurrency tuning · `todo`
+**Recorded as its own numbered task rather than continuing to carry it as an unnumbered handoff
+bullet** — deferred three times now (T35, T38A, T38B, and again in the T18M planning session),
+each time by the user's own explicit choice to keep the session it was raised in focused.
+
+- **`Dockerfile`'s `USER` directive** — the deployed image still runs as root. Needs a real
+  Playwright/HyperFrames/ffmpeg render-verification pass once changed, not just a rebuild.
+- **`RENDER_MAX_CONCURRENCY` retuning** — currently `1` (fully serial), unmeasured since it was
+  set. Measured this session: one real job's render phase took ~15m45s of its 17-minute total, one
+  segment at a time, ~60-90s apart. Worth knowing before tuning: Container Apps' worker replica
+  scaling (0→3) does **not** help a single job's wall-clock — every segment of one job runs inside
+  one worker's own graph, so this lever only helps *concurrent different jobs*, never one job's
+  own speed.
+**Depends:** T35 — met.

@@ -4412,3 +4412,127 @@ dependency by read/write is one extra type alias and costs nothing on routes tha
 going to be called through `openapi-fetch` (which sets the header unconditionally) -- it only
 removes a capability (triggering a mutation from an arbitrary page) that no legitimate caller ever
 needed.
+
+### D188 -- Azure Static Web Apps' region is hardcoded independently of every other resource's
+shared `location` parameter (`infra/main.bicep`'s `staticSite` declares `location: 'eastus2'`
+directly, never reading the `location` param the rest of the file uses).
+
+**Rejected:** reusing the shared `location` parameter (defaulting to `eastus`, where every other
+resource in this deployment lives) for the new resource too, the way every prior resource in this
+file does.
+
+**Reasoning:** verified live against the real subscription (`az provider show --namespace
+Microsoft.Web --query "resourceTypes[?resourceType=='staticSites'].locations"`), not assumed:
+`Microsoft.Web/staticSites` is only available in Central US, East US 2, West US 2, West Europe,
+and East Asia -- `eastus` is not on that list, despite every other resource here living there
+without incident. Exactly the class of trap D179 (Container Apps' `workloadProfiles` requirement)
+already burned this project on once: a resource that looks like it should accept the same
+`location` value as its neighbors, and silently doesn't. East US 2 is the same physical metro area
+(Virginia) as the rest of the deployment, and Static Web Apps' actual content serving is via a
+global CDN regardless of which region the resource itself is created in, so this costs nothing
+functionally -- it is a region parameter, not an architecture decision. A resource group's own
+location does not constrain where its child resources live, so no second resource group was
+needed either.
+
+### D189 -- The Entra identity env vars (`AUTH_ENV`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`,
+`ENTRA_ALLOWED_TENANTS`, `ENTRA_REQUIRED_SCOPE`, `ENTRA_REQUIRED_APP_ROLE`) are real Bicep
+parameters wired into `sharedEnv`, not left to rely on `api/main.py`'s own local-development
+defaults.
+
+**Rejected:** leaving these unset in `infra/main.bicep` on the assumption that T38A's own commit
+already covered the deployed environment, since the auth *code* was already live in the image.
+
+**Reasoning:** found live, the hard way, mid-T38B-deployment: T38A shipped a complete, correctly
+-implemented auth chain, and separately shipped local (`.env`) config for it -- but never added
+the corresponding parameters to `infra/main.bicep`, so the actual deployed Container App had none
+of these set. `api/main.py::_build_verifier()` treats an unset `AUTH_ENV` as `"none"` by design
+(the same local-dev-friendly default this project's whole `*_ENV` idiom relies on everywhere else),
+so the live API was silently running fully unauthenticated -- `GET /jobs` returned real job data
+to anyone, with all the auth code present and doing nothing. Caught only because this session
+checked the *live* behavior after redeploying rather than trusting that shipped code implies
+active enforcement. None of these six values are secret (a SPA client id and a tenant id are
+public by design -- what actually constrains use is the app registration's own redirect-URI
+allowlist, not keeping the id hidden), so they are plain `sharedEnv` entries, not Key Vault
+secrets, keeping the secret surface exactly as small as before.
+
+### D190 -- `scripts/deploy_cloud.sh`'s own Bicep parameter file now always specifies an explicit
+`containerImage` when one already exists in the resource group's ACR, rather than trusting
+`main.bicep`'s placeholder default to only ever apply on a genuinely first-time deploy.
+
+**Rejected:** relying on the script's own documented step ordering (Bicep-with-placeholder, build,
+point-at-real-image) as the thing that keeps this safe, and treating any deviation from that exact
+sequence as user error.
+
+**Reasoning:** found live, the hard way, immediately after D189's own fix: redeploying *only* the
+Bicep step (to add the new auth parameters, with no reason to also rebuild the image) reset both
+Container Apps back to `main.bicep`'s placeholder default (`mcr.microsoft.com/k8se/quickstart`),
+which has no `uvicorn` binary at all -- both apps crash-looped
+(`exec: "uvicorn": executable file not found`) until manually re-pointed at the real image again.
+The original three-step shape is genuinely safe for a first deploy; it was never safe against a
+*partial* re-run of just the Bicep step, and there is no way to guarantee this script is always
+run start-to-finish rather than adapted by hand later for some future one-off change. Detecting an
+existing built image (`az acr list` + `az acr repository show-tags`, checking the actual returned
+content for the `latest` tag rather than only the command's exit status -- an exit-status-only
+version of this check was itself a bug caught by `project-reviewer` before this checkpoint, since
+`az acr repository show-tags` succeeds whether or not the specific tag being searched for exists)
+and passing it as an explicit parameter makes any future Bicep-only re-run safe by construction,
+not by remembered discipline. Steps 3-4 still always rebuild and always re-point regardless of
+what this guard finds, so it can never mask a rebuild that was actually needed.
+
+### D191 -- A real 15-segment cloud render surfaced three video-quality defects and one T38A
+regression; diagnosed and scoped as T18M, but deliberately not built this session.
+
+**Rejected:** building the fixes immediately in the same session/branch that just shipped T38A/
+T38B, since the diagnosis work (querying the real job's own `job.json` and worker logs from Log
+Analytics) was already done and the fixes are each individually small.
+
+**Reasoning:** the user's own explicit instruction: T18M's items 1-3 (fallback rate, blank-stage
+timing, fallback card content) are video-pipeline work and belong on `dev`, never on `cloud` --
+`cloud` is for cloud/infrastructure changes only (T34/T35/T38A/T38B), and mixing pipeline fixes
+into it is exactly the kind of scope-bleed that would make the branch's own purpose stop meaning
+anything. Item 4 (in-browser playback / Blob Storage CORS) does need the deployed stack, so it
+stays on `cloud`, but only after `dev`'s fixes are merged in -- not before, and not as a substitute
+for doing 1-3 properly first. Full plan, findings, and evidence:
+`C:\Users\juant\.claude\plans\t38-final-stretch-of-serialized-pelican.md` (T18M).
+
+**The four findings, in brief (full detail and file:line citations in the plan file):**
+1. **Fallback rate 4/15 (27%) on the evidence job** (`eaebea14d7484ef19a82fcd7881f94d3`) -- one
+   concrete cause identified: `rendering/geometry_findings.py`'s `_CONTENT_SIZING_CODES` is missing
+   `clipped_text`, the third time in this module's own history a real content-sizing code has been
+   omitted (after `text_occluded` at T18I, `caption_zone_collision` at T18J). Two other failing
+   segments (4, 12) exhausted all 3 retry attempts with the same finding code every time, and
+   cannot currently be diagnosed at all -- `core/graph/nodes/render_scene.py` discards the failing
+   scene when it falls back, and `RenderOutcome` keeps only finding *codes*, not the scene or the
+   full finding text. **The user's own stated target is a fallback rate close to zero, not merely
+   an improvement over 27%** -- recorded as its own memory
+   (`fallback-rate-must-be-near-zero.md`) since it changes what "done" means for this task.
+2. **A confirmed 10-second blank stage** (video seconds ~48-58, reported independently by the user
+   before this diagnosis found it): `rendering/renderable.py`'s `entrance_start` for a single-block
+   scene is the resolved narration-anchor time with no upper bound anywhere in the timing chain --
+   a phrase resolving 49% into a segment holds the entire block invisible until then. Root cause is
+   precise and the fix (a small entrance-time cap) is well-scoped.
+3. **Fallback title cards are static walls of text** -- `core/graph/nodes/scene_fallback.py`
+   hardcodes `key_terms=[]`, so the chip-staging animation T18G's F3 built never has anything to
+   stage; the card shows a bare headline + a 166-198 character subtitle held still for 21-31
+   seconds. The tier-downgrade to `Tier.REVEAL` was explicitly justified in `render_scene.py`'s own
+   comment as preserving "staggered chip entrances" -- a rationale `scene_fallback.py` makes
+   impossible to satisfy. Fix approach chosen by the user: derive `key_terms` deterministically
+   from the segment's own narration (verbatim fragments as both chip text and anchor phrase, so
+   resolution can never fail), not an LLM call and not reusing `text_panel`.
+4. **In-browser video playback is broken, and it is a real T38A regression, not pre-existing.**
+   `VideoPlayer.tsx`'s `crossOrigin="use-credentials"` (added in T38A so the session cookie reaches
+   the API) requires the *entire* redirect chain -- including the Blob Storage SAS URL the API
+   redirects to -- to answer with CORS headers. Confirmed live: the storage account has zero CORS
+   rules configured (`az storage cors list` -> `[]`), so the browser rejects the video response
+   while a plain download (not subject to the same check) works fine. Fix is a CORS rule on the
+   existing, Bicep-unmanaged storage account, added as a `scripts/deploy_cloud.sh` step so it
+   survives a rebuild.
+
+**Also recorded as a real backlog item, not left as a handoff bullet a third time:** container
+hardening (`Dockerfile`'s `USER` directive) and `RENDER_MAX_CONCURRENCY` retuning, deferred again
+this session by the user's own explicit choice. Measured this session: the evidence job's render
+phase alone ran ~15m45s of its 17-minute total, one segment at a time, ~60-90s apart -- consistent
+with `RENDER_MAX_CONCURRENCY=1`, and worth noting that Container Apps' worker replica scaling
+(0->3) does not help a single job's wall-clock at all, since every segment of one job runs inside
+one worker's own graph. Suggested as **T39** in `tasks.md` rather than continuing to carry it as an
+unnumbered gap.
