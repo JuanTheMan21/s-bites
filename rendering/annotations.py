@@ -147,8 +147,9 @@ def resolve_annotations(
     Four ways an annotation is dropped rather than guessed at (T18E, D121/D122 -- a wrong
     annotation is worse than a missing one, the same reasoning as an unresolvable block
     ``anchor_phrase`` falling back to a beat rather than never appearing was the *opposite* call,
-    made deliberately different here because a mistargeted overlay actively misleads a viewer
-    where a late block entrance does not): ``target_block_index`` out of range (nothing in
+    made deliberately different here because a mistargeted overlay actively misleads a viewer in
+    a way a late entrance does not -- T18M capped a late entrance separately, in
+    ``renderable.py``, as its own real defect): ``target_block_index`` out of range (nothing in
     strict-mode structured output can be forced to stay in range -- the same defensive-default
     reasoning ``core/graph/nodes/visual_plan.py::_fallback_scene`` applies to a segment plan's own
     index); ``target_item_index`` outside the target block's real item/link count (T18I: a LINK

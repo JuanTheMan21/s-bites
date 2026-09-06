@@ -119,7 +119,10 @@ async def test_tier_reveal_renders_muxes_and_persists_a_playable_clip(tmp_path: 
     assert result[0].clip_key == SEGMENT_CLIP_KEY.format(job_id=JOB_ID, index=0)
 
 
-async def test_a_lint_finding_raises_before_any_mux_or_storage_write(tmp_path: Path) -> None:
+async def test_a_lint_finding_raises_before_any_mux_or_clip_write(tmp_path: Path) -> None:
+    """T18M: a hard failure still writes its diagnostic (the whole point of preserving it for
+    segments that exhaust every recovery step), but never a clip -- a diagnostic write is not
+    the mux/storage write this test's name is really about."""
     segment = an_authored_segment(0, BlockType.TEXT_PANEL, Tier.STATIC, duration_ms=DURATION_MS)
     storage = FakeStorage()
     render = FakeRenderBackend(findings=["[error] fake_finding: something is wrong"])
@@ -129,4 +132,4 @@ async def test_a_lint_finding_raises_before_any_mux_or_storage_write(tmp_path: P
     with pytest.raises(CompositionInvalid, match="fake_finding"):
         await run_render_scene(segment, context)
 
-    assert storage.objects == {}
+    assert list(storage.objects.keys()) == ["job-1/segments/0/failed_scene_attempt1.json"]

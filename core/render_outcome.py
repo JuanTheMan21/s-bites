@@ -27,6 +27,14 @@ class RenderOutcome(BaseModel):
     segment_index: int
     attempts: int
     finding_codes: list[str]
+    findings: list[str] = Field(
+        default_factory=list,
+        description="T18M: the full '[severity] code: message' string for every finding across "
+        "every attempt, in order -- finding_codes above keeps only the bare code, which was not "
+        "enough to diagnose two real segments that exhausted all retries on the same code every "
+        "time (job eaebea14d7484ef19a82fcd7881f94d3, segments 4 and 12). default_factory so "
+        "every existing RenderOutcome construction (checkpoints, tests) stays valid without it.",
+    )
     reauthored: bool
     fallback_used: bool
     original_tier: int = Field(

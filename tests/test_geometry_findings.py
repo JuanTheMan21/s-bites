@@ -1,6 +1,8 @@
 """``rendering/geometry_findings.py`` -- parsing the ``"[severity] code: message"`` finding
 contract and deciding which fatal findings are worth one bounded re-author attempt (T18I)."""
 
+import logging
+
 from rendering.geometry_findings import feedback_note, finding_codes, is_content_retryable
 
 
@@ -56,3 +58,24 @@ def test_feedback_note_names_every_finding() -> None:
     assert "escaped_container" in note
     for finding in findings:
         assert finding in note
+
+
+def test_clipped_text_is_retryable() -> None:
+    # T18M: job eaebea14d7484ef19a82fcd7881f94d3, segment 9 -- this code alone skipped the
+    # retry and went straight to fallback because it wasn't recognised here.
+    assert is_content_retryable(["[error] clipped_text: caption clipped by its own container"])
+
+
+def test_an_unrecognised_code_logs_a_warning_naming_it(caplog) -> None:
+    # T18M: the vocabulary-gap warning -- `clipped_text` was the third real code omitted from
+    # this module across three separate sessions before being noticed; this is what makes the
+    # fourth surface in one render instead.
+    with caplog.at_level(logging.WARNING, logger="rendering.geometry_findings"):
+        is_content_retryable(["[error] some_new_code: never seen before"])
+    assert any("some_new_code" in record.message for record in caplog.records)
+
+
+def test_a_known_non_content_code_does_not_log_a_warning(caplog) -> None:
+    with caplog.at_level(logging.WARNING, logger="rendering.geometry_findings"):
+        is_content_retryable(["[error] page_error: ReferenceError: compact is not defined"])
+    assert caplog.records == []

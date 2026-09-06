@@ -28,6 +28,7 @@ from pathlib import Path
 from langgraph.runtime import Runtime
 
 from core.graph.context import GraphContext
+from core.graph.nodes.render_diagnostics import save_failed_attempt
 from core.graph.nodes.scene_fallback import title_card_scene
 from core.graph.nodes.scene_reauthor import reauthor_scene
 from core.graph.nodes.synthesize import local_narration_path
@@ -98,6 +99,7 @@ async def render_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
 
     scene = ComposedScene.model_validate(segment.scene)
     codes: list[str] = []
+    all_findings: list[str] = []
     reauthored = False
     fallback_used = False
     attempts = 1
@@ -106,6 +108,8 @@ async def render_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
         await _render(segment, context, composition_dir, silent)
     except CompositionInvalid as exc:
         codes = finding_codes(exc.findings)
+        all_findings = list(exc.findings)
+        await save_failed_attempt(context.storage, job_id, segment, scene, exc.findings, attempt=1)
         if is_content_retryable(exc.findings):
             logger.warning(
                 "segment %s: geometry validation failed with content-shaped findings %s -- "
@@ -123,6 +127,10 @@ async def render_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
                 await _render(segment, context, composition_dir, silent)
             except CompositionInvalid as exc2:
                 codes = codes + finding_codes(exc2.findings)
+                all_findings = all_findings + list(exc2.findings)
+                await save_failed_attempt(
+                    context.storage, job_id, segment, reauthored_scene, exc2.findings, attempt=2
+                )
                 fallback_used = True
         else:
             fallback_used = True
@@ -170,6 +178,7 @@ async def render_scene(state: SegmentTask, runtime: Runtime[GraphContext]) -> di
             segment_index=segment.index,
             attempts=attempts,
             finding_codes=codes,
+            findings=all_findings,
             reauthored=reauthored,
             fallback_used=fallback_used,
             original_tier=int(original_tier),

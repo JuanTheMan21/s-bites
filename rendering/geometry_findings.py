@@ -16,7 +16,10 @@ of both kinds together, the non-retryable one wins -- re-authoring cannot fix a 
 there is nothing a retry buys.
 """
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 # T18H/D124's own real-render vocabulary -- extend this only with a code actually observed in a
 # real render's own findings, never on a guess (this module's own docstring: a code absent here
@@ -38,6 +41,12 @@ import re
 # purely on caption-band overflow (exactly a content-density defect, the class this vocabulary
 # exists for) skipped the retry unconditionally, which is a worse outcome than not checking for
 # it at all.
+#
+# T18M: `clipped_text` added from a real render (job `eaebea14d7484ef19a82fcd7881f94d3`, segment
+# 9) that failed with only this code, went straight to fallback (`reauthored: false` in the
+# job's own data) because the code wasn't recognised here -- the third time this exact omission
+# has bitten (after `text_occluded` at T18I, `caption_zone_collision` at T18J above). Content
+# clipped by its own container is exactly as content-shaped as the five codes already here.
 _CONTENT_SIZING_CODES = frozenset(
     {
         "canvas_overflow",
@@ -45,8 +54,14 @@ _CONTENT_SIZING_CODES = frozenset(
         "content_overlap",
         "text_occluded",
         "caption_zone_collision",
+        "clipped_text",
     }
 )
+
+# T18M: codes already known to name a template/code bug, not a content-sizing gap -- named here
+# so the vocabulary-gap warning below stays a genuine "we don't recognise this yet" signal
+# instead of firing on every legitimate non-retryable finding.
+_KNOWN_NON_CONTENT_CODES = frozenset({"page_error", "sweep_static"})
 
 _FINDING_RE = re.compile(r"^\[(?P<severity>\w+)\]\s*(?P<code>[\w.-]+):\s*(?P<message>.*)$")
 
@@ -65,8 +80,23 @@ def finding_codes(findings: list[str]) -> list[str]:
 def is_content_retryable(findings: list[str]) -> bool:
     """True only when EVERY finding's code is content-sizing (see module docstring) -- one
     template-bug finding among several content ones is enough to say no, since re-authoring
-    content cannot fix a code bug, and there would be nothing left to gain from the attempt."""
+    content cannot fix a code bug, and there would be nothing left to gain from the attempt.
+
+    T18M: also logs any code that is neither in ``_CONTENT_SIZING_CODES`` nor
+    ``_KNOWN_NON_CONTENT_CODES`` -- a vocabulary gap, the same class of bug `clipped_text` just
+    was. The classification itself is unchanged (still defaults to non-retryable, the safe
+    direction); this only makes the next omission visible in one render instead of three
+    sessions later.
+    """
     codes = finding_codes(findings)
+    for code in codes:
+        if code not in _CONTENT_SIZING_CODES and code not in _KNOWN_NON_CONTENT_CODES:
+            logger.warning(
+                "geometry finding code %r is not in the content-sizing vocabulary -- treating "
+                "as non-retryable by default; if a real render shows this is content-shaped, "
+                "add it to _CONTENT_SIZING_CODES",
+                code,
+            )
     return bool(codes) and all(code in _CONTENT_SIZING_CODES for code in codes)
 
 
