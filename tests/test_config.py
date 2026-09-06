@@ -8,32 +8,26 @@ friends does not touch the network until a call is made.
 
 import pytest
 
+import config_events
 import config_queue
 import config_render
+from adapters.azure.event_channel import ServiceBusEventChannel
 from adapters.azure.job_queue import ServiceBusJobQueue
 from adapters.azure.llm_provider import AzureOpenAILLMProvider
 from adapters.azure.render_backend import ContainerAppsRenderBackend
 from adapters.azure.skill_registry import BlobSkillRegistry
 from adapters.azure.storage import BlobStorage
 from adapters.azure.tts_provider import AzureSpeechTTS
+from adapters.local.event_channel import LocalEventChannel
 from adapters.local.job_queue import LocalJobQueue
 from adapters.local.render_backend import PlaywrightHyperFramesRenderBackend
 from adapters.local.skill_registry import DiskSkillRegistry
 from adapters.local.storage import DiskStorage
 from config import (
-    Adapters,
     _skill_registry,
     _storage,
     build_adapters,
     close_adapters,
-)
-from tests.fakes import (
-    FakeJobQueue,
-    FakeLLMProvider,
-    FakeRenderBackend,
-    FakeSkillRegistry,
-    FakeStorage,
-    FakeTTSProvider,
 )
 
 AZURE_ENV = {
@@ -48,8 +42,17 @@ AZURE_ENV = {
     "AZURE_STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
     "AZURE_STORAGE_CONTAINER": "explainer-artifacts",
     "AZURE_SKILLS_CONTAINER": "runtime-skills",
-    "AZURE_SERVICE_BUS_CONNECTION_STRING": "Endpoint=sb://x;",
+    # ServiceBusJobQueue/ServiceBusEventChannel construct a real SDK client eagerly (T34) --
+    # unlike the stub this replaces, a malformed connection string now fails at construction, so
+    # this dummy must actually parse: a real endpoint shape plus a syntactically valid (never
+    # dialed) key, the same "shaped like a real one" bargain this file's own docstring states.
+    "AZURE_SERVICE_BUS_CONNECTION_STRING": (
+        "Endpoint=sb://fake.servicebus.windows.net/;"
+        "SharedAccessKeyName=fake;SharedAccessKey=ZmFrZWZha2VmYWtlZmFrZWZha2U9"
+    ),
     "AZURE_SERVICE_BUS_QUEUE": "video-jobs",
+    "AZURE_SERVICE_BUS_TOPIC": "job-events",
+    "AZURE_SERVICE_BUS_SUBSCRIPTION": "api",
     "AZURE_RESOURCE_GROUP": "rg",
     "AZURE_CONTAINER_APPS_ENVIRONMENT": "env",
 }
@@ -63,7 +66,7 @@ LOCAL_ENV = {
 }
 
 
-async def test_runtime_env_azure_builds_all_six_real_adapters() -> None:
+async def test_runtime_env_azure_builds_all_seven_real_adapters() -> None:
     adapters = build_adapters(AZURE_ENV)
 
     assert isinstance(adapters.llm, AzureOpenAILLMProvider)
@@ -72,6 +75,7 @@ async def test_runtime_env_azure_builds_all_six_real_adapters() -> None:
     assert isinstance(adapters.skills, BlobSkillRegistry)
     assert isinstance(adapters.queue, ServiceBusJobQueue)
     assert isinstance(adapters.render, ContainerAppsRenderBackend)
+    assert isinstance(adapters.events, ServiceBusEventChannel)
 
     await close_adapters(adapters)  # must not raise, even though nothing was ever used
 
@@ -91,16 +95,25 @@ async def test_render_env_bridges_azure_llm_to_the_real_local_render_backend() -
 
 
 async def test_queue_env_bridges_azure_to_the_real_local_job_queue() -> None:
-    """The same bridge as RENDER_ENV above, for the same reason: ServiceBusJobQueue is still
-    T34's stub (every method raises NotImplementedError), so RUNTIME_ENV=azure alone cannot
-    complete a job through the real API -- POST /jobs 500s the instant JobRunner tries to
-    enqueue it. QUEUE_ENV=local pairs real Azure LLM/TTS/Storage with the real LocalJobQueue,
-    which is what lets `uvicorn api.main:app` actually run a job the way cli.py already could."""
+    """The same bridge as RENDER_ENV above. ServiceBusJobQueue is real as of T34, so this is no
+    longer masking a stub -- QUEUE_ENV=local is now a genuinely faster local dev loop (no
+    namespace round trip per enqueue/dequeue), not a workaround for anything missing."""
     bridged = {**AZURE_ENV, "QUEUE_ENV": "local"}
     adapters = build_adapters(bridged)
 
     assert isinstance(adapters.llm, AzureOpenAILLMProvider)  # RUNTIME_ENV=azure, unaffected
     assert isinstance(adapters.queue, LocalJobQueue)  # QUEUE_ENV=local
+
+    await close_adapters(adapters)
+
+
+async def test_events_env_bridges_azure_to_the_real_local_event_channel() -> None:
+    """Same bridge shape again, for EventChannel (T34)."""
+    bridged = {**AZURE_ENV, "EVENTS_ENV": "local"}
+    adapters = build_adapters(bridged)
+
+    assert isinstance(adapters.llm, AzureOpenAILLMProvider)  # RUNTIME_ENV=azure, unaffected
+    assert isinstance(adapters.events, LocalEventChannel)  # EVENTS_ENV=local
 
     await close_adapters(adapters)
 
@@ -122,6 +135,7 @@ def test_each_local_builder_returns_the_local_adapter() -> None:
     assert isinstance(_skill_registry(LOCAL_ENV), DiskSkillRegistry)
     assert isinstance(config_queue.resolve(LOCAL_ENV), LocalJobQueue)
     assert isinstance(config_render.resolve(LOCAL_ENV), PlaywrightHyperFramesRenderBackend)
+    assert isinstance(config_events.resolve(LOCAL_ENV), LocalEventChannel)
 
 
 def test_a_missing_required_azure_variable_fails_fast() -> None:
@@ -145,46 +159,6 @@ def test_a_non_numeric_concurrency_value_raises_a_clear_error() -> None:
 
     with pytest.raises(RuntimeError, match="AZURE_OPENAI_MAX_CONCURRENCY"):
         build_adapters(bad)
-
-
-async def test_close_adapters_is_best_effort_when_one_aclose_fails() -> None:
-    """One adapter's aclose() raising must not skip closing the rest -- found by review."""
-
-    class FailsToClose:
-        async def aclose(self) -> None:
-            raise RuntimeError("boom")
-
-    closed = []
-
-    class ClosesFine:
-        async def aclose(self) -> None:
-            closed.append(self)
-
-    bundle = Adapters(
-        llm=FailsToClose(),
-        tts=FakeTTSProvider(),
-        storage=FakeStorage(),
-        skills=FakeSkillRegistry(),
-        queue=FakeJobQueue(),
-        render=ClosesFine(),
-    )
-
-    await close_adapters(bundle)  # must not raise, and must still close `render`
-    assert closed == [bundle.render]
-
-
-async def test_close_adapters_skips_slots_with_no_aclose() -> None:
-    """None of the fakes define aclose() (per D55) -- proof the getattr guard actually guards."""
-    fake_bundle = Adapters(
-        llm=FakeLLMProvider(),
-        tts=FakeTTSProvider(),
-        storage=FakeStorage(),
-        skills=FakeSkillRegistry(),
-        queue=FakeJobQueue(),
-        render=FakeRenderBackend(),
-    )
-
-    await close_adapters(fake_bundle)  # must not raise
 
 
 def test_an_unknown_runtime_env_raises() -> None:

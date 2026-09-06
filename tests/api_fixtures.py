@@ -1,10 +1,16 @@
 """Shared setup for the API test suite (T23): a fully fake ``Adapters`` bundle wired into a real
-FastAPI app, so the app under test is exactly what production runs -- only the six interfaces
+FastAPI app, so the app under test is exactly what production runs -- only the seven interfaces
 underneath differ.
 """
 
 from config import Adapters
-from tests.fakes import FakeJobQueue, FakeRenderBackend, FakeStorage, FakeTTSProvider
+from tests.fakes import (
+    FakeEventChannel,
+    FakeJobQueue,
+    FakeRenderBackend,
+    FakeStorage,
+    FakeTTSProvider,
+)
 from tests.graph_pipeline_fixtures import seeded_llm, seeded_skills
 
 # Matches tests/graph_pipeline_fixtures.py's own TARGET_DURATION_MS -> 4 segments. Every API test
@@ -28,4 +34,5 @@ def fake_adapters(*, segment_count: int = API_TEST_SEGMENT_COUNT) -> Adapters:
         skills=seeded_skills(),
         queue=FakeJobQueue(),
         render=FakeRenderBackend(),
+        events=FakeEventChannel(),
     )

@@ -15,6 +15,7 @@ import pytest
 from interfaces import (
     AdapterError,
     CompositionInvalid,
+    EventChannel,
     JobQueue,
     LLMProvider,
     ObjectNotFound,
@@ -41,6 +42,7 @@ CONTRACTS = {
     SkillRegistry: {"load", "versions", "list_packs"},
     JobQueue: {"enqueue", "dequeue", "complete", "fail"},
     RenderBackend: {"capture", "render", "lint", "validate_geometry"},
+    EventChannel: {"publish", "end_stream", "subscribe", "unsubscribe", "start"},
 }
 
 # Everything a *backend* can do to us. Membership says only that the failure came from
@@ -56,9 +58,12 @@ ADAPTER_ERRORS = [
 ]
 
 # Everything a signature is allowed to be built from. `interfaces` covers SkillPack,
-# QueuedJob and the TypeVar; anything else -- azure, openai, playwright -- fails here.
+# QueuedJob and the TypeVar; anything else -- azure, openai, playwright -- fails here. `asyncio`
+# is stdlib, not a vendor SDK -- EventChannel.subscribe returns a plain asyncio.Queue so the SSE
+# generator that reads it does not change between implementations (T34).
 ALLOWED_ROOTS = {
     "abc",
+    "asyncio",
     "builtins",
     "collections",
     "interfaces",

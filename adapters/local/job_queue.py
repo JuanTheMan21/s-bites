@@ -1,7 +1,7 @@
 """``JobQueue``, as an in-process asyncio queue.
 
 For an in-process queue there is no "more real" implementation to build short of a genuine
-service -- Service Bus, at T34 (``adapters/azure/job_queue.py``, stubbed there until then). This
+service -- Service Bus, real as of T34 (``adapters/azure/job_queue.py``). This
 class is deliberately close to ``tests/fakes/job_queue.py``'s ``FakeJobQueue``: the two differ only
 in that this one does not mix in test-only failure injection, and that this one is what
 ``config.py`` wires up for real use. Seeing the same shape twice here is not duplication to clean

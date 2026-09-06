@@ -32,14 +32,15 @@ grep -rE "langgraph" core/ --include=*.py | grep -v "^core/graph/"           # m
 | `core/` | Business logic: outline, scripting, scene_author, tier_resolver | Interfaces only |
 | `core/graph/` | LangGraph state, nodes, graph wiring | The only place `langgraph` may appear |
 | `core/tier_resolver.py` | Pure function: segments → render tiers | stdlib + `core.models` only. No I/O, ever |
-| `interfaces/` | Six ABCs — the contracts | No implementations, no vendor types in signatures |
-| `adapters/local/` | Ollama, Kokoro, disk, asyncio pool, Playwright+HyperFrames | |
-| `adapters/azure/` | Azure OpenAI, Speech, Blob real; Service Bus + Container Apps stubbed | |
+| `interfaces/` | Seven ABCs — the contracts | No implementations, no vendor types in signatures |
+| `adapters/local/` | Ollama, Kokoro, disk, asyncio pool, Playwright+HyperFrames, in-process events | |
+| `adapters/azure/` | Azure OpenAI, Speech, Blob, Service Bus (queue + events) real; Container Apps stubbed | |
 | `rendering/` | One module per tier + Jinja templates | |
 | `mux/` | ffmpeg subprocess calls | Never moviepy |
 | `runtime_skills/` | Versioned prompt packs loaded at **runtime** by the pipeline | Not `.claude/skills/` |
 | `.claude/skills/` | **Build-time** skills for Claude Code | Not `runtime_skills/` |
 | `api/`, `web/` | FastAPI backend, React frontend | |
+| `worker.py` | Standalone worker process (T34) — same `JobRunner` as `api/`'s in-process default | Never calls `EventChannel.start()` |
 | `config.py` | The ONLY module naming concrete adapter classes | |
 
 ## Code conventions

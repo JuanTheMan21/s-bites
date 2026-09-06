@@ -6,10 +6,13 @@ This is the runner D67 has been waiting on. ``GraphContext`` deliberately exclud
 ceiling has only ever been buildable from *outside* the graph, wrapping a whole invocation. This
 module is that wrapper, and ``MAX_ATTEMPTS`` below is where the ceiling finally lands.
 
-Serial by design: one background task, one job at a time, on the same event loop the API serves
-requests on. T34 promotes this to a real separate worker process; until then, serial execution is
-what keeps ``JobStore``'s per-job writes race-free without a lock for every write, only the
-concurrent one (``api/jobs.py``'s submit path).
+Serial by design: one background task, one job at a time. Still true after T34 -- this class is
+unchanged; what changed is who runs it. ``worker.py`` now drives it in its own process, on its own
+event loop, separate from the API's; ``api/app.py`` can still run it in-process too
+(``run_worker=True``, the default every existing test relies on). Either way, serial execution
+inside *one* runner instance is what keeps ``JobStore``'s per-job writes race-free without a lock
+for every write, only the concurrent one (``api/jobs.py``'s submit path) -- running two runner
+instances against the same job store concurrently was never this class's promise and still isn't.
 """
 
 import asyncio
@@ -19,13 +22,13 @@ from pathlib import Path
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from api.events import JobEventBus, summarize_node_event
+from api.events import summarize_node_event
+from api.job_preview import assemble_preview
 from api.job_store import JobStore
 from config import Adapters
 from core.graph import GraphContext, build_graph
-from core.graph.state import GraphState
 from core.video_job import JobStatus, VideoJob
-from interfaces import QueuedJob
+from interfaces import EventChannel, QueuedJob
 
 logger = logging.getLogger(__name__)
 
@@ -36,24 +39,6 @@ MAX_ATTEMPTS = 3
 WORKING_ROOT = Path("artifacts") / "_api_run"
 
 
-def _assemble_preview(values: GraphState) -> VideoJob:
-    """The same ``state["segments"]``-dict-to-list assembly ``core/graph/nodes/finalize.py
-    ::finalize`` does at the very end, applied mid-run: ``state["job"].segments`` is only ever
-    populated by ``finalize`` itself, so a snapshot taken before then always carries an empty
-    list there even though ``state["segments"]`` (the fan-out accumulator
-    ``core/graph/state.py::merge_segments`` merges concurrent writes into) already has real data.
-    ``plan_segments`` seeds every index up front, unfilled, so this is already the full-length
-    list by the very first "end" event -- later per-segment nodes fill individual entries in as
-    they converge on each index, rather than new cards appearing one at a time.
-    """
-    job = values["job"]
-    segments = values.get("segments") or {}
-    if not segments:
-        return job
-    ordered = [segments[i] for i in sorted(segments)]
-    return job.model_copy(update={"segments": ordered})
-
-
 class JobRunner:
     """Owns the single background task that dequeues and runs jobs."""
 
@@ -61,7 +46,7 @@ class JobRunner:
         self,
         adapters: Adapters,
         store: JobStore,
-        bus: JobEventBus,
+        bus: EventChannel,
         *,
         frame_budget: int,
         fps: int,
@@ -100,6 +85,20 @@ class JobRunner:
                 logger.exception("unhandled failure processing job %s", queued.job_id)
 
     async def _run_one(self, queued: QueuedJob) -> None:
+        try:
+            await self._run_one_settling_the_receipt(queued)
+        except Exception as exc:
+            # Last-resort safety net: found by review, a JobStore failure in the prelude below (no
+            # job snapshot yet to persist against) or in the graph-failure handler's own save/fail
+            # calls used to escape with the receipt never settled -- stranded in ServiceBusJobQueue
+            # forever, its AutoLockRenewer still renewing. `fail` is idempotent, so a no-op if the
+            # normal path below already settled it; only does real work when it never ran.
+            requeue = queued.attempt < MAX_ATTEMPTS
+            with contextlib.suppress(Exception):
+                await self._adapters.queue.fail(queued.receipt, str(exc)[:500], requeue=requeue)
+            raise
+
+    async def _run_one_settling_the_receipt(self, queued: QueuedJob) -> None:
         job = await self._store.load(queued.job_id)
         job = job.model_copy(update={"status": JobStatus.RUNNING})
         await self._store.save(job)
@@ -144,7 +143,7 @@ class JobRunner:
                         # entire run and only ever jumped straight to the finished state.
                         if stage.get("stage") == "end":
                             in_progress = await graph.aget_state(gconfig)
-                            await self._store.save(_assemble_preview(in_progress.values))
+                            await self._store.save(assemble_preview(in_progress.values))
                 snapshot = await graph.aget_state(gconfig)
             finished: VideoJob = snapshot.values["job"]
             await self._store.save(finished)
@@ -184,6 +183,6 @@ class JobRunner:
                 # from whatever checkpoint it reached. A subscriber watching this attempt should
                 # see the failure, but the stream itself stays open for the retry that follows.
                 return
-            await self._bus.close(job.job_id)
+            await self._bus.end_stream(job.job_id)
         else:
-            await self._bus.close(job.job_id)
+            await self._bus.end_stream(job.job_id)

@@ -1,4 +1,4 @@
-"""Resolves which adapter set backs the six interfaces, from ``RUNTIME_ENV``.
+"""Resolves which adapter set backs the seven interfaces, from ``RUNTIME_ENV``.
 
 The single module CLAUDE.md permits to name a concrete adapter class. Every adapter constructor
 takes explicit arguments and never reads the environment itself (D51), so that this module's job
@@ -9,16 +9,18 @@ reachable from there.
 **``RUNTIME_ENV=local`` is genuinely incomplete, by user decision.** Ollama and Kokoro (local
 ``LLMProvider``/``TTSProvider``) don't exist yet and no task currently builds them (decisionlog.md
 D58/D59). ``build_adapters`` says so loudly rather than silently: ``Storage``, ``SkillRegistry``,
-``JobQueue`` and ``RenderBackend`` all resolve for real locally -- and are exercised directly by
-``tests/test_config.py`` -- but the bundle as a whole raises under ``RUNTIME_ENV=local`` until a
-future task closes that gap. Building Ollama/Kokoro themselves is out of scope here.
+``JobQueue``, ``RenderBackend`` and ``EventChannel`` all resolve for real locally -- and are
+exercised directly by ``tests/test_config.py`` -- but the bundle as a whole raises under
+``RUNTIME_ENV=local`` until a future task closes that gap. Building Ollama/Kokoro themselves is out
+of scope here.
 
-``close_adapters`` is where D55's open ``aclose()`` question lands: four adapters
-(``AzureOpenAILLMProvider``, ``BlobStorage``, ``BlobSkillRegistry``,
-``PlaywrightHyperFramesRenderBackend``) have an off-contract ``aclose()``, deliberately not on any
-interface. This module is their owner, and closes whichever of the six resolved instances define
-one -- generic over which four, so a future real ``ServiceBusJobQueue``/``ContainerAppsRenderBackend``
-growing an ``aclose()`` at T34/T35 is closed automatically with no edit here.
+``close_adapters`` is where D55's open ``aclose()`` question lands: adapters with an off-contract
+``aclose()`` (``AzureOpenAILLMProvider``, ``BlobStorage``, ``BlobSkillRegistry``,
+``PlaywrightHyperFramesRenderBackend``, and -- as of T34 -- ``ServiceBusJobQueue`` and
+``ServiceBusEventChannel``) are deliberately not required to define one by any interface. This
+module is their owner, and closes whichever of the seven resolved instances define one -- generic
+over which do, so a future real ``ContainerAppsRenderBackend`` growing an ``aclose()`` at T35 is
+closed automatically with no edit here.
 """
 
 import asyncio
@@ -30,6 +32,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+import config_events
 import config_queue
 import config_render
 from adapters.azure.llm_provider import AzureOpenAILLMProvider
@@ -38,7 +41,15 @@ from adapters.azure.storage import BlobStorage
 from adapters.azure.tts_provider import AzureSpeechTTS
 from adapters.local.skill_registry import DiskSkillRegistry
 from adapters.local.storage import DiskStorage
-from interfaces import JobQueue, LLMProvider, RenderBackend, SkillRegistry, Storage, TTSProvider
+from interfaces import (
+    EventChannel,
+    JobQueue,
+    LLMProvider,
+    RenderBackend,
+    SkillRegistry,
+    Storage,
+    TTSProvider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +65,7 @@ class Adapters:
     skills: SkillRegistry
     queue: JobQueue
     render: RenderBackend
+    events: EventChannel
 
 
 def _env(
@@ -126,8 +138,8 @@ def _tts_provider(env: Mapping[str, str]) -> TTSProvider:
 
 
 def build_adapters(env: Mapping[str, str] | None = None) -> Adapters:
-    """Resolve all six adapters from ``RUNTIME_ENV``. A full bundle, or a clear failure -- never a
-    partial one, which is why ``RUNTIME_ENV=local`` fails before any of the four working local
+    """Resolve all seven adapters from ``RUNTIME_ENV``. A full bundle, or a clear failure -- never
+    a partial one, which is why ``RUNTIME_ENV=local`` fails before any of the working local
     adapters are built rather than building them and discarding the result.
     """
     load_dotenv()
@@ -139,8 +151,8 @@ def build_adapters(env: Mapping[str, str] | None = None) -> Adapters:
         raise RuntimeError(
             "RUNTIME_ENV=local cannot build a full adapter set yet: LLMProvider (Ollama) and "
             "TTSProvider (Kokoro) do not exist (see decisionlog.md D58/D59). Storage, "
-            "SkillRegistry, JobQueue and RenderBackend do resolve locally -- see config._storage "
-            "et al -- but build_adapters() only ever returns a complete bundle."
+            "SkillRegistry, JobQueue, RenderBackend and EventChannel do resolve locally -- see "
+            "config._storage et al -- but build_adapters() only ever returns a complete bundle."
         )
     return Adapters(
         llm=_llm_provider(env),
@@ -149,14 +161,15 @@ def build_adapters(env: Mapping[str, str] | None = None) -> Adapters:
         skills=_skill_registry(env),
         queue=config_queue.resolve(env),
         render=config_render.resolve(env),
+        events=config_events.resolve(env),
     )
 
 
 async def close_adapters(adapters: Adapters) -> None:
-    """Close whichever of the six resolved adapters define ``aclose()``; no-op for the rest.
+    """Close whichever of the seven resolved adapters define ``aclose()``; no-op for the rest.
 
-    Generic over which four currently have one (D55) so a future real ``ServiceBusJobQueue`` or
-    ``ContainerAppsRenderBackend`` growing an ``aclose()`` at T34/T35 is closed with no edit here.
+    Generic over which currently have one (D55) so a future real ``ContainerAppsRenderBackend``
+    growing an ``aclose()`` at T35 is closed with no edit here.
 
     Best-effort: one adapter's ``aclose()`` raising must not skip closing the rest, since the
     intended caller is a shutdown path (T19's FastAPI lifespan) where leaking every later
@@ -171,6 +184,7 @@ async def close_adapters(adapters: Adapters) -> None:
             adapters.skills,
             adapters.queue,
             adapters.render,
+            adapters.events,
         )
         if (aclose := getattr(adapter, "aclose", None)) is not None
     ]

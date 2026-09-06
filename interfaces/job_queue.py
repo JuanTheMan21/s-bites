@@ -48,10 +48,10 @@ class JobQueue(ABC):
     a lock token on Service Bus. Callers pass it back to ``complete`` or ``fail`` and must
     never parse it, which is what allows the two implementations to differ underneath.
 
-    Every method here may raise ``ProviderUnavailable`` or ``RateLimited`` once the queue is
-    a real service (T34). The in-process implementation never does, which is precisely why
-    it is worth writing down: code written against the local pool alone will not have seen
-    either, and that is a parity gap waiting for the cloud path.
+    Every method here may raise ``ProviderUnavailable`` or ``RateLimited`` when the queue is
+    a real service (Service Bus, as of T34). The in-process implementation never does, which is
+    precisely why it is worth writing down: code written against the local pool alone will not
+    have seen either, and that is a parity gap waiting for the cloud path.
     """
 
     @abstractmethod

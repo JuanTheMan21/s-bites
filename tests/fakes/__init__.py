@@ -1,4 +1,4 @@
-"""In-memory implementations of all six contracts, for tests that must not touch a network.
+"""In-memory implementations of all seven contracts, for tests that must not touch a network.
 
 **A fake is an adapter.** It is held to the standard the ``adapter-parity`` agent applies to the
 real ones at T13: it may not import a vendor SDK, and it must match its interface in *semantics*
@@ -17,6 +17,7 @@ Three consequences worth stating outright, because each is a mistake that type-c
 Every fake can also be made to fail on demand -- see ``failure_injection``.
 """
 
+from tests.fakes.event_channel import FakeEventChannel
 from tests.fakes.failure_injection import FailureInjector
 from tests.fakes.job_queue import FakeJobQueue
 from tests.fakes.llm_provider import FakeLLMProvider, LLMCall
@@ -28,6 +29,7 @@ from tests.fakes.tts_provider import FakeTTSProvider, wav_duration_ms
 __all__ = [
     "CaptureCall",
     "FailureInjector",
+    "FakeEventChannel",
     "FakeJobQueue",
     "FakeLLMProvider",
     "FakeRenderBackend",

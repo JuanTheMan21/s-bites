@@ -4099,3 +4099,122 @@ all now renders a plain CSS progress bar instead of nothing, with every failure 
 `WaveScope.test.tsx` exercise the fallback for free -- jsdom has no real canvas backend (the
 optional `canvas` npm package isn't installed here), so `getContext('2d')` already returns null
 under vitest by construction, no mocking needed.
+
+## 2026-09-06 · T34 — Cloud-ready runtime: real Service Bus queue, worker split, cross-process progress
+
+### D173 -- `ContainerAppsRenderBackend` stays a stub permanently, by design; T35's scope narrows
+to image + IaC + first cloud run. No Cosmos DB.
+
+**Rejected:** T35's original task text as written -- the render backend itself becoming a real
+Container Apps implementation, each `capture`/`render`/`lint`/`validate_geometry` call dispatched
+to the cloud individually. Also rejected: adding Cosmos DB for job records, an earlier draft of
+the architecture writeup's own first pass.
+
+**Reasoning:** counted the actual calls before designing around them, rather than assuming the
+original brief's shape was right. `rendering/render_segment.py` makes ~3 heavyweight render-
+backend calls per segment (`lint`, `validate_geometry`, the tier's `capture`/`render`), so a
+15-segment video is ~45 dispatches -- each needing the composition and its assets shipped out and
+frames shipped back, each paying a container cold start. That is tens of minutes of pure overhead
+for no correctness gain. The right move is containerising the **worker**, not the renderer: one
+image runs the graph, Chromium and HyperFrames together, so "local render backend" means "in this
+process," and in the cloud that process *is* the cloud. `config_render.py` keeps resolving
+`PlaywrightHyperFramesRenderBackend` under `RUNTIME_ENV=azure` for exactly this reason -- this is
+not an oversight to fix later, it is the design. Splitting rendering across a pool of containers
+remains possible later (the render backend is already an interface; a real Container Apps
+implementation would be a new one behind it, not a rewrite) but is deferred until T35's real cloud
+latency is actually measured, not assumed to need it.
+
+Cosmos was rejected on a narrower, more mechanical basis: `api/job_store.py`'s index is only ever
+written by the API's own submit path, already serialised by `app.state.index_lock`, and the API
+runs at one replica by design (T34's own `EventChannel` docstring). Scoping Blob keys by owner
+(`jobs/{owner}/...`, T38) gets per-user isolation and a cheaper listing than today with no new
+service, no migration, and no second data store to keep consistent. A real database becomes the
+right call once the queries get richer than "list mine" -- T30's vector store is the actual trigger
+for that, not a feeling that a job-tracking app "should" have one.
+
+### D174 -- `ServiceBusJobQueue`'s receipt is `f"{message_id}:{delivery_count}"`, and this SDK's
+`delivery_count` is 0 on a message's first delivery, not 1 -- found live, not assumed from docs.
+
+**Rejected:** treating `delivery_count` as 1-indexed on first delivery, which is what most Service
+Bus documentation implies and what the first version of `adapters/azure/job_queue.py` assumed.
+
+**Reasoning:** every live parity test (`pytest -m live tests/test_job_queue_parity.py`) failed
+identically against the real `sbites-servicebus` namespace on the very first run: the receipt
+`dequeue` returned did not match what `enqueue` had promised, and (as a direct consequence)
+`fail(requeue=True)` looked up a receipt that had never actually been stored, so the abandoned
+message was never released and a subsequent dequeue saw nothing. Confirmed by inspection against
+the real messages, not guessed: `delivery_count` is 0 on first delivery in `azure-servicebus==
+7.14.3`. Fixed by having `enqueue` hand back `f"{job_id}:0"` and setting `QueuedJob.attempt =
+delivery_count + 1`, so `attempt` still starts at 1 -- matching `LocalJobQueue`/`FakeJobQueue`'s
+own default -- without lying about what the broker actually counts from. General lesson, matching
+this project's own repeated one (D89/D106/D109/D119/D124, most recently D172): an SDK's documented
+or assumed behavior is a claim, not a fact, until checked against the real thing it describes.
+
+### D175 -- `ServiceBusJobQueue` gives every in-flight message its own `AutoLockRenewer`, closed the
+moment it settles, rather than one shared renewer for the adapter's whole lifetime.
+
+**Rejected:** the first version's design -- one `AutoLockRenewer()` constructed once in `__init__`
+and reused by every `dequeue()` for the life of the instance.
+
+**Reasoning:** found by `project-reviewer`, not by any test -- this is exactly the class of defect
+too slow to show up in either the offline suite or a single live run. The installed SDK's
+`AutoLockRenewer` never drops a completed registration from its internal tracking list except on
+`close()`. `worker.py` runs one `ServiceBusJobQueue` instance for the life of the process --
+documented, deliberately, as meant to run for days -- so a shared renewer accumulates one more
+permanently-referenced finished task per job, forever: a slow, real memory leak invisible in any
+test shorter than sustained production operation. Fixed by keying a fresh, short-lived
+`AutoLockRenewer` per receipt (`self._renewers: dict[str, AutoLockRenewer]`, alongside the existing
+`self._in_flight`), closed in a `finally` inside both `complete()` and `fail()` regardless of
+whether the settle attempt itself succeeds, with `aclose()` sweeping whatever remains as a last
+resort. Bounded by construction: nothing here can outlive a single job's lifetime.
+
+### D176 -- `ServiceBusEventChannel`'s background pump retries forever with capped exponential
+backoff on a connection-level failure, instead of letting the coroutine end.
+
+**Rejected:** the first version's shape -- a single outer `try/except Exception` around the whole
+`async for message in self._receiver:` loop, logging once and returning.
+
+**Reasoning:** found by `project-reviewer`. A dropped AMQP link or any transient Service Bus
+hiccup is exactly the class of error `ServiceBusError`/`translate` exist to name -- and the first
+version caught it, logged "pump died," and let the task finish. `start()`'s own idempotency guard
+(`if self._pump_task is not None: return`) then permanently no-oped on every future call, because a
+*finished* task is not `None` -- nothing ever revived it. Concretely: one transient network blip
+would silently and permanently stop live progress for every job on that API replica from that
+moment on, discoverable only by reading logs -- precisely the "hung pipeline with no error anywhere
+to find" failure this whole adapter exists to prevent (this module's own docstring says so).
+Fixed with a `while True` loop around the `async for`, capped exponential backoff (1s doubling to a
+60s ceiling, reset to 1s on a clean iteration end) on any non-cancellation exception. Verified
+against the installed SDK's own source, not assumed: the receiver self-heals on the next iteration
+after a transient failure (`_open()` transparently recreates the handler whenever `_running` is
+`False`), so retrying the same receiver object is genuinely sufficient, not a band-aid. Known,
+accepted limit: a permanently unfixable condition (a deleted subscription, revoked credentials)
+retries at the 60s ceiling forever with an identical log line each time, indistinguishable from a
+transient blip -- acceptable given this project has no alerting configured anywhere else either
+(`CLAUDE.md`'s own Environment section already says so for cost).
+
+### D177 -- `JobRunner._run_one` wraps its entire body (the `JobStore` prelude and the existing
+graph-failure handler) in one more outer `try/except` whose only job is guaranteeing the queue
+receipt is released, even when something above the normal failure path itself fails.
+
+**Rejected:** leaving `_run_one`'s structure as it already was -- the prelude (`store.load`,
+`store.save`, `mkdir`) sat outside any try block, and the existing graph-failure handler's own
+`store.save(failed)` call could itself raise before ever reaching its own `queue.fail(...)` line.
+
+**Reasoning:** found by `project-reviewer`'s second pass, after the four fixes above were already
+verified correct in isolation -- this is a gap in code the T34 diff did not touch (`api/runner.py`'s
+structure predates this task), but its consequence became real only now that `ServiceBusJobQueue`
+is a genuine broker rather than an in-process object with nothing to strand. Before T34 an escaped
+exception here just meant a dropped in-memory reference; now it means a real Service Bus message
+stays locked and invisible to every other worker, its `AutoLockRenewer` renewing it for up to an
+hour and then stopping, with nothing in `JobStore` ever recording that anything went wrong. Fixed
+by renaming the existing method to `_run_one_settling_the_receipt` and wrapping a call to it in a
+thin `_run_one` that, on any exception reaching that far, makes one best-effort
+`queue.fail(receipt, ..., requeue=queued.attempt < MAX_ATTEMPTS)` call before re-raising --
+harmless and idempotent whenever the normal path already settled the receipt itself, load-bearing
+only in the narrow case it never ran. `_assemble_preview` moved to a new `api/job_preview.py` in
+the same change, to stay under the 200-line ceiling once this safety net was added -- a pure
+helper function with no reason to live inside the class, the same "split by responsibility" call
+`rendering/compose.py`/`rendering/block_timing.py` already made. Regression test:
+`tests/test_runner_receipt_safety.py`, constructed directly against `JobRunner` and `FakeJobQueue`
+(no graph, no ffmpeg, no FastAPI) since the property under test is receipt bookkeeping, not
+anything the graph does.

@@ -1,20 +1,28 @@
-"""The two ``JobQueue`` implementations, held to one set of assertions.
+"""The three ``JobQueue`` implementations, held to one set of assertions.
 
-Both run offline: ``LocalJobQueue`` is pure ``asyncio``, no installs, no network -- unlike the
-other T12 interface (``RenderBackend``), there is nothing here to gate behind ``local_live``. The
-real Service Bus implementation does not exist until T34 (D25); this file gets a third parameter
-then, matching ``test_storage_parity.py``'s ``blob`` pattern.
+``fake`` and ``local`` run offline: ``LocalJobQueue`` is pure ``asyncio``, no installs, no
+network. ``servicebus`` (T34, real as of this task) is marked ``live`` and so is deselected by
+default, matching ``test_storage_parity.py``'s ``blob`` pattern -- each test gets its own
+throwaway queue (``tests.azure_live.throwaway_queue``), never the real ``video-jobs`` queue this
+project runs against, for the same isolation reason ``throwaway_container`` exists: a queue shared
+across test runs risks a dequeue picking up a stale message left by an earlier, differently-
+asserting test.
+
+**The existing assertions below are the specification, unchanged by adding this third param.** If
+one fails against Service Bus, the adapter is wrong, not the test.
 """
 
 from collections.abc import AsyncIterator
 
 import pytest
 
+from adapters.azure.job_queue import ServiceBusJobQueue
 from adapters.local.job_queue import LocalJobQueue
 from interfaces import JobQueue
+from tests.azure_live import SERVICE_BUS_CONNECTION_STRING, require, throwaway_queue
 from tests.fakes import FakeJobQueue
 
-IMPLEMENTATIONS = ["fake", "local"]
+IMPLEMENTATIONS = ["fake", "local", pytest.param("servicebus", marks=pytest.mark.live)]
 
 
 @pytest.fixture(params=IMPLEMENTATIONS)
@@ -22,7 +30,16 @@ async def queue(request: pytest.FixtureRequest) -> AsyncIterator[JobQueue]:
     if request.param == "fake":
         yield FakeJobQueue()
         return
-    yield LocalJobQueue()
+    if request.param == "local":
+        yield LocalJobQueue()
+        return
+
+    async with throwaway_queue() as name:
+        sb_queue = ServiceBusJobQueue(require(SERVICE_BUS_CONNECTION_STRING), name)
+        try:
+            yield sb_queue
+        finally:
+            await sb_queue.aclose()
 
 
 async def test_a_job_dequeues_with_its_payload_and_starting_attempt(queue: JobQueue) -> None:

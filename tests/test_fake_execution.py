@@ -1,9 +1,11 @@
 """What ``FakeJobQueue`` and ``FakeRenderBackend`` do.
 
-Paired because they are the two contracts that stay stubbed on Azure through iteration 3 and
-become real services in iteration 5.5 (T34, T35). Both are therefore tested here against
-behaviour a *cloud* implementation must also produce -- attempts surviving a requeue,
-dead-letters never redelivered -- rather than against whatever an in-process object happens to do.
+Paired because they were the two contracts that stayed stubbed on Azure through iteration 3, and
+became real services in iteration 5.5 -- `JobQueue` (Service Bus) at T34, `RenderBackend`
+(Container Apps) deliberately still a stub even after T35, see `tasks.md`'s own Iteration 5.5
+note. Both are therefore tested here against behaviour a *real* implementation must also produce
+-- attempts surviving a requeue, dead-letters never redelivered -- rather than against whatever an
+in-process object happens to do.
 """
 
 from pathlib import Path

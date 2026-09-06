@@ -1,12 +1,16 @@
-"""Fans one job's graph events out to any number of concurrent SSE subscribers (T20).
+"""Reduces LangGraph's own event stream to one "stage" transition a client cares about (T20).
 
-No bespoke event bus -- the source of truth is ``graph.astream_events`` itself (``api/runner.py``
-iterates it directly). This module exists only because ``astream_events`` has exactly one
-consumer, and an HTTP request that arrives after a run has already started still needs to see
-what happens next.
+The source of truth is ``graph.astream_events`` itself (``api/runner.py`` iterates it directly).
+This module exists only because that stream carries far more than a UI needs -- LLM sub-steps
+inside a node, checkpoint writes -- and ``summarize_node_event`` is the filter down to the eight
+node-level transitions ``STAGE_NODES`` names.
+
+**Fan-out itself moved to ``interfaces/event_channel.py`` at T34** (this module's own
+``JobEventBus`` before then). The worker and the API stopped being guaranteed to share a process,
+and a bespoke in-process bus cannot cross that boundary on its own -- see that interface's
+docstring for why a cross-process channel became necessary rather than optional.
 """
 
-import asyncio
 from typing import Any
 
 # The graph's own node names (core/graph/pipeline.py's add_node calls) -- everything else
@@ -65,31 +69,3 @@ def _segment_payload(event: dict[str, Any]) -> Any:
     if isinstance(payload, dict):
         return payload.get("segment")
     return getattr(payload, "segment", None)
-
-
-class JobEventBus:
-    """Per-``job_id`` fan-out. Each subscriber gets its own queue; ``None`` is the end-of-stream
-    sentinel a subscriber's SSE generator stops on."""
-
-    def __init__(self) -> None:
-        self._subscribers: dict[str, list[asyncio.Queue]] = {}
-
-    def subscribe(self, job_id: str) -> asyncio.Queue:
-        queue: asyncio.Queue = asyncio.Queue()
-        self._subscribers.setdefault(job_id, []).append(queue)
-        return queue
-
-    def unsubscribe(self, job_id: str, queue: asyncio.Queue) -> None:
-        subscribers = self._subscribers.get(job_id, [])
-        if queue in subscribers:
-            subscribers.remove(queue)
-        if not subscribers:
-            self._subscribers.pop(job_id, None)
-
-    async def publish(self, job_id: str, event: dict[str, Any]) -> None:
-        for queue in self._subscribers.get(job_id, []):
-            await queue.put(event)
-
-    async def close(self, job_id: str) -> None:
-        for queue in self._subscribers.get(job_id, []):
-            await queue.put(None)

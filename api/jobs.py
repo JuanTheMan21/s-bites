@@ -72,7 +72,7 @@ async def stream_job_events(job_id: str, request: Request) -> EventSourceRespons
     # publish to (the runner has already returned) and hang open forever. Terminal jobs skip
     # subscribing entirely and just report the status once.
     already_terminal = job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED)
-    queue = None if already_terminal else bus.subscribe(job_id)
+    queue = None if already_terminal else await bus.subscribe(job_id)
 
     async def stage_events():
         if already_terminal or queue is None:
@@ -88,6 +88,6 @@ async def stream_job_events(job_id: str, request: Request) -> EventSourceRespons
                     break
                 yield {"event": "stage", "data": json.dumps(item)}
         finally:
-            bus.unsubscribe(job_id, queue)
+            await bus.unsubscribe(job_id, queue)
 
     return EventSourceResponse(stage_events())

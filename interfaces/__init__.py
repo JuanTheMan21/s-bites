@@ -1,4 +1,4 @@
-"""The six contracts every adapter implements, and the errors raised around them.
+"""The seven contracts every adapter implements, and the errors raised around them.
 
 ``core/`` imports from here and from nowhere outside itself. Adapters implement these;
 ``config.py`` is the only module in the repo permitted to name a concrete implementation.
@@ -17,6 +17,7 @@ from interfaces.errors import (
     SkillPackNotFound,
     StructuredOutputError,
 )
+from interfaces.event_channel import EventChannel, check_event_serialisable
 from interfaces.job_queue import JobQueue, QueuedJob, check_serialisable
 from interfaces.llm_provider import LLMProvider
 from interfaces.render_backend import RenderBackend
@@ -27,6 +28,7 @@ from interfaces.tts_provider import TTSProvider
 __all__ = [
     "AdapterError",
     "CompositionInvalid",
+    "EventChannel",
     "JobQueue",
     "LLMProvider",
     "ObjectNotFound",
@@ -42,6 +44,7 @@ __all__ = [
     "Storage",
     "StructuredOutputError",
     "TTSProvider",
+    "check_event_serialisable",
     "check_key",
     "check_serialisable",
     "version_key",

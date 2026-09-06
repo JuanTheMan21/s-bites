@@ -1,9 +1,16 @@
 """ASGI entrypoint: ``uvicorn api.main:app``.
 
 Builds real adapters from the environment and hands them to ``api.app.create_app`` -- the only
-place ``api/`` reads ``FRAME_BUDGET``/``FPS``/``RUNTIME_ENV`` from the process, mirroring
-``cli.py``'s own "read configuration at the edge" pattern rather than duplicating it as a shared
-helper (there are exactly two edges in this repo, and a third does not exist yet).
+place ``api/`` reads ``FRAME_BUDGET``/``FPS``/``RUNTIME_ENV``/``RUN_INPROC_WORKER`` from the
+process, mirroring ``cli.py``'s own "read configuration at the edge" pattern rather than
+duplicating it as a shared helper (there are exactly three edges in this repo since T34's
+``worker.py``, and a fourth does not exist yet).
+
+**``RUN_INPROC_WORKER`` (T34), default ``true``:** set to ``false`` when ``worker.py`` is running
+this job's actual work in its own process -- otherwise two runner instances would both dequeue
+from the same queue and this process would additionally do rendering work it does not need to.
+Left ``true`` by default so a single ``uvicorn api.main:app`` still runs a complete job standalone,
+exactly as it always has.
 
 **Never run this with ``uvicorn``'s own ``--reload`` on Windows.** Found live, T18J: `--reload`
 runs the actual server as a spawned worker (`use_subprocess=True` in uvicorn's own
@@ -54,6 +61,7 @@ app = create_app(
     build_adapters(),
     frame_budget=_required_int("FRAME_BUDGET"),
     fps=_required_int("FPS"),
+    run_worker=os.environ.get("RUN_INPROC_WORKER", "true").strip().lower() != "false",
 )
 
 # The Vite dev server (default :5173) and its production origin are otherwise blocked outright --

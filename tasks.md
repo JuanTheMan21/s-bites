@@ -1,8 +1,9 @@
 # Task Backlog
 
-38 tasks across 8 iterations (T36 and T37 both added 2026-09-04, mid-Iteration-5 — T36 at explicit
+39 tasks across 8 iterations (T36 and T37 both added 2026-09-04, mid-Iteration-5 — T36 at explicit
 user request during the T24-T28 session, D136; T37 scoped as a follow-up once that session's real
-end-to-end use surfaced both a real backend bug and a visual-design rejection, D144). **One task
+end-to-end use surfaced both a real backend bug and a visual-design rejection, D144; T38 added
+2026-09-06 mid-Iteration-5.5, splitting what T35's original text covered — see below). **One task
 per session** (though iterations have twice now been built as one combined session by explicit
 user choice — T19-T23 and T24-T28+T36, both recorded in decisionlog.md). Descriptions are
 deliberately high-level — detail is negotiated in plan mode at the start of each session, not
@@ -1064,31 +1065,91 @@ open findings in `web/` at close. One pre-existing (not T37-introduced) accessib
 
 ## Iteration 5.5 — Cloud execution *(added during T3 planning; runs before iteration 6)*
 
-Task numbers are identity, not order: **T34 and T35 run here**, between T28 and T29.
+Task numbers are identity, not order: **T34, T35 and T38 run here**, between T28 and T29, on a
+`cloud` branch. Full architecture, cost model and provisioning request written up for the user's
+architect: `https://claude.ai/code/artifact/16c2937c-f019-454c-88e0-5dc6f5e99199`.
 
 D5 stubbed the Azure `JobQueue` and `RenderBackend` deliberately, to keep POC debugging on the
-local machine. With Azure-native as the primary stack that call is now revisited: both stubs become
-real implementations, and the signature-matched stubs from T12 are what make that a fill-in rather
-than a redesign.
+local machine. With Azure-native as the primary stack that call is revisited across these three
+tasks, in a shape that deviates from the original brief in two deliberate ways — recorded in
+`decisionlog.md` (search for T34):
 
-### T34 — Service Bus job queue · `todo`
-The `JobQueue` stub becomes a real Service Bus implementation: lease/renew semantics, dead-lettering
-on `fail`, and `attempt` surviving a requeue. Worker and API become separate processes.
-**DoD:** a job submitted through the API is claimed and run by a separate worker process; the
-parity tests from T13 pass unchanged against both the asyncio pool and Service Bus.
-**Depends:** T23, T28
+1. **`ContainerAppsRenderBackend` stays a stub permanently, by design, not by delay.** The original
+   text below (T35) called for the render backend itself to become a real Container Apps
+   implementation. Counting the actual calls first: `rendering/render_segment.py` makes ~3
+   heavyweight render-backend calls per segment (`lint`, `validate_geometry`, the tier's
+   `capture`/`render`), so a 15-segment video is ~45 dispatches — each needing composition+assets
+   shipped out and frames shipped back, each paying a container cold start. The correct move is
+   containerising the **worker**, not the renderer: one image runs the graph, Chromium and
+   HyperFrames together, so "local render backend" means "in this process," and in the cloud that
+   process *is* the cloud. `config_render.py` keeps resolving `PlaywrightHyperFramesRenderBackend`
+   under `RUNTIME_ENV=azure` for exactly this reason.
+2. **No Cosmos DB.** `api/job_store.py`'s index is already serialised by `app.state.index_lock`
+   and the API runs at one replica — scoping Blob keys by owner (`jobs/{owner}/…`, T38) gets
+   per-user isolation with no new service. Cosmos returns when RAG needs a vector store (T30).
 
-### T35 — Container Apps render backend · `todo`
-The `RenderBackend` stub becomes a real Container Apps implementation. **Moves the Dockerfile out of
-T33**, which currently owns it — cloud rendering needs the image, and T33 now runs after this. The
-image carries both browsers (Playwright's Chromium *and* HyperFrames' Chrome Headless Shell, per
-D15) plus vendored GSAP, since the scaffold's CDN pull will not survive a locked-down container.
-Expect fewer parallel workers than local: Container Apps caps at 4 vCPU against this machine's 16.
-**DoD:** a Tier-2 segment renders in the cloud and its duration matches the local render of the
-same composition within tolerance; `RUNTIME_ENV=azure` runs a job end to end with nothing executing
-on the developer machine. **Closes the gap T18/T18A worked around by hand** — once this exists,
-`cli.py` runs a full job on `RUNTIME_ENV=azure` alone, no manual adapter-mixing needed.
-**Depends:** T34
+### T34 — Cloud-ready runtime: real queue, separate worker, cross-process progress · `done`
+The `JobQueue` stub became a real Service Bus implementation (lease/renew via a per-message
+`AutoLockRenewer`, dead-lettering on `fail`, `attempt` surviving a requeue via the broker's own
+0-indexed `delivery_count`). `worker.py` is a new standalone entry point running the same
+`JobRunner` in its own process; `api/app.py::create_app` gained `run_worker: bool = True` so the
+API's own in-process worker stays the default and nothing existing changed behaviour. A 7th
+interface, `EventChannel` (`LocalEventChannel`/`ServiceBusEventChannel`), was added and was *not*
+in the original task text — found necessary because the old in-process `JobEventBus` cannot cross
+a process boundary, and splitting the worker out with no replacement would make
+`/jobs/{id}/events` go silently and permanently dead (no error anywhere) the moment the two
+processes are actually separate. Two real bugs found only by live testing against the real
+namespace, not assumed correct in advance: Service Bus `delivery_count` is 0-indexed on first
+delivery, not 1 (both the receipt round-trip and redelivery failed identically until fixed); a
+single shared `AutoLockRenewer` for the adapter's whole lifetime never drops a completed
+registration except on `close()`, a slow real memory leak on a long-lived worker — fixed to one
+renewer per in-flight message, closed the moment it settles. A third bug (the event-channel pump
+permanently dying, silently, on any connection-level failure — the exact "hung pipeline, no error
+anywhere" failure this whole task exists to prevent) was found by `project-reviewer`, not live
+testing, and fixed with a capped-backoff retry loop before checkpoint.
+**DoD:** verified for real, not just by pytest — `uvicorn api.main:app` with
+`RUN_INPROC_WORKER=false` in one process, `python worker.py` in a separate one, both against the
+real `sbites-servicebus` namespace; a submitted job was dequeued and entirely driven by the
+separate worker process, live progress arrived over SSE on the API process the whole time, and the
+job reached `status: succeeded` with a real `video_key`. `pytest -m live
+tests/test_job_queue_parity.py tests/test_event_channel_parity.py` green (12/12) against the real
+namespace; full offline `pytest` green; `ruff` clean; boundary/line-count checks clean.
+**Depends:** T23, T28 — met.
+
+### T35 — Container image, IaC, first real cloud render · `todo`
+Package the pipeline (already Linux-portable after T34 — see the gotcha below) into one container
+image; Bicep templates for the resources named in the architecture writeup (Container Apps
+environment, ACR, the API and worker container apps, Static Web Apps, Key Vault, a subscription
+budget); deploy to a dedicated resource group; run one real job end to end with nothing executing
+on a developer machine, and measure its real cloud latency against the local baseline. That
+measurement is what decides whether a future task ever needs to split rendering across a pool of
+containers (deferred, not designed away — the render backend interface already makes that a new
+implementation later, not a rewrite).
+**Gotcha found during T34 planning, not yet fixed:** `adapters/local/hyperframes_process.py`'s
+stalled-process kill shells out to Windows `taskkill /T /F`; on Linux this silently no-ops
+(`except OSError: pass`), leaving orphaned Chrome/Node children running on every render timeout —
+a real portability bug this task must fix before the image is trustworthy under sustained load.
+**DoD:** a real job produced end to end in the cloud, nothing executing locally; the image contains
+both browsers (Playwright's Chromium *and* HyperFrames' Chrome Headless Shell, per D15) plus
+vendored GSAP, since the scaffold's CDN pull will not survive a locked-down container.
+**Depends:** T34.
+
+### T38 — Identity, per-user ownership, the shareable link · `todo`
+Microsoft Entra ID sign-in (workforce/single-tenant — the company tenant, per user decision),
+token validation in the API, an `owner_id` recorded on every job at submission and enforced on all
+eight job-scoped routes (`/jobs`, `/jobs/{id}`, `/jobs/{id}/resume`, `/jobs/{id}/events`, and the
+four artifact/segment/scorm routes) — a wrong owner gets a 404, not a 403, so a job's existence
+isn't leaked. `web/`'s own `seen-store.ts` already documents "no auth/user model in this backend
+at all yet"; this is what closes that gap. Two details the architecture writeup flags as easy to
+get wrong: the browser's `EventSource` cannot send an `Authorization` header, so the SSE endpoint
+needs a different auth mechanism than the rest of the REST surface; the Blob SAS URL
+`api/artifact_response.py` already hands back for downloads currently lives for an hour, which
+should drop to minutes once it's a bearer capability guarding real per-user content. Frontend
+deployed to Azure Static Web Apps — this is the task that produces the link the user can actually
+send someone.
+**DoD:** two different signed-in users each submit a job and can only ever see, list, or download
+their own.
+**Depends:** T35.
 
 ---
 

@@ -16,8 +16,17 @@ from pathlib import Path
 import pytest
 
 import interfaces
-from interfaces import JobQueue, LLMProvider, RenderBackend, SkillRegistry, Storage, TTSProvider
+from interfaces import (
+    EventChannel,
+    JobQueue,
+    LLMProvider,
+    RenderBackend,
+    SkillRegistry,
+    Storage,
+    TTSProvider,
+)
 from tests.fakes import (
+    FakeEventChannel,
     FakeJobQueue,
     FakeLLMProvider,
     FakeRenderBackend,
@@ -34,6 +43,7 @@ IMPLEMENTATIONS: dict[type, type] = {
     FakeSkillRegistry: SkillRegistry,
     FakeJobQueue: JobQueue,
     FakeRenderBackend: RenderBackend,
+    FakeEventChannel: EventChannel,
 }
 
 # The boundary rule, applied to fakes because a fake is an adapter.
