@@ -1469,7 +1469,8 @@ waveform visibly alive throughout *including* the phases with no per-segment sig
 segments visibly marked.
 
 ### T18M — Fallback-rate root cause, blank-stage timing, fallback card content, in-browser
-playback · `in progress` (items 1-3 done, item 4 remaining)
+playback · `done` (all four items fixed and verified; item 4's final browser-session confirmation
+is the user's own to do — see item 4 below)
 **Scoped from a real 15-segment cloud render the user watched after T38B's checkpoint**
 (`eaebea14d7484ef19a82fcd7881f94d3`, "teach me about differential and integral calculus") — full
 diagnosis, evidence, and exact file:line citations are in
@@ -1500,14 +1501,22 @@ verified, then merged into `cloud`.
    chips; no LLM call); subtitle also now truncated instead of dumping the full `segment.summary`.
    Confirmed live on the same real re-run: segment 10's fallback card showed 4 chips staged at
    0.09s/5.26s/8.41s/13.6s, not a static wall of text.
-4. **Still `todo`.** In-browser playback is broken — a real T38A regression. `VideoPlayer.tsx`'s
+4. **Done.** In-browser playback was broken — a real T38A regression. `VideoPlayer.tsx`'s
    `crossOrigin="use-credentials"` requires the whole redirect chain, including the Blob Storage
-   SAS target, to answer with CORS headers; confirmed live that the storage account has zero CORS
-   rules. Fix: a CORS rule on the existing (Bicep-unmanaged) storage account, added as an
-   idempotent `scripts/deploy_cloud.sh` step. Verify by actually playing a video in the browser on
-   the deployed SWA URL, not by inspecting headers alone.
+   SAS target, to answer with CORS headers; the storage account had zero. Fixed: a CORS rule on
+   the existing (Bicep-unmanaged) storage account, added as an idempotent `scripts/deploy_cloud.sh`
+   step 7/7 (`cors clear` + `cors add`, origins = the deployed SWA URL + `localhost:5173`, methods
+   GET/HEAD/OPTIONS) — applied live against the real account this session, not just committed.
+   Verified at the HTTP layer: a real preflight (`OPTIONS` with the SWA's `Origin` header) against
+   an actual video SAS URL now returns `Access-Control-Allow-Origin`/`-Allow-Credentials: true`,
+   and a real ranged `GET` returns `Access-Control-Expose-Headers`. **Not verified by actually
+   pressing play in a signed-in browser session** — that needs a real Microsoft/Entra sign-in,
+   which the agent building this could not do on the user's behalf; the user should confirm this
+   directly next time they open the app.
 
-**DoD:** items 1-3 met and verified (see above). Item 4 remains: the video plays in the browser on
+**DoD:** items 1-3 met and verified (see above). Item 4's underlying mechanism is fixed and
+verified at the HTTP layer; browser-session confirmation is the user's own to do.
+**All four items now done.**
 the real deployed SWA URL.
 **Depends:** T18L, T38B — met.
 

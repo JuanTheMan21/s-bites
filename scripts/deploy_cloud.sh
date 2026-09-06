@@ -202,7 +202,7 @@ rm -f web/.env.production.local  # never committed (*.local is already gitignore
 SWA_TOKEN="$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group "$RESOURCE_GROUP" --query "properties.apiKey" -o tsv)"
 npx -y @azure/static-web-apps-cli@latest deploy web/dist --deployment-token "$SWA_TOKEN" --env production
 
-echo "== 6/6: add the deployed frontend as a second SPA redirect URI =="
+echo "== 6/7: add the deployed frontend as a second SPA redirect URI =="
 # `PATCH applications/{id}` on `spa.redirectUris` REPLACES the whole array rather than appending
 # -- confirmed against Graph's own documented behaviour, not assumed. Read the app's current URIs
 # first and union in the new one, so a re-run of this script (or an app registration that already
@@ -232,6 +232,46 @@ az rest --method PATCH \
   --url "https://graph.microsoft.com/v1.0/applications/$APP_OBJECT_ID" \
   --headers "Content-Type=application/json" \
   --body "$PATCH_BODY" \
+  -o none
+
+echo "== 7/7: CORS on the artifact storage account (T18M item 4 -- in-browser video playback) =="
+# `VideoPlayer.tsx`'s `crossOrigin="use-credentials"` (T38A, needed to carry the session cookie on
+# a <video> element, which has no way to set a header) requires the WHOLE redirect chain --
+# including the Blob Storage SAS URL `/jobs/{id}/video` 307s to -- to answer with CORS headers,
+# not just the API. Confirmed live before this fix: `az storage cors list` on this account
+# returned `[]`, zero rules; downloads worked (a plain `<a download>` isn't subject to the same
+# browser check) while playback silently failed, exactly the reported symptom.
+#
+# The storage account (`sbitesartifacts25817`) is deliberately NOT managed by infra/main.bicep --
+# see that file's own header for why -- so this rule lives here instead, as an idempotent step
+# that survives a full infra redeploy. `cors clear` + `cors add` (rather than `cors add` alone) is
+# what makes a re-run of this script idempotent: `add` on its own would accumulate a duplicate
+# rule on every re-run, since Storage has no "add if not present" primitive. Idempotent in
+# END STATE, not atomic: if `add` fails for a transient reason right after `clear` succeeds, this
+# account is left with zero CORS rules (the exact bug this step fixes) until the script is rerun
+# -- caught by review, accepted as a narrow-window risk on a manually-run script, matching this
+# same file's existing tolerance elsewhere (the Key Vault purge step above has the same shape).
+#
+# `--exposed-headers Content-Range/Accept-Ranges` isn't load-bearing for how a plain `<video src>`
+# element seeks today (that's the browser's own media engine reading raw 206/Content-Range off the
+# wire, not gated by CORS at all) -- it only matters if this response is ever read from JS
+# (fetch/XHR/MSE) instead. Included now since it's free and future-proofs that path; if range-
+# seeking ever breaks, look at Accept-Ranges support in api/byte_range.py, not this line.
+#
+# Read via a python one-liner into a bash variable, not `source .env` -- D180's own lesson (the
+# connection string contains literal `;`, which bash's own `source`/`set -a` truncates at) applies
+# here exactly as it does everywhere else in this script; a plain command-substitution capture of
+# stdout is not subject to that parsing at all.
+STORAGE_CONNECTION_STRING="$(python -c "from dotenv import dotenv_values; print(dotenv_values('.env')['AZURE_STORAGE_CONNECTION_STRING'])")"
+az storage cors clear --services b --connection-string "$STORAGE_CONNECTION_STRING" -o none
+az storage cors add \
+  --services b \
+  --methods GET HEAD OPTIONS \
+  --origins "$SWA_URL" "http://localhost:5173" \
+  --allowed-headers "*" \
+  --exposed-headers "Content-Range" "Accept-Ranges" \
+  --max-age 3600 \
+  --connection-string "$STORAGE_CONNECTION_STRING" \
   -o none
 
 echo "Done. Frontend: $SWA_URL"

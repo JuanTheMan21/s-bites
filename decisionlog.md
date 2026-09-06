@@ -4621,3 +4621,46 @@ T40 in `tasks.md` was rewritten with this exact diagnosis (the arithmetic, the c
 first hypothesis so it is not re-tried, the specific colliding selectors, and the repro method) so
 whoever builds the real fix starts from evidence, not from D192's original, softer "read the
 preserved diagnostics and decide" framing.
+
+### D194 -- T18M item 4 (Blob CORS / in-browser playback) fixed and applied live; all four T18M
+items now closed.
+
+**Reasoning:** D191/D192 deferred item 4 until items 1-3 landed (the branch-split rule). Items 1-3
+were merged into `cloud` this session (D192); this entry closes item 4, on the user's own explicit
+instruction to do it in the same session rather than leave it open.
+
+**Fix:** `scripts/deploy_cloud.sh` gained step 7/7 -- `az storage cors clear` then `az storage cors
+add` against the artifact storage account (`sbitesartifacts25817`, deliberately not Bicep-managed,
+per `infra/main.bicep`'s own header), origins the deployed SWA URL plus `localhost:5173`, methods
+GET/HEAD/OPTIONS, exposing `Content-Range`/`Accept-Ranges`. `clear`-then-`add` is idempotent in
+end state (a re-run converges to the same rule set) but not atomic -- a transient failure of `add`
+right after `clear` succeeds would leave the account with zero CORS rules until the script is
+rerun. Recorded in the script's own comment as an accepted, narrow-window risk on a manually-run
+script, the same tolerance this file already has for its Key Vault purge step; not fixed with a
+retry wrapper, since `project-reviewer` called it worth knowing rather than blocking and the user
+did not ask for extra defensive plumbing here.
+
+**Applied live, not just committed:** ran the same two `az storage cors` commands directly against
+the real deployed storage account this session (not the full `deploy_cloud.sh`, which would have
+also rebuilt the container image and redeployed the frontend -- unnecessary blast radius for a
+CORS-only fix). Verified with real HTTP requests against an actual video's SAS URL: a preflight
+`OPTIONS` with the SWA's own `Origin` header now returns `Access-Control-Allow-Origin` matching it
+and `Access-Control-Allow-Credentials: true`; a real ranged `GET` returns
+`Access-Control-Expose-Headers: Content-Range,Accept-Ranges`. This is the exact mechanism D191
+confirmed broken (`az storage cors list` returning `[]`), now confirmed fixed at the same layer.
+
+**Rejected:** claiming full DoD (a real signed-in browser session pressing play) -- that requires
+the user's own Microsoft/Entra credentials, which the agent building this cannot exercise on the
+user's behalf. Recorded honestly in `tasks.md` as the one remaining, user-owned confirmation step,
+not glossed over as "done" without qualification.
+
+**Also decided:** a comment on the new step originally justified `--exposed-headers Content-Range/
+Accept-Ranges` as needed for `<video>` range-seeking -- caught by `project-reviewer` as overstated
+(a native `<video src>` element's seeking is the browser's own media engine reading raw
+`206`/`Content-Range` off the wire, not gated by CORS at all; `Access-Control-Expose-Headers` only
+matters if the response is ever read from JS). Corrected the comment rather than leaving a false
+trail for a future range-seeking bug to be misdiagnosed against.
+
+All four T18M items are now done. The task's own `tasks.md` entry is the fuller record; this entry
+is the reasoning trail for the one judgment call (accepting the clear/add non-atomicity) and the
+one thing intentionally left unverified (real browser playback).
