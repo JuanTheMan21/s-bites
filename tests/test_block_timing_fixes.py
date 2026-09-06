@@ -10,6 +10,8 @@ interpolation (the other two defects from the same render) are covered in
 import re
 from pathlib import Path
 
+import pytest
+
 from core.block_types import BlockType
 from core.scene_schemas import ComposedBlock, ComposedScene
 from interfaces.tts_provider import WordMark
@@ -85,7 +87,10 @@ def test_a_split_panel_headline_enters_with_its_panel_not_its_content_anchor(
 def test_a_single_block_scene_still_honors_its_own_content_anchor(tmp_path: Path) -> None:
     """The multi-block fix must not regress the single-block case -- there the block IS the
     segment's whole content, so revealing it exactly when the narration introduces it is
-    correct choreography, unchanged."""
+    correct choreography, unchanged. T18M capped how late that reveal can land (a real render
+    showed an anchor resolving 49% into its own duration, leaving the stage empty that whole
+    time) -- this scene's anchor is intentionally later than the cap, so the assertion below
+    is against the cap, not the raw anchor time."""
     narration = (
         "First a filler line. "
         + " ".join(f"pad{i}" for i in range(10))
@@ -114,6 +119,8 @@ def test_a_single_block_scene_still_honors_its_own_content_anchor(tmp_path: Path
     html = dest.read_text(encoding="utf-8")
 
     headline_time = _headline_time(html, "b0")
-    assert headline_time > 3.0, (
-        "a single-block scene's headline should still honor a real, late content anchor"
+    assert headline_time == pytest.approx(2.0), (
+        "a late single-block anchor should be capped at rendering.renderable._MAX_ANCHOR_ENTRANCE, "
+        "not honored uncapped (which would reproduce the blank-stage defect) and not ignored "
+        "outright (which would fall back to the structural default and lose the anchor entirely)"
     )

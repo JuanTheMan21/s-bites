@@ -279,6 +279,11 @@ export interface components {
             attempts: number;
             /** Finding Codes */
             finding_codes: string[];
+            /**
+             * Findings
+             * @description T18M: the full '[severity] code: message' string for every finding across every attempt, in order -- finding_codes above keeps only the bare code, which was not enough to diagnose two real segments that exhausted all retries on the same code every time (job eaebea14d7484ef19a82fcd7881f94d3, segments 4 and 12). default_factory so every existing RenderOutcome construction (checkpoints, tests) stays valid without it.
+             */
+            findings?: string[];
             /** Reauthored */
             reauthored: boolean;
             /** Fallback Used */

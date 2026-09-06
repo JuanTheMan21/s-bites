@@ -70,6 +70,9 @@ async def test_a_content_shaped_finding_triggers_one_reauthor_then_succeeds(tmp_
     assert outcome.reauthored is True
     assert outcome.fallback_used is False
     assert outcome.finding_codes == ["canvas_overflow"]
+    # T18M: the full finding string is preserved too, not just the bare code -- this is what
+    # makes a segment that keeps failing on the same code across every attempt diagnosable.
+    assert outcome.findings == ["[error] canvas_overflow: too much content"]
     assert result[0].clip_key is not None
     assert llm.responses == []  # both queued responses were consumed
 
@@ -117,6 +120,12 @@ async def test_a_reauthor_that_still_fails_falls_back_to_title_card(tmp_path: Pa
     assert outcome.reauthored is True
     assert outcome.fallback_used is True
     assert outcome.finding_codes == ["canvas_overflow", "canvas_overflow"]
+    # T18M: exactly the segments-4/12 shape from the real evidence job -- the same code failing
+    # every attempt is now diagnosable from the preserved full strings, not just the bare codes.
+    assert outcome.findings == [
+        "[error] canvas_overflow: too much content",
+        "[error] canvas_overflow: still too much",
+    ]
     assert outcome.original_tier == int(Tier.STATIC)
     assert result[0].clip_key is not None
 

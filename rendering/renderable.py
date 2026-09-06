@@ -7,6 +7,7 @@ ceiling with still-sampling wired on top of everything already there -- this mod
 per-block build step; ``compose.py`` calls it once per block and stays the orchestration layer.
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,11 +18,21 @@ from rendering.anchors import resolve_anchor
 from rendering.annotations import RenderableAnnotation
 from rendering.block_timing import resolve_item_starts, resolve_step_starts
 
+logger = logging.getLogger(__name__)
+
 # Fallback entrance beat when a block's anchor_phrase doesn't match the narration (or is null) --
 # the same small per-block stagger every pre-T18B template hand-picked, generalised so a second
 # block in a SPLIT_HORIZONTAL scene doesn't land on top of the first.
 _DEFAULT_ENTRANCE_BASE = 0.15
 _DEFAULT_ENTRANCE_STEP = 0.25
+
+# T18M: a single-block scene's narration anchor had no upper bound at all -- confirmed live, one
+# segment's anchor resolved 49% into its own 22s duration, leaving the stage genuinely empty
+# (every block partial renders opacity:0 before its tween) for the ~10s before it. A block's
+# anchor says "emphasise this now", never "hide the only thing on screen until now" -- so the
+# resolved anchor is capped, not trusted outright. 2.0s keeps a real beat of anticipation (most
+# anchors resolve well under this) while making a long void impossible.
+_MAX_ANCHOR_ENTRANCE = 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +82,19 @@ def build_renderable(
         entrance_start = structural_start
     else:
         anchor_ms = resolve_anchor(word_marks, block.anchor_phrase)
-        entrance_start = anchor_ms / 1000 if anchor_ms is not None else structural_start
+        if anchor_ms is None:
+            entrance_start = structural_start
+        else:
+            anchor_s = anchor_ms / 1000
+            entrance_start = min(anchor_s, _MAX_ANCHOR_ENTRANCE)
+            if entrance_start < anchor_s:
+                logger.info(
+                    "block %s: narration anchor at %.2fs capped to %.2fs -- an uncapped anchor "
+                    "this late would leave the stage empty for the whole gap",
+                    index,
+                    anchor_s,
+                    entrance_start,
+                )
 
     payload, item_starts, item_permutation = resolve_item_starts(
         block_type, payload, word_marks, entrance_start=entrance_start, end_s=duration_s
