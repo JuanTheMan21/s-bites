@@ -6,87 +6,83 @@ memory of how this state was reached.**
 
 ## What just happened
 
-**No code changed this session beyond the T38B checkpoint already recorded.** After T38B shipped
-and the user confirmed T38's actual DoD live (two real Microsoft accounts, `juanthemancr7@gmail.com`
-and `skillbites911@gmail.com`, each submitting a job and correctly unable to see the other's — T38
-is genuinely done, not just structurally verified), the user ran a real 15-segment job and reported
-four real problems. This session **diagnosed all four with hard evidence and wrote a full plan
-(T18M), but built nothing** — the user's own explicit instruction was to do the actual work in a
-future session, on the right branch. Full plan, findings, and file:line citations:
-`C:\Users\juant\.claude\plans\t38-final-stretch-of-serialized-pelican.md`. Short version:
-`decisionlog.md` D191.
+**T18M items 1-3 were built, verified against a real re-render, and merged into `cloud`.** D191
+diagnosed four defects from a real 15-segment cloud render and built nothing; this session built
+items 1-3 on `dev` (per D191's own branch-split rule), verified them end-to-end against a second
+real render of the same topic, then merged `dev` into `cloud`. Full details: `tasks.md`'s T18M
+entry, `decisionlog.md` D192.
 
-### The branch split for T18M is load-bearing — read this before starting it
-**Items 1-3 (fallback rate, blank-stage timing, fallback card content) are video-pipeline work and
-go on `dev`. Item 4 (in-browser playback / Blob CORS) needs the deployed stack and stays on
-`cloud`, merged in only after 1-3 land on `dev`.** This was the user's own explicit correction
-mid-session, after this session first planned all four as one unit on `cloud` — recorded as its
-own memory (`branch-split-cloud-vs-dev.md` in the user's persistent memory directory) specifically
-so it isn't relearned the hard way twice. `cloud` and `dev` have never been merged in either
-direction and will have diverged — check that before starting T18M.
+**Measured result:** fallback rate on "teach me about differential and integral calculus" went
+from 4/15 (27%, the D191 baseline) to **1/15 (6.7%)**, job `24a8f261-d260-4e09-a08d-a7a8640c6245`.
+The one remaining fallback (segment 10, a dense `graph_diagram`) is now diagnosable — a genuinely
+different problem than the vocabulary-gap fix that closed the other three — and was scoped as its
+own task, **T40**, rather than guessed at this session.
 
-### The four findings (T18M), each with real evidence from a real job
-Evidence job: `eaebea14d7484ef19a82fcd7881f94d3` ("teach me about differential and integral
-calculus", 15 segments, 376s), owned by `juanthemancr7@gmail.com`. Its `job.json` is at
-`jobs/9188040d-6c67-4c5b-b112-36a304b66dad.00000000-0000-0000-625c-98001dc531b1/eaebea14d7484ef19a82fcd7881f94d3/job.json`
-in the `explainer-artifacts` blob container (owner-scoped path — T38A's design working exactly as
-intended). Read it directly; every number below came from it.
+### What shipped (T18M items 1-3, commit `5112f4a` on `dev`, merged into `cloud`)
+1. `clipped_text` added to `rendering/geometry_findings.py::_CONTENT_SIZING_CODES`; an
+   unrecognised finding code now logs a `WARNING` naming it, so the next vocabulary gap surfaces
+   in one render instead of three sessions later. Failed attempts now preserve their own scene and
+   full finding strings (`RenderOutcome.findings`, new `core/graph/nodes/render_diagnostics.py`) —
+   this is the mechanism that made segment 10's real diagnosis (see T40) possible.
+2. `rendering/renderable.py`'s single-block `entrance_start` capped at `_MAX_ANCHOR_ENTRANCE =
+   2.0`s (multi-block untouched) — confirmed firing live (a 5.26s anchor capped to 2.00s).
+3. `core/graph/nodes/scene_fallback.py`'s fallback title card now derives `key_terms`
+   deterministically from the segment's own narration (verbatim fragments, capped at 4 chips, no
+   LLM call) instead of hardcoded `[]`; subtitle truncated instead of the full `segment.summary`.
+   Confirmed live: segment 10's fallback card showed 4 chips staged at
+   0.09s/5.26s/8.41s/13.6s.
 
-1. **Fallback rate: 4 of 15 segments (27%) degraded.** One concrete, already-identified cause:
-   `rendering/geometry_findings.py::_CONTENT_SIZING_CODES` is missing `clipped_text` — the third
-   time a real content-sizing code has been omitted from that vocabulary (after `text_occluded` at
-   T18I, `caption_zone_collision` at T18J). Two other failing segments exhausted all 3 retries on
-   the same finding code every time and currently **cannot be diagnosed at all** — the failing
-   scene and full finding text are discarded on fallback; `RenderOutcome` keeps only codes.
-   **The user's stated target is a fallback rate close to zero, not merely improved** — recorded
-   as its own memory (`fallback-rate-must-be-near-zero.md`) because it changes what "done" means
-   for whoever builds T18M.
-2. **A confirmed 10-second blank stage**, video seconds ~48-58 — the user had already reported
-   this once before this session traced it. Root cause is exact:
-   `rendering/renderable.py:70-74`'s `entrance_start` for a single-block scene is the resolved
-   narration-anchor time with **no upper bound anywhere in the timing chain**. Segment 2's anchor
-   resolved 49% into its own duration, so the whole block stayed invisible until then.
-3. **Fallback title cards are a static wall of text for 21-31 seconds.**
-   `core/graph/nodes/scene_fallback.py:23` hardcodes `key_terms=[]`, so the chip-staging animation
-   T18G's F3 built (the "blue boxes popping up one by one" the user likes on real title cards) has
-   nothing to stage. `render_scene.py`'s own comment justifies the fallback's tier downgrade as
-   preserving "staggered chip entrances" — a rationale this same file makes impossible to satisfy.
-4. **In-browser video playback is broken — a real T38A regression, not pre-existing.**
-   `VideoPlayer.tsx`'s `crossOrigin="use-credentials"` (added in T38A for the cookie) requires the
-   *entire* redirect chain, including the Blob Storage SAS target, to answer with CORS headers.
-   Confirmed live: `az storage cors list --account-name sbitesartifacts25817 --services b` →
-   `[]`, zero rules. Downloads work because they don't go through the same check — exactly the
-   symptom reported (playback broken, download fine).
+`web/openapi.json`/`web/src/api/schema.d.ts` were regenerated for the new `RenderOutcome.findings`
+field — no `web/` logic change needed (`job-adapter.ts` destructures only what it uses, the
+frontend-insulation guarantee working as designed). `project-reviewer` ran clean before commit;
+full pytest/ruff/boundary/web gates all green both on `dev` before merge and on `cloud` after.
 
-**T39 was also created this session** (in `tasks.md`, not built) to stop container hardening and
-render-concurrency tuning from being an unnumbered handoff bullet a fourth time — deferred again
-this session, the user's own explicit choice each time.
+### T18M item 4 — still open, on `cloud`
+**In-browser video playback is still broken right now.** `VideoPlayer.tsx`'s
+`crossOrigin="use-credentials"` requires the whole redirect chain, including the Blob Storage SAS
+target, to answer with CORS headers; the storage account (`sbitesartifacts25817`) has zero CORS
+rules configured. Downloads work (not subject to the same check); playback doesn't. Fix: a CORS
+rule on the existing, Bicep-unmanaged storage account, added as an idempotent
+`scripts/deploy_cloud.sh` step. Not attempted this session — D191's own ordering said item 4 only
+after items 1-3 land, which they now have, so this is unblocked for a future session.
+
+### T40 — new task, not built
+The one remaining fallback (segment 10 of the verification job) is a 6-node `graph_diagram` that
+still overlapped after the LLM's own one re-author attempt shrank it to 5 nodes — a real capacity
+question (how many node+caption pairs the `graph_diagram` "graph" layout can place without
+overlap), not a vocabulary gap. Both failed attempts' full scenes and findings are preserved on
+`Storage` at `{job_id}/segments/10/failed_scene_attempt{1,2}.json` for
+`24a8f261-d260-4e09-a08d-a7a8640c6245` — read them directly rather than re-deriving. Full scope in
+`tasks.md`'s T40 entry.
 
 ## Environment state
 
-- **Branch `cloud`**, still holding T38A+T38B, checkpointed and — per the last checkpoint —
-  **still not pushed**. Nothing changed this session, so this is unchanged from T38B's own handoff.
-- The deployed stack is live and correctly enforcing auth: `https://lively-meadow-05448450f.6.
+- **Branch `cloud`**, now holding T34/T35/T38A/T38B **and** T18M items 1-3 (merged from `dev`).
+  `dev` and `cloud` are back in sync on everything through this merge — `dev` has no commits
+  `cloud` lacks. Not pushed to `origin/cloud` yet (was already 1 commit ahead before this session's
+  merge; now further ahead).
+- The deployed stack is live and auth-correct: `https://lively-meadow-05448450f.6.
   azurestaticapps.net` (SWA) talking to
-  `https://ca-sbites-api.politeforest-8877ab80.eastus.azurecontainerapps.io` (API). Two real users
-  confirmed working, cross-isolated, this session.
-- **In-browser video playback is still broken right now** (finding 4 above) — anyone opening the
-  deployed frontend today can watch the sign-in/job-list/download flow work but will hit a blank
-  player. Not fixed this session; T18M item 4 is the fix, gated behind items 1-3 landing on `dev`
-  first per the branch-split rule.
+  `https://ca-sbites-api.politeforest-8877ab80.eastus.azurecontainerapps.io` (API). Unchanged this
+  session — the merged pipeline fixes have not yet been deployed to this live stack (T35's deploy
+  step wasn't re-run); the container image there still predates T18M.
+- **In-browser video playback is still broken on the live deployed stack** (T18M item 4, above) —
+  unrelated to and unfixed by this session's pipeline work.
 - `RUNTIME_ENV=azure`, `QUEUE_ENV=local`, `EVENTS_ENV=local`, `RUN_INPROC_WORKER=true` (local),
-  `RENDER_ENV=local` — all unchanged.
-- `RENDER_MAX_CONCURRENCY=1` — still unmeasured/untuned, now T39, still not this session's job.
+  `RENDER_ENV=local` — all unchanged. This session's verification render ran locally via `cli.py`,
+  not against the deployed container.
+- `RENDER_MAX_CONCURRENCY=1` — still unmeasured/untuned, still T39, still nobody's task.
 
 ## Known gaps / open questions, unresolved this session
 
-- **T18M is planned, not built.** The next session on it should read the plan file directly
-  (`t38-final-stretch-of-serialized-pelican.md`) rather than re-deriving from this summary — it has
-  the exact file:line citations, the chosen fix approach for each item, and what NOT to guess at
-  (segments 4/12's repeated same-code failures need the preserved-findings fix built first, not a
-  blind content-authoring change).
-- Whether to merge `cloud` into `dev` — this is now actually load-bearing for T18M's own branch
-  plan (items 1-3 on `dev`, merge into `cloud` for item 4), not just a standing open question.
-  Check the real divergence between the two branches before starting.
+- **T18M item 4 (Blob CORS / in-browser playback)** is the next piece of this task — on `cloud`,
+  unblocked now that items 1-3 are merged in. See "T18M item 4" above for the exact fix.
+- **T40 (`graph_diagram` capacity)** — diagnosed with real preserved evidence, not built. See
+  above and `tasks.md`.
+- **The deployed container image predates this session's pipeline fixes.** If the next session's
+  goal involves the *live* deployed video quality (not just local `cli.py` runs), a redeploy
+  (T35's image-build step) is needed first — not assumed to have happened automatically.
+- `cloud` has local commits not yet pushed to `origin/cloud` — confirm before assuming the remote
+  reflects this state.
 - D141's `Copy Link` UI feature — still not redesigned, still not blocking anything.
-- The Dockerfile's `USER` directive and `RENDER_MAX_CONCURRENCY` — now T39, still nobody's task.
+- The Dockerfile's `USER` directive and `RENDER_MAX_CONCURRENCY` — still T39, still nobody's task.

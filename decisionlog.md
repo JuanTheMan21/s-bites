@@ -4536,3 +4536,40 @@ with `RENDER_MAX_CONCURRENCY=1`, and worth noting that Container Apps' worker re
 (0->3) does not help a single job's wall-clock at all, since every segment of one job runs inside
 one worker's own graph. Suggested as **T39** in `tasks.md` rather than continuing to carry it as an
 unnumbered gap.
+
+### D192 -- T18M items 1-3 built on `dev`, verified against a real re-render, merged into `cloud`;
+item 4 remains, and the one still-degraded segment became its own task (T40) instead of a guess.
+
+**Reasoning:** D191 scoped T18M and deliberately built nothing. This session built items 1-3 on
+`dev` exactly as D191 required (branch discipline unchanged from that decision), then merged into
+`cloud` once verified -- see `tasks.md`'s T18M entry for the itemized fix list and evidence, this
+entry is about what the *re-run* proved and the one thing it left open.
+
+**Measured, not claimed:** a second real render of the same topic ("teach me about differential
+and integral calculus", job `24a8f261-d260-4e09-a08d-a7a8640c6245`) put the fallback rate at
+**1/15 (6.7%)**, down from the D191 baseline of 4/15 (27%). The single-block entrance cap fired
+live (a 5.26s anchor capped to 2.00s, logged). The fallback card's narration-derived chips fired
+live too (segment 10's card showed 4 chips staged at 0.09s/5.26s/8.41s/13.6s, confirmed by reading
+the actual rendered composition HTML, not just unit tests).
+
+**Rejected:** treating 6.7% as "close to zero" and closing item 1 outright, and separately,
+guessing a fix for the one remaining fallback to chase that number lower this session. The
+preserved-findings mechanism item 1 built (`RenderOutcome.findings`,
+`core/graph/nodes/render_diagnostics.py`) did exactly the job it was built for: segment 10's own
+failed scenes (both attempts) were read directly from `Storage`, and they show a 6-node
+`graph_diagram` that the LLM's own one re-author attempt shrank to 5 nodes and which *still*
+overlapped with the same finding codes. That is a genuinely different, harder problem than the
+`clipped_text` vocabulary gap item 1 actually fixed -- graph_diagram layout capacity, not a
+missing code or a generic content-density nudge -- and D191's own instruction not to guess at
+segments 4/12 applies here with equal force now that the evidence is real instead of hypothetical.
+Presented to the user directly as a choice (investigate now vs. defer); the user chose to defer.
+Recorded as **T40** in `tasks.md` with the exact preserved-diagnostic keys so a future session
+reads real numbers instead of re-deriving them.
+
+**Also decided:** `RenderOutcome.findings` is additive (`default_factory=list`) and the OpenAPI/TS
+client was regenerated (`web/openapi.json`, `web/src/api/schema.d.ts`) even though no `web/` logic
+change was needed -- `job-adapter.ts` destructures only the fields it uses, so this exercised the
+T18-era frontend-insulation guarantee (CLAUDE.md's Invariant 5) rather than testing around it.
+
+Item 4 (Blob CORS / in-browser playback) is still open on `cloud`, unchanged from D191 -- not
+attempted this session, per D191's own ordering (item 4 only after 1-3 land, which they now have).

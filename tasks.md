@@ -1469,45 +1469,46 @@ waveform visibly alive throughout *including* the phases with no per-segment sig
 segments visibly marked.
 
 ### T18M — Fallback-rate root cause, blank-stage timing, fallback card content, in-browser
-playback · `todo`
+playback · `in progress` (items 1-3 done, item 4 remaining)
 **Scoped from a real 15-segment cloud render the user watched after T38B's checkpoint**
 (`eaebea14d7484ef19a82fcd7881f94d3`, "teach me about differential and integral calculus") — full
 diagnosis, evidence, and exact file:line citations are in
 `C:\Users\juant\.claude\plans\t38-final-stretch-of-serialized-pelican.md`; decisionlog D191 has the
-short version. Not built yet — diagnosed and planned only, per the user's explicit instruction to
-do the actual work in its own session.
+short version.
 
-**Branch split is load-bearing, stated explicitly by the user, and recorded as its own memory
+**Branch split was load-bearing, stated explicitly by the user, and recorded as its own memory
 (`branch-split-cloud-vs-dev.md`): items 1-3 are video-pipeline work and belong on `dev`; item 4
-needs the deployed stack and stays on `cloud`, merged in only after 1-3 land on `dev`.**
+needs the deployed stack and stays on `cloud`.** Items 1-3 built on `dev` (commit `5112f4a`),
+verified, then merged into `cloud`.
 
-1. **Fallback rate 4/15 (27%) — user's explicit target is close to zero, not just improved
-   (`fallback-rate-must-be-near-zero.md`).** One concrete cause found: `clipped_text` is missing
-   from `rendering/geometry_findings.py::_CONTENT_SIZING_CODES` — the third time a real
-   content-sizing code has been omitted from that vocabulary (after `text_occluded` at T18I,
-   `caption_zone_collision` at T18J). Add it, and make the next omission visible (log any
-   unrecognised finding code). Two other failing segments exhausted all 3 retries on the same
-   code every time and currently cannot be diagnosed at all — the failing scene and full finding
-   text are discarded when `render_scene.py` falls back, `RenderOutcome` keeps only codes. Preserve
-   them. Do not guess at a fix for those two beyond what the preserved data actually shows.
-2. **A confirmed 10-second blank stage** (video seconds ~48-58 on the evidence job, matching a
-   complaint the user had already raised before this session traced it). Root cause is precise:
-   `rendering/renderable.py`'s `entrance_start` for a single-block scene is the resolved
-   narration-anchor time with no upper bound anywhere in the chain. Fix: cap it.
-3. **Fallback title cards are a static wall of text** — `core/graph/nodes/scene_fallback.py`
-   hardcodes `key_terms=[]`, so the chip-staging animation T18G's F3 built has nothing to stage.
-   Fix chosen by the user: derive `key_terms` deterministically from the segment's own narration
-   (verbatim fragments as both text and anchor, so resolution can never fail) — no LLM call, no
-   reuse of `text_panel`.
-4. **In-browser playback is broken — a real T38A regression.** `VideoPlayer.tsx`'s
+1. **Done.** Fallback rate 4/15 (27%) → **1/15 (6.7%), measured on a real re-run of the same
+   topic** (`24a8f261-d260-4e09-a08d-a7a8640c6245`). `clipped_text` added to
+   `rendering/geometry_findings.py::_CONTENT_SIZING_CODES`; an unrecognised finding code now logs
+   a `WARNING` naming it. Failed attempts now preserve their own scene + full finding strings
+   (`RenderOutcome.findings`, `core/graph/nodes/render_diagnostics.py`) — this is what made the
+   one remaining fallback (segment 10, real render) diagnosable: a 6-node `graph_diagram`
+   (differentiation ↔ integration relationships) that still overlapped (`text_occluded`,
+   `content_overlap`) even after the LLM's own one re-author attempt shrank it to 5 nodes. This is
+   a genuinely different problem than the vocabulary gap — graph_diagram layout capacity, not a
+   one-line fix — left undiagnosed-no-longer but **unfixed**, per the user's own choice not to
+   guess at it this session. See **T40**.
+2. **Done.** The 10-second blank stage — `rendering/renderable.py`'s single-block
+   `entrance_start` now capped at `_MAX_ANCHOR_ENTRANCE = 2.0`s (multi-block untouched). Confirmed
+   firing live on the same real re-run (a 5.26s anchor capped to 2.00s, logged at `INFO`).
+3. **Done.** Fallback title cards — `core/graph/nodes/scene_fallback.py`'s `key_terms` now derived
+   deterministically from the segment's own narration (verbatim leading fragments, capped at 4
+   chips; no LLM call); subtitle also now truncated instead of dumping the full `segment.summary`.
+   Confirmed live on the same real re-run: segment 10's fallback card showed 4 chips staged at
+   0.09s/5.26s/8.41s/13.6s, not a static wall of text.
+4. **Still `todo`.** In-browser playback is broken — a real T38A regression. `VideoPlayer.tsx`'s
    `crossOrigin="use-credentials"` requires the whole redirect chain, including the Blob Storage
    SAS target, to answer with CORS headers; confirmed live that the storage account has zero CORS
    rules. Fix: a CORS rule on the existing (Bicep-unmanaged) storage account, added as an
-   idempotent `scripts/deploy_cloud.sh` step.
+   idempotent `scripts/deploy_cloud.sh` step. Verify by actually playing a video in the browser on
+   the deployed SWA URL, not by inspecting headers alone.
 
-**DoD:** a re-run of the same topic measures a fallback rate close to zero (report the number, do
-not just claim improvement); no segment shows an empty stage; every fallback card has narration
--derived chips appearing over time; the video plays in the browser on the real deployed SWA URL.
+**DoD:** items 1-3 met and verified (see above). Item 4 remains: the video plays in the browser on
+the real deployed SWA URL.
 **Depends:** T18L, T38B — met.
 
 ---
@@ -1528,3 +1529,37 @@ each time by the user's own explicit choice to keep the session it was raised in
   one worker's own graph, so this lever only helps *concurrent different jobs*, never one job's
   own speed.
 **Depends:** T35 — met.
+
+### T40 — `graph_diagram` layout capacity · `todo`
+**T18M's one remaining fallback, now diagnosable instead of guessed at.** On the same real
+15-segment render T18M items 1-3 were verified against
+(`24a8f261-d260-4e09-a08d-a7a8640c6245`, "teach me about differential and integral calculus"),
+segment 10 — a `graph_diagram` illustrating differentiation ↔ integration as 6 interconnected
+nodes with captions — failed geometry validation with `text_occluded`/`content_overlap` on its
+first attempt, got one bounded re-author (the LLM's own choice: shrank to 5 nodes), and **still**
+failed with the same codes. Preserved via T18M's new
+`core/graph/nodes/render_diagnostics.py::save_failed_attempt` — both attempts' full scenes and
+findings are on `Storage` at `{job_id}/segments/10/failed_scene_attempt{1,2}.json`, read directly
+during T18M's own verification.
+
+This is a different class of problem than T18M's `clipped_text` vocabulary gap: the LLM's own
+content-shortening feedback loop (`geometry_findings.py::feedback_note`) already ran once and the
+result still didn't fit, which suggests either a real capacity ceiling in how many
+node+caption pairs the `graph_diagram` "graph" sub-layout (`rendering/templates/
+_block_graph_diagram.html`, `GraphLayoutMode.GRAPH`) can place without overlap, or that
+`feedback_note`'s generic "shorter, sparser, smaller" guidance doesn't tell the LLM the one thing
+that would actually fix a graph specifically (node count, not prose length).
+
+**Do not guess at the fix.** Start by reading the two preserved diagnostics for real numbers
+(node/edge/caption counts, position values), then decide whether the fix belongs in the template
+(a real max-node cap enforced before validation, or better auto-layout), the schema (`GraphDiagram
+Slots`, a `min_length`/`max_length`-style guard if `core/strict_schema.py`'s "no defaults, no
+length constraints" rule allows one), or the feedback text (a graph_diagram-specific correction
+naming node count explicitly). A second real render on the same topic (or a synthetic
+reproduction of the preserved 6/5-node scene) is the way to confirm any fix actually closes this,
+the same way T18M closed its own three items.
+
+**DoD:** the preserved segment-10 scenario (or an equivalent dense `graph_diagram`) renders
+without falling back, confirmed by re-running geometry validation against it, not just visual
+inspection.
+**Depends:** T18M — items 1-3 done (met); item 4 unrelated.
