@@ -7,9 +7,10 @@ memory of how this state was reached.**
 ## What just happened
 
 **T18K and T18L both shipped in one combined session** (backend + frontend, by explicit user
-request), then verified against two real end-to-end renders through the live UI — not just the
-offline test suite. Both are marked `done` in `tasks.md`. Full reasoning for every non-obvious
-choice: `decisionlog.md` D165-D171.
+request), verified against two real end-to-end renders through the live UI, checkpointed and
+pushed to `dev` — then a real user bug report against that exact push led to one more fix,
+checkpointed separately just after. Both are marked `done` in `tasks.md`. Full reasoning for
+every non-obvious choice: `decisionlog.md` D165-D172.
 
 ### T18K (backend)
 - **K1** — Tier-1 stills now sample at caption-cue boundaries and block reveal times
@@ -46,18 +47,19 @@ choice: `decisionlog.md` D165-D171.
   separately unit-tested), `WaveScope.tsx` (canvas: a dark scope panel, 3 layered wave copies,
   bright-with-glow left of the playhead / dim ghost right of it). `ClipTrack.tsx`'s playhead
   position is now set via plain `style.left`, not a Motion `animate` tween — kept pixel-synced
-  with what the canvas draws every frame, deliberately not double-smoothed.
+  with what the canvas draws every frame, deliberately not double-smoothed. **`WaveScope.tsx` now
+  also has a hardened failure path — see D172 below, read it before touching this file again.**
 - **L3** — `Segment.render_outcome` (already a real per-segment field on the API schema) is
   destructured directly in `job-adapter.ts` into `SegmentView.degraded` — simpler than the
   original plan's job-level-array-joined-by-index design, since the per-segment field already
   existed (D169). `SegmentCard.tsx` shows a small amber "Degraded" badge with a tooltip; confirmed
   live against two real re-authored segments across two different jobs.
 
-## Two real bugs found only by watching real renders (not by the offline suite)
+## Three real bugs found only by watching real renders or real usage (not by the offline suite)
 
-Both are now fixed, with regression tests — the same "toolchain-only checks miss real defects"
-lesson this project's history keeps re-learning (D89/D106/D109/D119/D124), so read both before
-assuming "tests pass" means "the video is right."
+All three are now fixed, with regression tests — the same "toolchain-only checks miss real
+defects" lesson this project's history keeps re-learning (D89/D106/D109/D119/D124), so read all
+three before assuming "tests pass" means "the feature actually works for a real user."
 
 1. **The caption band was never marked exempt from `hyperframes check --caption-zone`** (D166).
    K1's own fix (extending the last cue's visible window to `duration_ms`) made a real render fail
@@ -73,6 +75,23 @@ assuming "tests pass" means "the video is right."
    ...)` was added to `api/main.py`. **This means T18E's own timing/retry-visibility feature has
    been invisible for its entire life until this session.** If you're debugging something and
    expect to see INFO logs, they now actually work — they didn't before.
+3. **A real user reported the progress waveform rendering as a permanent black box after the
+   above was already pushed to `dev`** (D172). Root cause was a stale Vite dev-server HMR module
+   cache in that one browser tab (`ReferenceError: useState is not defined` from a broken
+   intermediate module state a plain `Ctrl+R` did not clear) — not a logic bug in the pushed code,
+   and not reproducible in this project's own Playwright test browser, which is exactly why the
+   T18K/T18L checkpoint's own verification didn't catch it: that browser only ever loaded the
+   final code, never sat through the session's many incremental HMR updates the way a tab left
+   open during development would have. Fixed regardless, because the underlying failure mode was
+   genuinely bad no matter what triggers it: `WaveScope.tsx` previously had zero error recovery —
+   one thrown exception while drawing a frame permanently starved `requestAnimationFrame` from
+   ever being called again (silent freeze, no console output), and a `getContext('2d')` failure
+   had no fallback at all (a dead black box forever). Now a failed frame retries (falls back only
+   after 5 consecutive failures), a canvas that can't draw at all renders a plain CSS progress bar
+   instead of nothing, and every failure path logs to `console.error`. Test: the new
+   `WaveScope.test.tsx` — jsdom has no real canvas backend by default (the optional `canvas` npm
+   package isn't installed here), so `getContext('2d')` already returns null under vitest,
+   exercising the fallback path for free with no mocking needed.
 
 ## Also fixed this session
 - Two `project-reviewer` nits from the first review pass: `mux/frames_to_clip.py::crossfade` now
@@ -82,10 +101,10 @@ assuming "tests pass" means "the video is right."
   `rendering/renderable.py` to stay under the 200-line ceiling once still-plan wiring was added.
 - `rendering/block_timing.py`'s two pure array-math helpers moved to new
   `rendering/timing_math.py`, same reason.
-- **A real 200-line-ceiling violation slipped past the quality hook**, found in this checkpoint's
-  own final review pass: a test appended via a raw Bash heredoc (`cat >>`) bypasses the
-  `PostToolUse` hook entirely, since it only fires on Edit/Write tool calls. Caught at 205 lines
-  on `tests/test_compose_scene.py`, fixed by moving the test to its own file
+- **A real 200-line-ceiling violation slipped past the quality hook**, found in the first
+  checkpoint's own final review pass: a test appended via a raw Bash heredoc (`cat >>`) bypasses
+  the `PostToolUse` hook entirely, since it only fires on Edit/Write tool calls. Caught at 205
+  lines on `tests/test_compose_scene.py`, fixed by moving the test to its own file
   (`tests/test_caption_zone_exemption.py`). **Worth remembering going forward: a raw shell append
   to a `.py` file gets none of the automatic `ruff check --fix`/`ruff format`/line-count
   enforcement Edit/Write gets — prefer Write for new files and Edit for existing ones, even when
@@ -93,16 +112,21 @@ assuming "tests pass" means "the video is right."
 
 ## Environment state
 
-- `RUNTIME_ENV=azure`. Backend (`uvicorn api.main:app`, **no** `--reload`, restarted twice this
-  session to pick up the caption fix and then the logging fix) and frontend (`npm run dev` in
-  `web/`, also restarted once for a clean module graph after two file deletions) are both running
-  for the user as of this checkpoint — confirm they're still up before assuming a fresh render
-  will work.
-- Two real jobs from this session's own verification remain on disk under `artifacts/_api_run/`:
-  `a662bdf1881743c1a2b830f9f4bbb56c` (DNS resolution, 6 segments, one real degraded/re-authored
-  segment) and `a2365c0bc4534e0f960cf62f8382e937` (TCP handshake, 6 segments, also one real
-  degraded segment) — both succeeded end to end, both are what D171's finalize timing numbers
-  came from.
+- `RUNTIME_ENV=azure`. Backend (`uvicorn api.main:app`, **no** `--reload`) restarted several times
+  across both checkpoints (caption fix, logging fix). Frontend (`npm run dev` in `web/`) was
+  restarted **with its Vite dependency cache cleared** (`rm -rf web/node_modules/.vite`) as the
+  concrete fix for D172's stale-module bug — both are running for the user as of this checkpoint.
+  **If a black box, a blank panel, or any "it worked before and now it doesn't" report comes up
+  again on the frontend, clearing `web/node_modules/.vite` and restarting is the first thing to
+  try before assuming a logic bug** — this is now a demonstrated real failure mode for this
+  project's dev workflow, not a theoretical one, especially after a long session with many edits
+  to the same file via HMR.
+- Real jobs from this session's own verification remain on disk under `artifacts/_api_run/`:
+  `a662bdf1881743c1a2b830f9f4bbb56c` (DNS resolution) and `a2365c0bc4534e0f960cf62f8382e937` (TCP
+  handshake) — both 6 segments, both succeeded with one real degraded/re-authored segment each,
+  both are what D171's finalize timing numbers came from. `fb473305e1ae4ef3946e4fc79849728e` and
+  `d272c91b5ca44db798ff412a7d985528` (the CAT DILR puzzle topic and a binary-search topic) are
+  from D172's own reproduction and fix verification.
 
 ## Gotchas carried forward, still true
 
@@ -110,9 +134,12 @@ assuming "tests pass" means "the video is right."
   docstring; breaks every subprocess-shelling call non-deterministically.
 - **A backend started without `--reload` gives no signal that it's serving stale code.** Restart
   it by hand after any pipeline-relevant edit, every time.
+- **The frontend dev server can serve a stale/broken module to a tab that's been open across many
+  HMR updates, and a plain reload does not always clear it** (D172) — a real, reproduced failure
+  mode now, not theoretical. Prefer restarting the dev server (with its `.vite` cache cleared) over
+  debugging a frontend symptom that doesn't match the current source on disk.
 - **The `PostToolUse` quality hook only fires on Edit/Write, never on a raw Bash file write** —
-  see "Also fixed this session" above. This is now a demonstrated real failure mode, not a
-  theoretical one.
+  a demonstrated real failure mode (see "Also fixed this session" above).
 - **Opus plans, Sonnet builds — this is not self-enforcing.** Check the current-model line after a
   plan is approved and before the first `Write`/`Edit`/`Bash` of a build.
 - `graph_diagram` is deliberately excluded from `_SORTABLE_ITEM_FIELDS` and must stay that way —
@@ -121,6 +148,10 @@ assuming "tests pass" means "the video is right."
   logging configuration elsewhere (a test fixture, a script), remember `basicConfig` is a no-op
   once root handlers exist — order of configuration now matters in a way it didn't before this
   session, in the unlikely case something else tries to configure logging first.
+- **A silent, unexplained failure with no visible error is worse than a visible one, everywhere in
+  this codebase** — three separate findings this session (D166, D167, D172) were each "something
+  failed and nothing said so." When adding a new failure path anywhere, ask what it looks like to
+  someone with no access to the source when it breaks.
 
 ## Known gaps / open questions, unresolved this session
 

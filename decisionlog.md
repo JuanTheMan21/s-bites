@@ -4068,3 +4068,34 @@ all): `concat_segments` 12.61s, `final.mp4` upload 1.14s, `write_srt` 0.00s, `fi
 majority of the drop; the `.srt` gap's absence here is consistent with D162's own Blob-upload-
 latency guess being real but intermittent, not with the guess being wrong -- not confirmed either
 way, and not worth chasing further now that finalize is no longer the dominant cost.
+
+### D172 -- A real user-reported "waveform is a permanent black box" bug traced to a stale Vite
+dev-server HMR module cache in that one browser tab, not a logic bug in the shipped code --
+`WaveScope.tsx` hardened regardless, since the underlying failure mode (a canvas that stops
+drawing) had zero recovery and zero visible error no matter what caused it.
+
+**Rejected:** treating this as closed once the caching artifact was identified. The dev-server
+cache explains THIS occurrence, but it does not make the component's own behavior under a real
+canvas failure acceptable -- a permanent, silent, unexplained black box is the wrong failure mode
+regardless of what triggers it, and this project's own history (D160's `--reload` incident,
+D167's silent-logging gap) is full of exactly this lesson: a failure mode that produces no visible
+signal costs far more debugging time than one that does.
+
+**Reasoning:** reproduced live, twice, against the user's own exact topic and exact phase
+("Composing scenes"): a `ReferenceError: useState is not defined` inside `WaveScope`, thrown
+during render from a stale cached module -- `location.reload()` did not clear it (the browser kept
+re-serving the same cached response), only navigating to a genuinely different URL forced a fresh
+fetch. This was not reproducible in this project's own Playwright test browser, which explains why
+the checkpoint before this one didn't catch it: that verification used a browser that only ever
+loaded the FINAL, correct code, never sat through the many incremental HMR updates a tab left open
+during active development would have. Root cause aside, the code itself had two real gaps, both
+fixed: (1) any exception thrown while drawing a frame skipped the `requestAnimationFrame(frame)`
+call that would have scheduled the next one, permanently freezing the animation with nothing in
+the console; (2) `canvas.getContext('2d')` returning null (or throwing) had no fallback at all,
+leaving the component's own dark background as the only visible thing forever. Fixed: a failed
+frame now retries (falls back only after 5 consecutive failures), and a canvas that can't draw at
+all now renders a plain CSS progress bar instead of nothing, with every failure path logged to
+`console.error` so a real recurrence is diagnosable. Regression tests in the new
+`WaveScope.test.tsx` exercise the fallback for free -- jsdom has no real canvas backend (the
+optional `canvas` npm package isn't installed here), so `getContext('2d')` already returns null
+under vitest by construction, no mocking needed.

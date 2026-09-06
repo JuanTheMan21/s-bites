@@ -1236,6 +1236,12 @@ every phase including the four with no per-segment signal, and the degraded badg
 correctly on two real re-authored segments across two different real renders. Full detail:
 `decisionlog.md` D165-D171, `handoff.md`.
 **Depends:** none. Built in the same combined session as T18K, sharing no files.
+**Note added by this checkpoint's own immediate follow-up:** a real user hit the waveform
+rendering as a permanent black box right after this task's own push — traced to a stale Vite
+dev-server module cache (D172), not a logic bug, and not reproducible in this project's own test
+browser. `WaveScope.tsx` was hardened regardless (a failed frame no longer freezes the animation
+forever; a canvas that can't draw at all now falls back to a plain progress bar instead of
+nothing). Read D172 before touching `WaveScope.tsx` again.
 
 Independent of T18K — **they share no files**, so either order, or in parallel. Respect the ESLint
 seam (`web/eslint.config.js`): `features/`, `components/`, `routes/` may not import `src/api/*` or

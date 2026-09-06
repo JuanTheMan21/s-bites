@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { buildHarmonics, edgeEnvelope, sampleWave, type Harmonic } from './wave-shape'
 
 interface Props {
@@ -102,12 +102,25 @@ function drawFrame(
  * bright where real progress has been made and dim beyond it -- the boundary between the two IS
  * the progress indicator, legible at a glance rather than needing a separate thin bar.
  * `ClipTrack.tsx` overlays the existing playhead marker on top of this at the same `fillPct`. */
+// A frame that throws (any browser/GPU/extension quirk that makes 2D canvas drawing misbehave,
+// not just theoretical) used to permanently kill the rAF loop with zero recovery and zero visible
+// error -- the loop's own `requestAnimationFrame(frame)` call sat AFTER the draw call, so an
+// exception skipped it and nothing ever scheduled another frame again. Found live: a real user's
+// browser showed nothing but this component's own dark background (plus the separate, unaffected
+// DOM playhead marker riding on top) -- exactly what a silently-dead canvas looks like, and it
+// could not be reproduced in this project's own test browser, so the actual trigger is unconfirmed.
+// Fixed on two levels: a failed draw no longer stops the loop (caught, logged, retried next
+// frame), and if drawing keeps failing or a 2D context can never be obtained at all, this falls
+// back to a plain CSS progress bar rather than a dead black box forever.
+const MAX_CONSECUTIVE_DRAW_FAILURES = 5
+
 export function WaveScope({ seed, fillPct }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   // buildHarmonics is pure and deterministic on seed -- calling it during render (the initial
   // useRef value) is not a purity violation the way performance.now()/matchMedia would be.
   const harmonicsRef = useRef(buildHarmonics(seed))
   const fillRef = useRef(fillPct)
+  const [canvasFailed, setCanvasFailed] = useState(false)
 
   useEffect(() => {
     harmonicsRef.current = buildHarmonics(seed)
@@ -120,9 +133,22 @@ export function WaveScope({ seed, fillPct }: Props) {
   }, [fillPct])
 
   useEffect(() => {
+    if (canvasFailed) return
     const canvas = canvasRef.current
-    const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx) return
+    let ctx: CanvasRenderingContext2D | null = null
+    try {
+      ctx = canvas?.getContext('2d') ?? null
+    } catch (err) {
+      console.error('WaveScope: canvas.getContext("2d") threw', err)
+    }
+    if (!canvas || !ctx) {
+      console.error('WaveScope: no 2D canvas context available, falling back to a plain bar')
+      // Deferred, not called synchronously in the effect body -- react-hooks/set-state-in-effect
+      // wants setState reserved for callbacks, even a one-off failure path like this one.
+      queueMicrotask(() => setCanvasFailed(true))
+      return
+    }
+    const readyCtx = ctx
 
     const reduceMotion =
       typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -136,7 +162,7 @@ export function WaveScope({ seed, fillPct }: Props) {
       const rect = canvas.getBoundingClientRect()
       canvas.width = Math.max(1, Math.round(rect.width * dpr))
       canvas.height = Math.max(1, Math.round(rect.height * dpr))
-      ctx?.setTransform(dpr, 0, 0, dpr, 0, 0)
+      readyCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
 
     resize()
@@ -144,16 +170,32 @@ export function WaveScope({ seed, fillPct }: Props) {
     observer.observe(canvas)
 
     let raf = 0
+    let consecutiveFailures = 0
     function frame(now: number) {
-      const rect = canvas!.getBoundingClientRect()
-      const t = (now - start) / 1000
-      drawFrame(ctx!, harmonicsRef.current, t, rect.width, rect.height, fillRef.current)
+      try {
+        const rect = canvas!.getBoundingClientRect()
+        const t = (now - start) / 1000
+        drawFrame(readyCtx, harmonicsRef.current, t, rect.width, rect.height, fillRef.current)
+        consecutiveFailures = 0
+      } catch (err) {
+        consecutiveFailures += 1
+        console.error('WaveScope: draw frame failed', err)
+        if (consecutiveFailures >= MAX_CONSECUTIVE_DRAW_FAILURES) {
+          setCanvasFailed(true)
+          return
+        }
+      }
       raf = requestAnimationFrame(frame)
     }
 
     if (reduceMotion) {
-      const rect = canvas.getBoundingClientRect()
-      drawFrame(ctx, harmonicsRef.current, 0, rect.width, rect.height, fillRef.current)
+      try {
+        const rect = canvas.getBoundingClientRect()
+        drawFrame(readyCtx, harmonicsRef.current, 0, rect.width, rect.height, fillRef.current)
+      } catch (err) {
+        console.error('WaveScope: static draw failed', err)
+        queueMicrotask(() => setCanvasFailed(true))
+      }
     } else {
       raf = requestAnimationFrame(frame)
     }
@@ -162,7 +204,24 @@ export function WaveScope({ seed, fillPct }: Props) {
       observer.disconnect()
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [])
+  }, [canvasFailed])
+
+  if (canvasFailed) {
+    return (
+      <div className="relative h-[88px] w-full overflow-hidden rounded-md" style={{ background: SCOPE_BG }}>
+        <div
+          aria-hidden
+          className="absolute inset-y-0 left-0"
+          style={{
+            width: `${Math.min(100, Math.max(0, fillPct))}%`,
+            background: BRIGHT_COLOR,
+            boxShadow: `0 0 14px 2px ${BRIGHT_GLOW}`,
+            transition: 'width 0.2s linear',
+          }}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="relative h-[88px] w-full overflow-hidden rounded-md" style={{ background: SCOPE_BG }}>
