@@ -23,22 +23,24 @@ describe('WaveScope', () => {
     await waitFor(() => expect(container.querySelector('canvas')).toBeNull())
     const bar = container.querySelector('[aria-hidden]') as HTMLElement | null
     expect(bar).not.toBeNull()
-    expect(bar!.style.width).toBe('42%')
+    // scaleX, not width -- a layout property would reflow on every tick; transform is
+    // compositor-only (found by the project's own design hook, fixed alongside this suite).
+    expect(bar!.style.transform).toBe('scaleX(0.42)')
 
     errorSpy.mockRestore()
   })
 
-  it('clamps the fallback bar width into 0..100 regardless of an out-of-range fillPct', async () => {
+  it('clamps the fallback bar scale into 0..1 regardless of an out-of-range fillPct', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const { container, rerender } = render(<WaveScope seed={1} fillPct={150} />)
     await waitFor(() => expect(container.querySelector('canvas')).toBeNull())
     let bar = container.querySelector('[aria-hidden]') as HTMLElement
-    expect(bar.style.width).toBe('100%')
+    expect(bar.style.transform).toBe('scaleX(1)')
 
     rerender(<WaveScope seed={1} fillPct={-10} />)
     bar = container.querySelector('[aria-hidden]') as HTMLElement
-    expect(bar.style.width).toBe('0%')
+    expect(bar.style.transform).toBe('scaleX(0)')
 
     vi.restoreAllMocks()
   })
