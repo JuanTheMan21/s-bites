@@ -1530,36 +1530,60 @@ each time by the user's own explicit choice to keep the session it was raised in
   own speed.
 **Depends:** T35 — met.
 
-### T40 — `graph_diagram` layout capacity · `todo`
-**T18M's one remaining fallback, now diagnosable instead of guessed at.** On the same real
-15-segment render T18M items 1-3 were verified against
-(`24a8f261-d260-4e09-a08d-a7a8640c6245`, "teach me about differential and integral calculus"),
-segment 10 — a `graph_diagram` illustrating differentiation ↔ integration as 6 interconnected
-nodes with captions — failed geometry validation with `text_occluded`/`content_overlap` on its
-first attempt, got one bounded re-author (the LLM's own choice: shrank to 5 nodes), and **still**
-failed with the same codes. Preserved via T18M's new
-`core/graph/nodes/render_diagnostics.py::save_failed_attempt` — both attempts' full scenes and
-findings are on `Storage` at `{job_id}/segments/10/failed_scene_attempt{1,2}.json`, read directly
-during T18M's own verification.
+### T40 — `graph_diagram` deep-chain layout capacity · `todo`
+**T18M's one remaining fallback — root cause now pinned down to exact math and exact colliding
+elements, in a follow-up session after T18M's own checkpoint, not guessed at.** Preserved via
+T18M's `core/graph/nodes/render_diagnostics.py::save_failed_attempt` on job
+`24a8f261-d260-4e09-a08d-a7a8640c6245`'s segment 10 (`{job_id}/segments/10/
+failed_scene_attempt{1,2}.json`), then reproduced directly and diagnosed with the real tool:
 
-This is a different class of problem than T18M's `clipped_text` vocabulary gap: the LLM's own
-content-shortening feedback loop (`geometry_findings.py::feedback_note`) already ran once and the
-result still didn't fit, which suggests either a real capacity ceiling in how many
-node+caption pairs the `graph_diagram` "graph" sub-layout (`rendering/templates/
-_block_graph_diagram.html`, `GraphLayoutMode.GRAPH`) can place without overlap, or that
-`feedback_note`'s generic "shorter, sparser, smaller" guidance doesn't tell the LLM the one thing
-that would actually fix a graph specifically (node count, not prose length).
+```
+python - <<'EOF'   # loads a preserved failed_scene_attemptN.json, calls compose_scene + the
+                    # real local PlaywrightHyperFramesRenderBackend.validate_geometry
+EOF
+cd <composed dir> && npx hyperframes check --json --samples 9 \
+  --caption-zone "x0=0;y0=0.8574;x1=1;y1=0.9407;severity=error" .
+```
+(the exact repro script was run inline this session, not saved as a file — reconstructing it from
+`core/models.Segment` + `rendering.compose.compose_scene` +
+`adapters.local.render_backend.PlaywrightHyperFramesRenderBackend.validate_geometry` takes under a
+minute; feed it either preserved attempt's `scene` JSON and a plausible `duration_ms`).
 
-**Do not guess at the fix.** Start by reading the two preserved diagnostics for real numbers
-(node/edge/caption counts, position values), then decide whether the fix belongs in the template
-(a real max-node cap enforced before validation, or better auto-layout), the schema (`GraphDiagram
-Slots`, a `min_length`/`max_length`-style guard if `core/strict_schema.py`'s "no defaults, no
-length constraints" rule allows one), or the feedback text (a graph_diagram-specific correction
-naming node count explicitly). A second real render on the same topic (or a synthetic
-reproduction of the preserved 6/5-node scene) is the way to confirm any fix actually closes this,
-the same way T18M closed its own three items.
+**This is a genuine physical capacity ceiling, not a spacing constant to retune.** Segment 10's
+attempt 2 is a 5-node straight chain (`a→d→f→i→n`, GRAPH layout mode though topologically a
+CHAIN) with no same-rank crowding at all — one node per rank, 5 ranks. `hyperframes check`'s raw
+JSON named the exact collision: node "Integration"'s `div.blk-graph-label` overlapping node "Net
+change"'s `#b0-node-marker-4` (and a second overlap on rank 0's marker). The math: each node needs
+roughly **250px** of vertical room for its marker+label alone (`rendering/templates/
+_block_graph_diagram.html`'s own existing `RANK_NODE_PX` constant, already calibrated for exactly
+this — it is just never wired into the rank-axis spacing formula, only into the same-rank overflow
+path). 5 nodes need 4 gaps × 250px = **1000px**. The safe vertical band that keeps a node clear of
+the bottom caption zone (`Y_MIN_FRAC`/`Y_MAX_FRAC` × the non-compact canvas's real 620px height) is
+only **~335px**. No spacing-constant tweak closes a 1000px-vs-335px gap — the existing single-
+column rank layout cannot fit a 5-deep chain in GRAPH mode at all, non-compact.
 
-**DoD:** the preserved segment-10 scenario (or an equivalent dense `graph_diagram`) renders
-without falling back, confirmed by re-running geometry validation against it, not just visual
-inspection.
+Confirmed NOT the earlier hypothesis this session tried first: the file's own caption-vs-
+marker+label collision-drop mechanism (`_block_graph_diagram.html`'s `graphEssentialRects`/
+`hfRectsOverlap` pass) is already working correctly — 4 of 5 captions were confirmed hidden via a
+live Playwright bounding-rect dump. The remaining overlap is between two nodes' ESSENTIAL content
+(marker+label), which that mechanism deliberately never drops (by design — see the file's own
+comment on why captions are the droppable layer and marker+label are not).
+
+**The real fix is a genuine layout algorithm feature, not a one-line change: teach
+`computeLayeredLayout` to zigzag/serpentine a deep single-file chain across both axes** (e.g.
+alternate rank-axis nodes between two cross-axis lanes) so 5+ ranks get real room instead of being
+squeezed into one column. This is new capability in a template with a five-round hardening history
+(T18E→T18H, each round's own comments document a live collision found, fixed narrowly, and
+re-verified) — every prior round in this file changed something and had to re-verify against
+several other real diagram shapes to avoid trading one collision for another elsewhere. Do the
+same here: implement, then re-render segment 10's exact preserved scene AND at least 2-3 other
+real historical `graph_diagram` jobs (`artifacts/_cli_run/*/segments/*/composition/` from past
+sessions, or a fresh CLI run) before considering this closed. **Do not ship a spacing-constant
+tweak that "happens to" pass segment 10** — the math above shows why that would be a coincidence,
+not a fix, for any similarly deep chain.
+
+**DoD:** segment 10's preserved scene (either attempt) renders without a `content_overlap` or
+`text_occluded` `[error]`, confirmed by `hyperframes check`'s own JSON output (not visual
+inspection alone), AND at least 2-3 other real historical `graph_diagram` renders show no new
+collisions introduced by the change.
 **Depends:** T18M — items 1-3 done (met); item 4 unrelated.

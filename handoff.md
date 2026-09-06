@@ -46,14 +46,20 @@ rule on the existing, Bicep-unmanaged storage account, added as an idempotent
 `scripts/deploy_cloud.sh` step. Not attempted this session — D191's own ordering said item 4 only
 after items 1-3 land, which they now have, so this is unblocked for a future session.
 
-### T40 — new task, not built
-The one remaining fallback (segment 10 of the verification job) is a 6-node `graph_diagram` that
-still overlapped after the LLM's own one re-author attempt shrank it to 5 nodes — a real capacity
-question (how many node+caption pairs the `graph_diagram` "graph" layout can place without
-overlap), not a vocabulary gap. Both failed attempts' full scenes and findings are preserved on
-`Storage` at `{job_id}/segments/10/failed_scene_attempt{1,2}.json` for
-`24a8f261-d260-4e09-a08d-a7a8640c6245` — read them directly rather than re-deriving. Full scope in
-`tasks.md`'s T40 entry.
+### T40 — pinned down precisely this session, still not built
+Pushed further after the first checkpoint (D192) at the user's explicit request ("do more") —
+reproduced segment 10's exact preserved scene locally (real `compose_scene` +
+`PlaywrightHyperFramesRenderBackend.validate_geometry`, real `hyperframes check --json`) and got
+the actual colliding elements, not a guess. **Root cause is a genuine physical capacity ceiling**:
+a 5-node straight chain needs ~250px/node along the rank axis (4 gaps x 250px = 1000px) but the
+safe vertical band before the caption zone is only ~335px — no spacing-constant retune closes that
+gap. The real fix is a new serpentine/zigzag layout capability in `computeLayeredLayout`
+(`rendering/templates/_block_graph_diagram.html`), not a one-line change, and that file has a
+five-round hardening history where every fix needed live re-verification against several other
+diagram shapes. Deferred rather than rushed, on the user's own choice once the tradeoff was
+explicit. Full math, the disproven first hypothesis (caption-vs-caption — checked live, was
+already correctly mitigated), and the repro method are in `tasks.md`'s T40 entry and
+`decisionlog.md` D193 — read those before touching this file, not this summary.
 
 ## Environment state
 

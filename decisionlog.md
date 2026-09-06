@@ -4573,3 +4573,51 @@ T18-era frontend-insulation guarantee (CLAUDE.md's Invariant 5) rather than test
 
 Item 4 (Blob CORS / in-browser playback) is still open on `cloud`, unchanged from D191 -- not
 attempted this session, per D191's own ordering (item 4 only after 1-3 land, which they now have).
+
+### D193 -- T40's `graph_diagram` fallback traced to an exact, math-backed capacity ceiling, not
+a spacing constant to retune; a real fix (serpentine layout) deferred rather than rushed.
+
+**Reasoning:** after D192 closed T18M items 1-3 and deferred segment 10's remaining fallback as
+T40, the user pushed back on stopping after one fix iteration ("do more"). This entry records
+what the deeper dig found, since it materially sharpens T40 beyond D192's original diagnosis.
+
+**Method, not guesswork:** reproduced segment 10's exact preserved failing scene locally --
+loaded `failed_scene_attempt2.json` from `Storage`, built a real `Segment` from it, ran it through
+the real `rendering.compose.compose_scene` and the real local `PlaywrightHyperFramesRenderBackend
+.validate_geometry` (not a mock). First hypothesis tried (captions colliding with EACH OTHER,
+unmitigated by `_block_graph_diagram.html`'s existing `graphEssentialRects` collision-drop) was
+tested directly with a live Playwright bounding-rect dump and **disproven** -- 4 of 5 captions
+were already being correctly hidden by the existing mechanism. Ran `npx hyperframes check --json`
+directly against the reproduced composition (bypassing the adapter's terse string return) to get
+the tool's own raw per-finding JSON, which names the exact colliding selectors: node
+"Integration"'s label overlapping node "Net change"'s marker circle, plus a second overlap on
+rank 0's marker -- real elements, real coordinates, not inferred.
+
+**Root cause, confirmed by arithmetic against the template's own already-existing constants:**
+segment 10's attempt-2 scene is a 5-node straight chain (topologically a CHAIN, authored as GRAPH
+mode) -- one node per rank, so none of the existing same-rank crowding mitigations (T18H) apply at
+all. `_block_graph_diagram.html`'s own `RANK_NODE_PX` constant (250px for non-compact) already
+states what one node's marker+label needs along the rank axis, but is wired only into the
+same-rank overflow-promotion path, never into the base rank-to-rank spacing formula. 5 nodes need
+4 gaps x 250px = 1000px; the safe vertical band before a node's content risks the caption zone
+(`Y_MIN_FRAC`/`Y_MAX_FRAC` x the real 620px canvas) is only ~335px. No constant retune closes a
+1000-vs-335px gap -- this is a genuine capacity ceiling of the current single-column rank layout,
+not a bug in an otherwise-correct formula.
+
+**Rejected:** shipping a spacing-constant bump anyway "since it might help." The arithmetic above
+shows any single-column fix is a coincidence for this one scene's exact proportions, not a real
+fix for any similarly deep chain -- exactly the kind of blind fix D191/T18M's own text warned
+against, now confirmed with real numbers rather than suspected. **Also rejected:** implementing
+the real fix (a serpentine/zigzag rank layout so a deep chain gets real room on both axes) in this
+same session. `_block_graph_diagram.html` has a five-round hardening history (T18E through T18H),
+every round narrowly targeted and re-verified live against multiple real diagram shapes to avoid
+trading one collision for another -- the same discipline this fix would need, and the user's own
+explicit instruction this session was not to break other working video output while chasing this
+one segment. Presented to the user directly as a scoped choice (implement now vs. record precisely
+and stop); the user chose to stop, given the file's own risk profile and the time a properly
+re-verified change would take.
+
+T40 in `tasks.md` was rewritten with this exact diagnosis (the arithmetic, the confirmed-wrong
+first hypothesis so it is not re-tried, the specific colliding selectors, and the repro method) so
+whoever builds the real fix starts from evidence, not from D192's original, softer "read the
+preserved diagnostics and decide" framing.
