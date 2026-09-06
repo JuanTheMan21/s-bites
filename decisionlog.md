@@ -4664,3 +4664,53 @@ trail for a future range-seeking bug to be misdiagnosed against.
 All four T18M items are now done. The task's own `tasks.md` entry is the fuller record; this entry
 is the reasoning trail for the one judgment call (accepting the clear/add non-atomicity) and the
 one thing intentionally left unverified (real browser playback).
+
+### D195 -- Waveform-appears-invisible-sometimes bug fixed on `dev`, merged into `cloud`: a real
+visibility defect, not a browser-specific one, found by reasoning through the actual code rather
+than reproducing live (no access to the user's own authenticated session).
+
+**Reasoning:** the user reported it live, mid-session, right after T18M item 4's push: two jobs
+submitted with the identical prompt on two different accounts/browsers, one showed the real
+flowing waveform, the other showed only a plain black box with the playhead dot moving, and asked
+for it fixed "properly," pushed to both `dev` and `cloud` (frontend work, so `dev` first per the
+branch-split convention), then checkpointed again.
+
+**Diagnosis, in order, each step ruling something out with real evidence rather than assumption:**
+1. First checked whether this was D172's known canvas-failure fallback (`WaveScope.tsx`) firing
+   again -- that path unconditionally logs to `console.error` before ever falling back. The user
+   checked DevTools directly: zero console output. Ruled out.
+2. Tried Log Analytics (`az monitor log-analytics query`) against both job ids -- empty, most
+   likely ingestion lag on jobs the user said were still running, not informative either way.
+3. Asked what was actually on screen: "just a black box with the slider moving through it." The
+   DOM-level ask (canvas present or not) couldn't be answered live (user had no laptop access), so
+   the investigation moved to reading the code directly rather than waiting on more live checks.
+4. Traced the real data flow: `WaveScope.tsx`'s `seed` is `ClipTrack.tsx`'s `segmentCount`, and its
+   `fillPct` comes from `use-progress-model.ts::derivePhaseProgress`, which returns `null` for any
+   phase with no per-segment signal -- true for the ENTIRE `outline` phase, which every job passes
+   through first. During that stretch, `ClipTrack.tsx`'s `fillPct` is `0`, and `WaveScope.tsx`'s
+   `drawFrame` draws the WHOLE canvas from `DIM_COLOR` (`rgba(255,255,255,0.14)`), further
+   multiplied by each of its three layers' own alpha (1, 0.5, 0.3) -- effective opacities of
+   0.14/0.07/0.042 against the near-black `#0a0a0d` background. Two jobs "looking different" was
+   never a browser difference -- it was one job simply being further along (a real non-zero
+   `fillPct`) than the other at the moment the user looked.
+5. **Verified this wasn't just arithmetic before touching code**: extracted the real wave-drawing
+   math (`wave-shape.ts` + `WaveScope.tsx`'s `pathForLayer`/`drawFrame`) into a standalone canvas
+   test page, rendered old (0.14) vs. a candidate new (0.38) `DIM_COLOR` side by side at
+   `fillPct=0` (the worst case), and screenshotted both via Playwright -- old was confirmably
+   near-invisible, new read clearly as a wave. Fixed the actual file only after seeing this.
+
+**Also fixed, found by the project's own design-quality hook while editing this file (not part of
+the original report):** the D172 fallback bar animated CSS `width` (a layout property -- reflow
+every tick) instead of `transform: scaleX()` (compositor-only). Fixed alongside the color change
+since it was already flagged on the same file being touched; `WaveScope.test.tsx`'s assertions
+updated to check `style.transform` instead of `style.width`.
+
+**Rejected:** waiting for further live reproduction (Log Analytics ingestion, more DevTools
+round-trips) before fixing -- the code-level evidence (the exact data path from `null`
+`phaseProgress` to a fully-dim canvas) was strong enough on its own, and was independently
+confirmed visually before shipping, which is the same evidentiary bar this session held itself to
+for T18M/T40 (reproduce or derive from real evidence, never patch on a guess).
+
+Built on `dev` (commit `374b934`), merged into `cloud` per the branch-split rule (frontend work
+belongs on `dev` first), full gates (pytest, ruff, boundary, web typecheck/lint/test) green on
+both branches before and after the merge.
