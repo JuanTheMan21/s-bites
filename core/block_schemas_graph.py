@@ -8,10 +8,23 @@ always null for ``CHAIN``); ``GraphLayoutMode.GRAPH`` places nodes on a real 2D 
 arbitrary topology, with an optional traversal highlight.
 """
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from core.block_types import GraphLayoutMode
 from core.strict_schema import StrictSchema
+
+# T18K/D163: "Three to seven nodes" and the edge/traversal caps below are enforced here, not as
+# Field(min_length=..., max_length=...) -- core/strict_schema.py's own docstring names `minItems`/
+# `maxItems` as keywords Azure strict mode rejects outright (a 400 at call time, mid-run), and
+# tests/test_block_schemas.py's conformance walk would catch that mistake immediately. A
+# model_validator runs after a real response is already parsed, so a violation raises pydantic's
+# ValidationError -- adapters/azure/openai_errors.py translates that into a StructuredOutputError,
+# which the existing node-local bounded retry (core/graph/nodes/structured_retry.py) re-asks
+# against, the same enforcement with no schema-time rejection risk.
+_MIN_NODES = 3
+_MAX_NODES = 7
+_MAX_EDGES = 12
+_MAX_TRAVERSAL_STEPS = 8
 
 
 class GraphNode(StrictSchema):
@@ -92,3 +105,21 @@ class GraphDiagramSlots(StrictSchema):
         "node. Leave empty for a diagram that just sits there, fully revealed, once its entrance "
         "finishes."
     )
+
+    @model_validator(mode="after")
+    def _bounded_counts(self) -> "GraphDiagramSlots":
+        """The backstop for the prose above -- see this module's own top-of-file note for why
+        this is a validator and not a ``Field`` constraint. Real edge routing is out of scope
+        (T18K); capping node/edge count just gives the existing layout fewer things to arrange."""
+        if not _MIN_NODES <= len(self.nodes) <= _MAX_NODES:
+            raise ValueError(
+                f"nodes must have {_MIN_NODES} to {_MAX_NODES} entries, got {len(self.nodes)}"
+            )
+        if len(self.edges) > _MAX_EDGES:
+            raise ValueError(f"edges must have at most {_MAX_EDGES} entries, got {len(self.edges)}")
+        if len(self.traversal) > _MAX_TRAVERSAL_STEPS:
+            raise ValueError(
+                f"traversal must have at most {_MAX_TRAVERSAL_STEPS} entries, "
+                f"got {len(self.traversal)}"
+            )
+        return self

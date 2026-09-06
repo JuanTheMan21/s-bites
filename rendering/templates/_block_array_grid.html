@@ -39,7 +39,7 @@
          -- hyperframes check's text_occluded finding is correct that the strike overlaps the
          text, and wrong that it is a legibility bug; a strikethrough crossing its own text is
          the whole point of the mark, not an accident. #}
-      <span class="blk-array-cell-value" data-layout-allow-occlusion>{{ cell }}</span>
+      <span class="blk-array-cell-value" data-layout-allow-occlusion data-anno-avoid>{{ cell }}</span>
       <span class="blk-array-cell-strike" id="{{ prefix }}-strike-{{ loop.index0 }}"></span>
       <span class="blk-array-badge" id="{{ prefix }}-badge-{{ loop.index0 }}"></span>
     </div>

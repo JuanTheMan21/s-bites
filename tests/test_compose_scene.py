@@ -49,7 +49,8 @@ def test_it_writes_index_html_and_the_vendored_gsap_it_references(
     (no more jsDelivr CDN, so a render needs no network egress). Verified directly against
     ``hyperframes check`` that a sibling file does not violate D60's actual constraint, which is
     the entry file's name (``index.html``) and location, not the directory being literally empty
-    otherwise.
+    otherwise. T18K adds a second sibling, ``still_plan.json`` (``rendering/still_plan.py``) --
+    same constraint, same reasoning.
     """
     segment = _a_composed_segment(block_type)
     dest_dir = tmp_path / "segments" / "0" / "composition"
@@ -57,7 +58,11 @@ def test_it_writes_index_html_and_the_vendored_gsap_it_references(
     dest = compose_scene(segment, dest_dir)
 
     assert dest == dest_dir / "index.html"
-    assert set(dest_dir.iterdir()) == {dest, dest_dir / "gsap.min.js"}
+    assert set(dest_dir.iterdir()) == {
+        dest,
+        dest_dir / "gsap.min.js",
+        dest_dir / "still_plan.json",
+    }
     assert (dest_dir / "gsap.min.js").stat().st_size > 0
     assert "cdn.jsdelivr" not in dest.read_text(encoding="utf-8")
 

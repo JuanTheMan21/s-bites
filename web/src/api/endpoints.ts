@@ -6,6 +6,7 @@ import type { components } from './schema'
 export type VideoJobDto = components['schemas']['VideoJob']
 export type SegmentDto = components['schemas']['Segment']
 export type JobSubmissionDto = components['schemas']['JobSubmission']
+export type RenderOutcomeDto = components['schemas']['RenderOutcome']
 
 /** `response.status` (not the schema-typed `error`) is what every caller here branches on --
  * FastAPI's real status codes (404, 409) are meaningful even when `app.openapi()` never declared

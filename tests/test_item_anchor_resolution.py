@@ -58,6 +58,14 @@ def test_graph_diagram_nodes_resolve_via_anchor_phrase_not_label() -> None:
                     "caption": None,
                     "anchor_phrase": "it forwards onward",
                 },
+                # T18K/D163: GraphDiagramSlots now requires 3-7 nodes -- this third node plays no
+                # part in the anchor-resolution proof below, it exists only to satisfy the bound.
+                {
+                    "id": "n3",
+                    "label": "Egress",
+                    "caption": None,
+                    "anchor_phrase": "onward",
+                },
             ],
             "edges": [],
             "positions": [],
@@ -148,6 +156,14 @@ def test_unresolved_anchor_phrases_interpolate_across_the_visible_window() -> No
                     "caption": None,
                     "anchor_phrase": "also never spoken here",
                 },
+                # T18K/D163: GraphDiagramSlots now requires 3-7 nodes -- this third node plays no
+                # part in the interpolation proof below, it exists only to satisfy the bound.
+                {
+                    "id": "n3",
+                    "label": "Node3",
+                    "caption": None,
+                    "anchor_phrase": "nor is this one spoken anywhere",
+                },
             ],
             "edges": [],
             "positions": [],
@@ -160,5 +176,5 @@ def test_unresolved_anchor_phrases_interpolate_across_the_visible_window() -> No
     )
 
     assert starts is not None
-    assert starts[0] < starts[1]
+    assert starts[0] < starts[1] < starts[2]
     assert all(_ENTRANCE_START <= s <= _END_S for s in starts)

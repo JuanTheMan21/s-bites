@@ -15,6 +15,7 @@ function segment(overrides: Partial<SegmentView>): SegmentView {
     tier: null,
     hasScene: false,
     clipKey: null,
+    degraded: null,
     ...overrides,
   }
 }

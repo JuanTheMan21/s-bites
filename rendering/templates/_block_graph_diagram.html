@@ -77,9 +77,9 @@
     {% set pct = (loop.index0 / (n - 1) * 100) if n > 1 else 50 %}
     <div class="blk-graph-node blk-graph-node-chain" id="{{ prefix }}-node-{{ loop.index0 }}" style="left: calc({{ pct }}% - {{ '100px' if compact else '140px' }});">
       <div class="blk-graph-marker voice-data" id="{{ prefix }}-node-marker-{{ loop.index0 }}">{{ "%02d" | format(loop.index) }}</div>
-      <div class="blk-graph-label">{{ node.label }}</div>
+      <div class="blk-graph-label" data-anno-avoid>{{ node.label }}</div>
       {% if node.caption %}
-      <div class="blk-graph-caption">{{ node.caption }}</div>
+      <div class="blk-graph-caption" data-anno-avoid>{{ node.caption }}</div>
       {% endif %}
     </div>
     {% endfor %}
@@ -100,9 +100,9 @@
     {% for node in payload.nodes %}
     <div class="blk-graph-node blk-graph-node-free" id="{{ prefix }}-node-{{ loop.index0 }}">
       <div class="blk-graph-marker voice-data" id="{{ prefix }}-node-marker-{{ loop.index0 }}">{{ "%02d" | format(loop.index) }}</div>
-      <div class="blk-graph-label">{{ node.label }}</div>
+      <div class="blk-graph-label" data-anno-avoid>{{ node.label }}</div>
       {% if node.caption %}
-      <div class="blk-graph-caption">{{ node.caption }}</div>
+      <div class="blk-graph-caption" data-anno-avoid>{{ node.caption }}</div>
       {% endif %}
     </div>
     {% endfor %}

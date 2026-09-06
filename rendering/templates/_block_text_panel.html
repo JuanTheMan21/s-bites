@@ -20,7 +20,7 @@
       {% if not compact %}
       <span class="blk-text-marker voice-data" id="{{ prefix }}-marker-{{ loop.index0 }}">{{ "%02d" | format(loop.index) }}</span>
       {% endif %}
-      <span class="blk-text-copy">{{ item.text }}</span>
+      <span class="blk-text-copy" data-anno-avoid>{{ item.text }}</span>
     </li>
     {% endfor %}
   </ul>
@@ -86,6 +86,11 @@
     font-weight: 400;
     font-size: {{ "30px" if compact else "38px" }};
     line-height: 1.35;
+    display: inline-block;
+    padding: {{ "8px 16px" if compact else "12px 22px" }};
+    border: 2px solid var(--accent-secondary);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--accent-secondary) 10%, transparent);
   }
 </style>
 {% endmacro %}

@@ -44,3 +44,36 @@ def group_into_cues(word_marks: list[WordMark]) -> list[Cue]:
             )
         )
     return cues
+
+
+def _even_stagger_word_marks(narration: str, duration_ms: int) -> list[WordMark]:
+    """Fabricate ``WordMark``s spread evenly across ``duration_ms`` -- the fallback every other
+    word-timed consumer already uses (``mux/subtitles.py``'s pre-T18K ``elif segment.narration``
+    branch) when a TTS adapter reports no word boundaries. Kept private: a caller with real
+    ``word_marks`` should never see fabricated ones."""
+    words = narration.split()
+    if not words or duration_ms <= 0:
+        return []
+    slot_ms = duration_ms / len(words)
+    return [
+        WordMark(text=word, offset_ms=round(i * slot_ms), duration_ms=round(slot_ms))
+        for i, word in enumerate(words)
+    ]
+
+
+def cues_for_segment(
+    word_marks: list[WordMark], narration: str | None, duration_ms: int
+) -> list[Cue]:
+    """The one grouping every caption consumer should call, in-frame band included (T18K --
+    D161 traced the in-frame band's blank-on-empty-``word_marks`` behavior to this exact gap).
+
+    Real ``word_marks`` win when present. Failing that, a non-empty ``narration`` is spread
+    evenly across ``duration_ms`` and grouped the same way -- the same degrade-to-something-usable
+    rule ``mux/subtitles.py`` has followed since T18B, now shared rather than duplicated. Only
+    truly empty input (no marks, no narration) returns ``[]``.
+    """
+    if word_marks:
+        return group_into_cues(word_marks)
+    if narration:
+        return group_into_cues(_even_stagger_word_marks(narration, duration_ms))
+    return []

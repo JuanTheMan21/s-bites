@@ -2,6 +2,8 @@ import { m } from 'motion/react'
 import { PHASE_LABEL, PHASE_ORDER, type PipelinePhase, type StageEvent } from '@/domain/stage'
 import { classNames } from '@/components/class-names'
 import { IconPlayhead } from '@/components/icons'
+import { useSmoothProgress } from './use-smooth-progress'
+import { WaveScope } from './WaveScope'
 
 interface Props {
   currentPhase: PipelinePhase | null
@@ -11,22 +13,14 @@ interface Props {
   phaseProgress: number | null
   events: StageEvent[]
   createdAt: string
-  /** Real segment count -- keys the waveform's bar count so the track's texture is a function of
-   * actual job size, never fabricated audio data (D137). */
+  /** Real segment count -- seeds the waveform's own shape (`WaveScope`) so the track's texture
+   * stays a deterministic function of the job, not `Math.random()` jitter (D137). */
   segmentCount: number
 }
 
 function formatTimecode(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
   return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, '0')}`
-}
-
-/** A deterministic hash-noise bar height, not `Math.random()` -- the same job renders the same
- * waveform on every re-render/remount rather than jittering. Decorative texture for the chosen
- * broadcast/NLE world's "waveform" device, never a stand-in for real audio analysis. */
-function barHeightPct(i: number): number {
-  const n = Math.sin(i * 12.9898) * 43758.5453
-  return 24 + (Math.abs(n - Math.floor(n)) * 76)
 }
 
 /** Real per-phase start times, read off the first transition event that entered each phase --
@@ -61,33 +55,29 @@ export function ClipTrack({
       ? 0
       : (activeIndex + (activeIndex === PHASE_ORDER.length - 1 ? 1 : (phaseProgress ?? 0))) *
         segmentWidth
-  const barCount = Math.max(32, segmentCount * 3)
+  // T18L: a phase with real per-segment signal (voice/scenes/render) already advances fillPct
+  // itself as segments complete -- its own ceiling is just its current fillPct, so the display
+  // eases smoothly toward each new value rather than snapping. A phase with NO per-segment
+  // signal (outline/budget/visuals, and the always-100 finalize case) has a flat fillPct for its
+  // whole duration -- its ceiling is the START of the next phase, so the display creeps toward
+  // it instead of sitting frozen, without ever visually entering the next phase's own territory.
+  const ceilingPct =
+    phaseProgress !== null
+      ? fillPct
+      : activeIndex < 0
+        ? segmentWidth
+        : Math.min(100, (activeIndex + 1) * segmentWidth)
+  const smoothedFillPct = useSmoothProgress(fillPct, ceilingPct)
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="relative flex h-9 items-center gap-px overflow-hidden rounded-md bg-paper-2 px-2">
-        {Array.from({ length: barCount }, (_, i) => {
-          const withinFill = ((i + 0.5) / barCount) * 100 <= fillPct
-          return (
-            <span
-              key={i}
-              aria-hidden
-              className={classNames(
-                'w-full min-w-px flex-1 rounded-full transition-colors duration-300',
-                withinFill ? 'bg-accent/70' : 'bg-ink-300/35',
-              )}
-              style={{ height: `${barHeightPct(i)}%` }}
-            />
-          )
-        })}
+      <div className="relative">
+        <WaveScope seed={segmentCount} fillPct={smoothedFillPct} />
         {activeIndex >= 0 && (
-          <m.div
+          <div
             aria-hidden
             className="absolute top-1/2 flex -translate-y-1/2 flex-col items-center text-accent"
-            initial={false}
-            animate={{ left: `${Math.min(100, fillPct)}%` }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            style={{ marginLeft: -8 }}
+            style={{ left: `${Math.min(100, smoothedFillPct)}%`, marginLeft: -8 }}
           >
             <m.span
               animate={{ scale: [1, 1.3, 1], opacity: [0.6, 0, 0.6] }}
@@ -95,7 +85,7 @@ export function ClipTrack({
               className="absolute h-6 w-6 rounded-full bg-accent/40"
             />
             <IconPlayhead className="relative h-5 w-5 drop-shadow-[0_1px_2px_rgb(0_0_0_/_0.3)]" />
-          </m.div>
+          </div>
         )}
       </div>
       <div className="grid grid-cols-7 gap-1">

@@ -34,8 +34,9 @@
 #}
 
 {% macro annotation_offset_script() %}
-  function hfAnnotationOffset(targetId, containerId) {
-    var target = document.getElementById(targetId);
+  // T18K/D164: split out of hfAnnotationOffset so the avoid-rect scan below (which has real DOM
+  // elements from querySelectorAll, not ids to look up) can share the exact same delta math.
+  function hfOffsetForElement(target, containerId) {
     var container = document.getElementById(containerId);
     if (!target || !container) return { dx: 0, dy: 0, w: 0, h: 0 };
     var root = document.getElementById("root");
@@ -48,6 +49,9 @@
       w: t.width / scale,
       h: t.height / scale,
     };
+  }
+  function hfAnnotationOffset(targetId, containerId) {
+    return hfOffsetForElement(document.getElementById(targetId), containerId);
   }
 
   // T18H: a block's own trailing caption paragraph (CODE_PANEL, CODE_DIFF) has no per-item height
@@ -134,6 +138,30 @@
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
   }
 
+  {#- T18K/D164: a SEPARATE registry from __hfPlacedRects above -- that one only ever learned
+     about other annotations and _block_graph_diagram.html's own edge labels, never a block's
+     ordinary body text (a text_panel row, a code line, another item's label), so nothing stopped
+     an annotation landing on one. Each block partial marks its own text-bearing elements with
+     `data-anno-avoid`; this scans them lazily (once per container, memoized) rather than
+     requiring every layout template to call a registration function block-by-block the way
+     edge labels do -- a block type gaining a new text element only needs the attribute, never a
+     script-side change here. #}
+  window.__hfAvoidRects = window.__hfAvoidRects || {};
+  window.__hfAvoidScanned = window.__hfAvoidScanned || {};
+  function hfEnsureAvoidRects(containerId) {
+    var list = window.__hfAvoidRects[containerId] || (window.__hfAvoidRects[containerId] = []);
+    if (window.__hfAvoidScanned[containerId]) return list;
+    window.__hfAvoidScanned[containerId] = true;
+    var container = document.getElementById(containerId);
+    if (!container) return list;
+    var els = container.querySelectorAll("[data-anno-avoid]");
+    for (var i = 0; i < els.length; i++) {
+      var off = hfOffsetForElement(els[i], containerId);
+      list.push({ x: off.dx, y: off.dy, w: off.w, h: off.h, el: els[i] });
+    }
+    return list;
+  }
+
   {#- T18E, D121/D122: two real text collisions -- a CHECK caption printed over its own block's
      headline, and a caption band printed over a dense SEQUENCE_DIAGRAM's last message -- both
      came from each annotation partial computing its own fixed offset with no idea what container
@@ -156,6 +184,7 @@
      already ignores extra keys on plain object literals, so this is additive. #}
   function hfAnnotationPlace(targetId, containerId, annoId, headlineId, captionLayerId, sides) {
     var off = hfAnnotationOffset(targetId, containerId);
+    var targetEl = document.getElementById(targetId);
     var anno = document.getElementById(annoId);
     var container = document.getElementById(containerId);
     if (!anno || !container) return { x: off.dx, y: off.dy, rotation: 0 };
@@ -175,17 +204,31 @@
     }
 
     var placed = window.__hfPlacedRects[containerId] || [];
+    // T18K/D164: every avoid-rect except the one(s) belonging to THIS annotation's own target --
+    // an annotation is supposed to sit on its target, so a target that is itself marked
+    // data-anno-avoid (a text_panel row IS the item an annotation points at) must not block its
+    // own annotation.
+    var avoid = hfEnsureAvoidRects(containerId).filter(function (r) {
+      return (
+        r.el !== targetEl &&
+        !(targetEl && r.el.contains(targetEl)) &&
+        !(targetEl && targetEl.contains(r.el))
+      );
+    });
     function inBounds(pos) {
       return (
         pos.x >= left && pos.x + annoW <= right && pos.y >= top && pos.y + annoH <= bottom
       );
     }
-    function clearOfPlaced(pos) {
+    function clearOfRects(pos, rects) {
       var box = { x: pos.x, y: pos.y, w: annoW, h: annoH };
-      for (var j = 0; j < placed.length; j++) {
-        if (hfRectsOverlap(box, placed[j])) return false;
+      for (var j = 0; j < rects.length; j++) {
+        if (hfRectsOverlap(box, rects[j])) return false;
       }
       return true;
+    }
+    function clearOfPlaced(pos) {
+      return clearOfRects(pos, placed) && clearOfRects(pos, avoid);
     }
 
     var GAP = 12;
@@ -212,7 +255,6 @@
     // onto the screen and their raw ratio would give the wrong on-screen angle. off.w/off.h
     // (from hfAnnotationOffset's own already-scale-normalized rect) give the true magnitude;
     // only the SIGN of each axis's direction is read from the attributes.
-    var targetEl = document.getElementById(targetId);
     var isLine =
       !!targetEl && (targetEl.tagName === "line" || targetEl.hasAttribute("data-hf-line"));
     if (isLine) {
@@ -257,7 +299,10 @@
     // T18I: generalized from "always nudge vertically" to "nudge along the candidate's OWN
     // direction" (candidates[side].dirX/dirY) -- "parallel"'s direction is the line's own, not
     // the frame's Y axis; nudging it vertically would search across the line, not along it.
-    function nudged(pos) {
+    // T18K/D164: takes the clear-check as a parameter so Pass 1 (clear of everything) and Pass 2
+    // (clear of body text only, tolerating another annotation) share one nudge search rather than
+    // two near-duplicate copies of it.
+    function nudged(pos, isClear) {
       var step = (annoH + GAP) * 0.65;
       var offsets = [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6];
       for (var s = 0; s < offsets.length; s++) {
@@ -266,23 +311,35 @@
           y: pos.y + pos.dirY * offsets[s] * step,
           rotation: pos.rotation,
         };
-        if (inBounds(cand) && clearOfPlaced(cand)) return cand;
+        if (inBounds(cand) && isClear(cand)) return cand;
       }
       return null;
     }
 
     // Pass 1: each candidate side, nudged along its own direction until one is both in-bounds
-    // and clear.
+    // and clear of everything (other annotations and body text alike).
     for (var i = 0; i < order.length; i++) {
-      var found = nudged(candidates[order[i]]);
+      var found = nudged(candidates[order[i]], clearOfPlaced);
       if (found) {
         hfRegisterPlacedRect(containerId, { x: found.x, y: found.y, w: annoW, h: annoH });
         return found;
       }
     }
-    // Pass 2: nothing was ever clear of every placed rect anywhere in bounds -- accept the first
-    // in-bounds candidate (may still overlap; an extremely dense scene can exhaust every option,
-    // and landing inside the frame overlapping something is better than landing outside it).
+    // Pass 2 (T18K/D164): nothing was ever clear of both -- prefer overlapping another
+    // annotation over overlapping text, since landing on ordinary content is the defect this
+    // task exists to close and landing on another annotation is merely untidy.
+    for (var i2 = 0; i2 < order.length; i2++) {
+      var found2 = nudged(candidates[order[i2]], function (pos) {
+        return clearOfRects(pos, avoid);
+      });
+      if (found2) {
+        hfRegisterPlacedRect(containerId, { x: found2.x, y: found2.y, w: annoW, h: annoH });
+        return found2;
+      }
+    }
+    // Pass 3: nothing was ever clear of text either -- accept the first in-bounds candidate (may
+    // still overlap; an extremely dense scene can exhaust every option, and landing inside the
+    // frame overlapping something is better than landing outside it).
     for (var k = 0; k < order.length; k++) {
       var pos2 = candidates[order[k]];
       if (inBounds(pos2)) {

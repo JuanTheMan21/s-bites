@@ -4,198 +4,134 @@
 History lives in `decisionlog.md`. **Written to be self-contained for a fresh session with zero
 memory of how this state was reached.**
 
-_Last updated: 2026-09-05 · T18J (five concrete defects the user reported with screenshots/
-timestamps against a real rendered video, plus the frontend's first live run) — substantial
-progress, not closed · `project-reviewer` run twice, all findings fixed · about to be pushed_
+## What just happened
 
----
+**T18K and T18L both shipped in one combined session** (backend + frontend, by explicit user
+request), then verified against two real end-to-end renders through the live UI — not just the
+offline test suite. Both are marked `done` in `tasks.md`. Full reasoning for every non-obvious
+choice: `decisionlog.md` D165-D171.
 
-## Where we are
+### T18K (backend)
+- **K1** — Tier-1 stills now sample at caption-cue boundaries and block reveal times
+  (`rendering/still_plan.py`, a JSON sidecar `compose_scene` writes and `rendering/reveal.py`
+  reads back — D165), with a hard cut across any transition where the caption text changes
+  (`mux/frames_to_clip.py::crossfade` gained optional `at_seconds`/`xfade_s`). Tier 0 suppresses
+  the in-frame caption band entirely (one still cannot show N captions). The last caption cue now
+  hides at the segment's measured `duration_ms`, not its own `end_ms`, so trailing silence no
+  longer shows a blank band.
+- **K2** — `core/graph/nodes/finalize.py` logs real per-step timing; `mux/concat_segments.py` has
+  explicit `-preset veryfast -crf 20` (previously absent everywhere in the repo). **Measured: a
+  comparable 6-segment job's finalize dropped from 3m41s (D162's baseline) to 14.06s** (D171) —
+  but see the logging gap below, without which this number would never have been visible at all.
+- **K3** — `rendering/block_timing.py`/`rendering/timing_math.py::clamp_non_decreasing` forces a
+  non-sortable item field's (graph_diagram, code_diff) or any step field's resolved time to
+  never fall before its predecessor's — a running-max clamp, never a re-sort (`graph_diagram`
+  must stay in `_SORTABLE_ITEM_FIELDS`'s exclusion list; do not add it back).
+- **K4** — `rendering/templates/_annotations.html` gained a second registry
+  (`window.__hfAvoidRects`, separate from `__hfPlacedRects`) populated by scanning
+  `[data-anno-avoid]` elements; 8 block partials now mark their own text-bearing elements with it.
+- **K5** — `_block_text_panel.html`'s `.blk-text-copy` items got the same outlined-chip treatment
+  `_block_title.html`'s `key_terms` already have (16px radius, not a pill — items are sentences).
 
-**T18I closed out D149-D154 last session** (the branch merge, variety/annotation enforcement, the
-latency Tier.REVEAL fix) — see decisionlog for that history. **This session (T18J) started from
-five concrete defects the user reported with timestamps/screenshots against the D152/D154 closing
-render**, fixed three outright, diagnosed the geometry gate's real blind spot, did latency work,
-and — once the frontend went live — found and fixed one more real defect from the user's own first
-live render through it.
+### T18L (frontend)
+- **L1** — `StageTicker.tsx` deleted (the jittery per-event ticker). **`StageLog.tsx` also
+  deleted** — not in the original task text, added mid-session on the user's own direct
+  instruction after watching a real render ("the stage log and shit needs to be fixed... needs to
+  be clean apple esque," D170). `use-job-stream.ts` now batches SSE arrivals into one `setEvents`
+  per animation frame instead of one per message; nothing is dropped, only coalesced (flushes
+  immediately on the terminal status event and on unmount).
+- **L2** — the waveform is real now: `wave-shape.ts` (deterministic harmonics from a seed, pure),
+  `use-smooth-progress.ts` (eases toward real progress, creeps toward the next phase's boundary
+  when idle, respects `prefers-reduced-motion` — pure tick function `nextProgressValue` is
+  separately unit-tested), `WaveScope.tsx` (canvas: a dark scope panel, 3 layered wave copies,
+  bright-with-glow left of the playhead / dim ghost right of it). `ClipTrack.tsx`'s playhead
+  position is now set via plain `style.left`, not a Motion `animate` tween — kept pixel-synced
+  with what the canvas draws every frame, deliberately not double-smoothed.
+- **L3** — `Segment.render_outcome` (already a real per-segment field on the API schema) is
+  destructured directly in `job-adapter.ts` into `SegmentView.degraded` — simpler than the
+  original plan's job-level-array-joined-by-index design, since the per-segment field already
+  existed (D169). `SegmentCard.tsx` shows a small amber "Degraded" badge with a tooltip; confirmed
+  live against two real re-authored segments across two different jobs.
 
-**Three timing defects, confirmed against the exact job's checkpoint before any fix (D155):**
-1. A `SPLIT_HORIZONTAL` panel's headline could wait until 80% through its segment, gated on the
-   block's own content anchor even though both panels are already visually present from the
-   layout's own entrance tween. Fixed in `rendering/compose.py::_build_renderable` — a multi-block
-   scene's headline now enters structurally, with its panel; single-block scenes are unaffected.
-2. Items rendered in authored order even when resolved anchors placed them in a different
-   narration order. Fixed: `text_panel`/`icon_panel`/`title` items are now reordered to match
-   (`core/scene_variety.py`'s `_SORTABLE_ITEM_FIELDS`, deliberately excluding `graph_diagram`/
-   `code_diff` where order is semantic).
-3. An unmatched anchor fell back to a flat 0.75s instant, sometimes before the block itself had
-   even entered. Fixed: `rendering/block_timing.py::_interpolate_missing` interpolates against
-   the block's own entrance/exit window instead.
+## Two real bugs found only by watching real renders (not by the offline suite)
 
-**The geometry gate's real blind spot, measured against the two exact compositions the user
-flagged (D156):** NOT sample density (raising `--samples` and enabling `--at-transitions` were
-both tested directly against the real compositions and changed nothing). The actual bug:
-`render_segment.py` treated every `[warning]`-severity finding the same as `[info]` — never
-fatal — which silently waved through real `content_overlap` findings `hyperframes check` was
-already correctly detecting. Fixed: `rendering/geometry_findings.py::is_fatal_geometry_finding`
-promotes a `[warning]` to fatal when its code is in the existing content-sizing vocabulary.
-`caption_zone` and `motion` findings also now flow through, at zero measured added cost.
+Both are now fixed, with regression tests — the same "toolchain-only checks miss real defects"
+lesson this project's history keeps re-learning (D89/D106/D109/D119/D124), so read both before
+assuming "tests pass" means "the video is right."
 
-**Latency (D157):** removed the one genuinely decorative perpetual tween (the user's own
-observation — "them two cards floating up and down") from `SPLIT_HORIZONTAL`, verified safe via a
-real recomposed segment still passing the frozen-sweep guard. Measured the frame budget's real
-cost/benefit with a new `scripts/tier_budget_sweep.py` and put the trade-off to the user (a
-demoted segment loses the smooth entrance-timing work, not just ambient motion) — **user chose to
-keep `FRAME_BUDGET=9500`**, every segment fully animated. `RENDER_MAX_CONCURRENCY` raised 2→3 (not
-config's own default of 4) after checking actual free RAM (~4GB, with a known drop to ~2.4GB under
-load) rather than assuming CPU was the only constraint. Geometry re-author scoping (refill only
-the failing block, not the whole scene) was investigated and deliberately deferred — the flattened
-finding-string contract loses the block-attribution data a real fix would need; not a one-line
-patch, recorded rather than rushed.
+1. **The caption band was never marked exempt from `hyperframes check --caption-zone`** (D166).
+   K1's own fix (extending the last cue's visible window to `duration_ms`) made a real render fail
+   `caption_zone_collision` on a segment's own caption words — it only ever passed before because
+   the last cue used to hide (opacity 0) before the geometry checker's end-of-timeline sample
+   landed. Fixed: `_captions.html`'s caption layer now carries
+   `data-layout-allow-caption-zone`. Test: `tests/test_caption_zone_exemption.py`.
+2. **Nothing in this app has ever configured Python's logging level** (D167). Every `logger.info`
+   call anywhere in the codebase — including `core/graph/node_timing.py`'s per-node timing logs,
+   shipped in T18E — was silently swallowed by the interpreter's default WARNING threshold, since
+   startup. Confirmed directly: a real server's stdout showed zero `logger.info` lines from
+   anywhere in the app across two full job runs, until `logging.basicConfig(level=logging.INFO,
+   ...)` was added to `api/main.py`. **This means T18E's own timing/retry-visibility feature has
+   been invisible for its entire life until this session.** If you're debugging something and
+   expect to see INFO logs, they now actually work — they didn't before.
 
-**`project-reviewer` caught two real bugs across two passes, both fixed and confirmed by
-reproduction (D158):**
-1. The item-reorder fix (above) silently broke annotation targeting whenever a reorder actually
-   fired — an annotation authored against pre-reorder item position kept targeting that same
-   numeric position after the reorder, marking the wrong item. Fixed by threading the permutation
-   through `RenderableBlock.item_permutation` and translating in `rendering/annotations.py`.
-   Verified by deliberately reverting the fix and confirming the exact mistargeting reproduces,
-   then restoring it.
-2. `caption_zone_collision` (newly reachable once the geometry fix started passing
-   `caption_zone`) was fatal but not in `_CONTENT_SIZING_CODES`, so a segment failing purely on
-   caption-band overflow skipped its retry and degraded unconditionally. Added.
-
-**The frontend went live this session — first real run, first real bug found live (D159).** Backend
-+ frontend dev servers started and verified end-to-end through the real Vite proxy. **Caught after
-the fact: the backend was started without `--reload` and was never restarted after the D155-D158
-code fixes landed**, so the user's first real job (`436c209225f848b39db5e698ac3aac1a`) ran on
-pre-fix code. Cross-referencing the user's screenshots against that job's own segment data found a
-real, additional bug regardless of the stale-code issue: **4 of 15 segments rendered as `title`**
-(only 1 legitimately the forced opener) — a static headline+paragraph with no progressive reveal,
-used for regular content segments the skill pack's own guidance says `title` is explicitly not
-for. Fixed: `core/scene_variety.py` gained a `title`-specific cap (`1/10`, tighter than the general
-rule, same shape as the existing `sequence_diagram` cap), folded into the same bounded re-ask.
-Backend restarted with `--reload` immediately after being caught.
-
-**Full regression, current state:** `pytest` full suite green (see git log for exact counts per
-commit), `ruff check .` clean, both boundary greps clean, no `.py` over 200 lines, `openapi.json`
-unchanged across every commit this session (all work was backend/render-internal).
-
-## Known gaps and open questions
-
-**New, found or left open this session:**
-- **Two of the user's five original defects (annotation/cursor placement "not nice," a graph
-  diagram called "a little messy") were NOT independently diagnosed** — the only real render
-  available to check them against (`436c209225f848b39db5e698ac3aac1a`) predates every code fix
-  from this session, so a placement complaint on it could be explained by bugs already fixed
-  (the annotation-reorder bug is a strong candidate) or could be a genuine separate issue. **A
-  fresh render on today's code is needed before any further placement work is scoped** — do not
-  guess at a fix without one.
-- **CURSOR's "tip lands on the target's own centre" design may itself read as visually rough** on
-  a `graph_diagram` node (the screenshot showed the cursor glyph overlapping the node marker) —
-  this is by design (`_annotation_cursor.html`'s own comment: the glyph's tip is meant to land on
-  the point), not a bug, but worth a design judgment call once a fresh render confirms it's still
-  happening: is the current glyph/angle just visually unrefined, or is "tip on centre" itself the
-  wrong choice for a small circular marker specifically.
-- **The `title` cap (`1/10`) and the `sequence_diagram` cap (`1/5`) are both soft, one-shot
-  nudges** — `plan_visuals` spends its single bounded re-ask on whichever violations exist, but
-  the second plan is taken as final even if it still misses (documented, same shape as
-  `missed_block_opportunities` since T18E). Confirmed live for `sequence_diagram` (D152); not yet
-  separately confirmed for the new `title` cap.
-- **Latency fixes from Phase 3 have not been re-measured on a real render this session** — the
-  idle-bob removal was verified safe (no new frozen-sweep finding) but not measured for actual
-  time saved; concurrency=3 has never run under real load.
-- **New `SceneLayout` members and the rest of the visual-polish plan (motif-driven typography,
-  syntax highlighting, icon two-toning, a `text_panel` redesign) were scoped but explicitly not
-  attempted this session** — flagged in the plan itself as the largest, least mechanical phase,
-  likely wanting its own session.
-- **No test yet for the whole-video annotation budget wired at the `collect_scenes` GRAPH level**
-  beyond `tests/test_collect_scenes_node.py`'s direct node test.
-
-**Carried forward, genuinely still open:**
-- `hyperframes check`/`validate_geometry` still occasionally non-deterministically flaky (D96).
-- No coverage gate exists (D42). T10 (`RUNTIME_ENV=local`'s Ollama/Kokoro) still unclaimed.
-- `api/runner.py::WORKING_ROOT` still has no cleanup routine.
-- `artifacts/_api_run/` and `artifacts/_cli_run/` both growing with every real render this
-  session added several more job directories to each; gitignored, safe to clean up locally.
-- Frontend items from T37 (out of this task's territory, per CLAUDE.md's invariant 5):
-  `Pill`/`StatusPill`'s WCAG contrast gap, `StageTicker`'s occasional generic label,
-  no automated tests for `ClipTrack`/`ClipStrip`/`use-placeholder-cycle.ts`/`theme-store.ts`,
-  ~516KB JS bundle (not code-split).
-
-## Before the next session
-
-**T18J is not closed** — real, named gaps above, most importantly the two placement complaints
-that need a fresh render to even diagnose properly.
-
-**The most useful thing to do first: generate one real video on today's fully-fixed code** (either
-via `cli.py` or the frontend, both work) and check, specifically: do the three D155 timing fixes
-hold up, does the geometry gate now catch what it should without over-blocking, is `title` no
-longer overused, and — the two genuinely open items — does annotation placement still look wrong,
-and does the graph diagram still look "messy." That render is what turns the two open complaints
-from a guess into a real diagnosis.
-
-Real remaining choices, not yet decided:
-1. Continue T18J's visual-polish plan (motif-driven typography, new layouts, syntax highlighting)
-   vs. move to the deferred cloud work (T34/T35, see
-   `C:\Users\juant\.claude\plans\foamy-sparking-swing.md`) vs. T29-T33 (RAG).
-2. Whether the `title`/`sequence_diagram` caps need to become hard guarantees (deterministic
-   downgrade) rather than soft nudges, if they keep missing in practice.
+## Also fixed this session
+- Two `project-reviewer` nits from the first review pass: `mux/frames_to_clip.py::crossfade` now
+  raises if `xfade_s` is given without `at_seconds` (was a silent mis-timing footgun); `use-job-
+  stream.ts`'s unmount cleanup now flushes pending events before closing.
+- `rendering/compose.py` was split: `RenderableBlock`/`build_renderable` moved to new
+  `rendering/renderable.py` to stay under the 200-line ceiling once still-plan wiring was added.
+- `rendering/block_timing.py`'s two pure array-math helpers moved to new
+  `rendering/timing_math.py`, same reason.
+- **A real 200-line-ceiling violation slipped past the quality hook**, found in this checkpoint's
+  own final review pass: a test appended via a raw Bash heredoc (`cat >>`) bypasses the
+  `PostToolUse` hook entirely, since it only fires on Edit/Write tool calls. Caught at 205 lines
+  on `tests/test_compose_scene.py`, fixed by moving the test to its own file
+  (`tests/test_caption_zone_exemption.py`). **Worth remembering going forward: a raw shell append
+  to a `.py` file gets none of the automatic `ruff check --fix`/`ruff format`/line-count
+  enforcement Edit/Write gets — prefer Write for new files and Edit for existing ones, even when
+  a shell heredoc feels faster.**
 
 ## Environment state
 
-| | |
-|---|---|
-| Model | Session ran on Opus for planning; `/model sonnet` run explicitly before the build phase, per CLAUDE.md's mandatory self-check. Verify again at the start of the next session. |
-| `RUNTIME_ENV` | `azure`, unchanged. |
-| `RENDER_ENV` | `local`, unchanged — real render, in-process. |
-| `FRAME_BUDGET` | `9500`, unchanged — user's explicit choice this session, see D157. |
-| `RENDER_MAX_CONCURRENCY` | `3` in this machine's own `.env` (gitignored) — raised from 2 after checking actual free RAM; `.env.example`'s own default stays `2`, unchanged, for other environments. |
-| Git | `dev`, at the tip of this session's commits, pushed to `origin/dev`. |
-| Backend/frontend servers | Both were left running at session end: `uvicorn api.main:app --reload` on `127.0.0.1:8000`, `npm run dev` (Vite) on `127.0.0.1:5173`. **Started with `--reload` this time** — the first backend start this session was NOT, which is exactly how a stale-code job got submitted (see D159). Check they're still up before assuming the frontend works; restart if not. |
-| Azure spend | Multiple real renders this session (`RUNTIME_ENV=azure`, real LLM+TTS+Storage): the D155/D156 closing-scope render, the tier-budget-sweep's real TTS pass, and the user's own API-submitted job. Check `/costs`. |
-| Local artifacts | `artifacts/_cli_run/` and `artifacts/_api_run/` both gained job directories this session (gitignored, safe to clean up). |
+- `RUNTIME_ENV=azure`. Backend (`uvicorn api.main:app`, **no** `--reload`, restarted twice this
+  session to pick up the caption fix and then the logging fix) and frontend (`npm run dev` in
+  `web/`, also restarted once for a clean module graph after two file deletions) are both running
+  for the user as of this checkpoint — confirm they're still up before assuming a fresh render
+  will work.
+- Two real jobs from this session's own verification remain on disk under `artifacts/_api_run/`:
+  `a662bdf1881743c1a2b830f9f4bbb56c` (DNS resolution, 6 segments, one real degraded/re-authored
+  segment) and `a2365c0bc4534e0f960cf62f8382e937` (TCP handshake, 6 segments, also one real
+  degraded segment) — both succeeded end to end, both are what D171's finalize timing numbers
+  came from.
 
-## Gotchas worth remembering
+## Gotchas carried forward, still true
 
-**New this session:**
-- **A backend process started without `--reload` silently keeps running old code through every
-  subsequent edit** — cost a full render cycle on stale code before being caught (D159), and was
-  only caught by cross-referencing user-reported screenshots against the job's own data, not by
-  anything that would have surfaced it automatically. Always start a long-lived dev server with
-  `--reload`/equivalent, and if one is already running when a session starts making code changes,
-  restart it rather than assume it's current.
-- **A pure function that changes item ORDER can silently break something else's item-index
-  assumptions** — the `resolve_item_starts` reorder fix broke annotation targeting because
-  `core/graph/nodes/annotation_author.py` authors indices against a different ordering than what
-  ends up on screen. Any function that reorders/filters/re-indexes a list needs an explicit check
-  for every OTHER place that list's original indices are referenced, not just its own callers.
-- **Enabling a new check/finding type is incomplete without also updating every classification
-  set that reads finding CODES** — `caption_zone_collision` was correctly fatal but silently
-  unretryable because `_CONTENT_SIZING_CODES` (a different set, same module) wasn't told about it.
-- **A geometry finding's severity (`[warning]` vs `[error]`) is not reliably tied to how visible
-  or real the defect is** — measured directly: the same `content_overlap` finding stayed
-  `[warning]` regardless of sample density or `--at-transitions`. Don't assume severity alone is a
-  safe fatal/non-fatal signal without checking the actual finding CODE too.
-- **A checkpointed job's `AsyncSqliteSaver` state is queryable directly**
-  (`saver.aget({"configurable": {"thread_id": job_id}})` against a job's own `checkpoints.sqlite`)
-  for post-hoc analysis of exactly what a run produced — works for both `cli.py`'s
-  `artifacts/_cli_run/` and the API's `artifacts/_api_run/` layouts. The API path additionally
-  persists a `job.json` via `api/job_store.py`, reachable through `GET /jobs/{id}` — a faster
-  check when only segment metadata (not the full scene/word_marks state) is needed.
-- **File birth/modify timestamps (`stat`) on a job's `checkpoints.sqlite` give real wall-clock
-  render duration** when nothing else recorded it explicitly — birth time = job start, last
-  modify = job completion.
+- **Never run `uvicorn --reload` on Windows for this app** — documented in `api/main.py`'s own
+  docstring; breaks every subprocess-shelling call non-deterministically.
+- **A backend started without `--reload` gives no signal that it's serving stale code.** Restart
+  it by hand after any pipeline-relevant edit, every time.
+- **The `PostToolUse` quality hook only fires on Edit/Write, never on a raw Bash file write** —
+  see "Also fixed this session" above. This is now a demonstrated real failure mode, not a
+  theoretical one.
+- **Opus plans, Sonnet builds — this is not self-enforcing.** Check the current-model line after a
+  plan is approved and before the first `Write`/`Edit`/`Bash` of a build.
+- `graph_diagram` is deliberately excluded from `_SORTABLE_ITEM_FIELDS` and must stay that way —
+  K3's fix is a clamp, not a re-sort.
+- **`logging.basicConfig` is now called in `api/main.py`.** If a future session adds its own
+  logging configuration elsewhere (a test fixture, a script), remember `basicConfig` is a no-op
+  once root handlers exist — order of configuration now matters in a way it didn't before this
+  session, in the unlikely case something else tries to configure logging first.
 
-**Carried from earlier sessions, still true:**
-- `AsyncSqliteSaver.from_conn_string(path)` creates `path` on disk the instant it connects.
-- Every real invocation of this graph must pass `durability="sync"` explicitly.
-- `Storage.url()`'s scheme is the only safe way to branch redirect-vs-stream at the API layer.
-- `FakeLLMProvider`'s strict-FIFO queue breaks under real concurrency with mixed schema types —
-  `PhaseQueueLLMProvider` is the fix pattern; a fixture using one interchangeable block type
-  everywhere may need its LLM response queued twice once a new code-enforced variety rule
-  correctly re-asks against it.
-- 200-line ceiling, enforced on write. Split by responsibility, don't compress.
-- `artifacts/` is gitignored. Nothing you need to keep goes there.
-- The quality hook strips an import added in one tool call and used only in a later one — add the
-  import in the same call as its first real usage, every time, no exceptions found yet.
+## Known gaps / open questions, unresolved this session
+
+- **K2's `.srt`-timing anomaly did not reproduce** on this session's own verification runs (D171)
+  — consistent with D162's Blob-upload-latency guess being real but intermittent, not with the
+  guess being wrong. Not confirmed either way, and no longer worth chasing now that finalize is
+  ~14s instead of the dominant cost.
+- T18F (vision critique/revision loop, full validation render, pipeline speed) is still `todo`,
+  unchanged this session — its own entry in `tasks.md` has the full scope and history.
+- T18I is still marked `in progress` in `tasks.md`, unchanged this session — not touched, not
+  investigated. Read its own entry before assuming it's either safe to ignore or ready to resume.
+- T18I's own two older open items (the `SceneLayout.SINGLE` combined-height constraint, a true
+  parallel-to-a-line annotation candidate geometry) remain untouched, not part of this session.
+- Cloud deployment (T34/T35) remains deliberately parked behind video quality, unchanged.

@@ -41,6 +41,10 @@ _GRAPH_MODE_PAYLOAD = {
     "nodes": [
         {"id": "n1", "label": "A", "caption": None, "anchor_phrase": "it gets"},
         {"id": "n2", "label": "B", "caption": None, "anchor_phrase": "concatenated"},
+        # T18K/D163: GraphDiagramSlots now requires 3-7 nodes -- this third node plays no part
+        # in the test's own assertions (edge/annotation targeting between n1/n2), it exists only
+        # to satisfy the bound.
+        {"id": "n3", "label": "C", "caption": None, "anchor_phrase": "third node"},
     ],
     "edges": [{"from_id": "n1", "to_id": "n2", "label": None}],
     "positions": [],

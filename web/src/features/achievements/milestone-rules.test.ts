@@ -50,9 +50,9 @@ describe('computeMilestones', () => {
     const mostlyStatic = computeMilestones([
       job({
         segments: [
-          { index: 0, title: 'a', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 0, hasScene: true, clipKey: null },
-          { index: 1, title: 'b', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 0, hasScene: true, clipKey: null },
-          { index: 2, title: 'c', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 2, hasScene: true, clipKey: null },
+          { index: 0, title: 'a', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 0, hasScene: true, clipKey: null, degraded: null },
+          { index: 1, title: 'b', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 0, hasScene: true, clipKey: null, degraded: null },
+          { index: 2, title: 'c', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 2, hasScene: true, clipKey: null, degraded: null },
         ],
       }),
     ])
@@ -61,8 +61,8 @@ describe('computeMilestones', () => {
     const mostlyAnimated = computeMilestones([
       job({
         segments: [
-          { index: 0, title: 'a', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 2, hasScene: true, clipKey: null },
-          { index: 1, title: 'b', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 2, hasScene: true, clipKey: null },
+          { index: 0, title: 'a', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 2, hasScene: true, clipKey: null, degraded: null },
+          { index: 1, title: 'b', summary: '', visualIntent: 'title_card', importance: 3, narration: null, durationMs: null, tier: 2, hasScene: true, clipKey: null, degraded: null },
         ],
       }),
     ])

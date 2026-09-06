@@ -3,8 +3,6 @@ import { ClipStrip } from './ClipStrip'
 import { ClipTrack } from './ClipTrack'
 import { ElapsedClock } from './ElapsedClock'
 import { PlayfulCaption } from './PlayfulCaption'
-import { StageLog } from './StageLog'
-import { StageTicker } from './StageTicker'
 import { useProgressModel } from './use-progress-model'
 
 /** The direction's signature interaction: one continuous clip track the eye follows top to
@@ -48,13 +46,11 @@ export function LiveProgress({
         createdAt={job.createdAt}
         segmentCount={job.segments.length}
       />
-      <StageTicker events={events} />
       <ClipStrip
         segments={job.segments}
         activeSegmentIndex={activeSegmentIndex}
         onOpenSegment={onOpenSegment}
       />
-      <StageLog events={events} />
     </div>
   )
 }

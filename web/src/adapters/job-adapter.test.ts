@@ -45,6 +45,34 @@ describe('toJobView', () => {
       tier: 2,
       hasScene: true,
       clipKey: 'j1/segments/0/clip.mp4',
+      degraded: null,
+    })
+  })
+
+  it('maps a degraded segment render_outcome onto degraded', () => {
+    const withRenderOutcome = {
+      ...baseDto,
+      segments: [
+        {
+          ...baseDto.segments![0]!,
+          render_outcome: {
+            segment_index: 0,
+            attempts: 3,
+            finding_codes: ['content_overlap'],
+            reauthored: true,
+            fallback_used: true,
+            original_tier: 2,
+          },
+        },
+      ],
+    }
+    expect(toJobView(withRenderOutcome).segments[0]!.degraded).toEqual({
+      segmentIndex: 0,
+      attempts: 3,
+      findingCodes: ['content_overlap'],
+      reauthored: true,
+      fallbackUsed: true,
+      originalTier: 2,
     })
   })
 

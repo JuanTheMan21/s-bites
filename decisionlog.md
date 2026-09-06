@@ -3826,3 +3826,245 @@ reading as visually rough at that specific angle -- worth judging on a render ma
 code in place, not this one.
 
 **Depends:** D155-D158 (same session).
+
+### D160 -- `uvicorn --reload` is permanently forbidden on Windows for this app: it silently breaks
+every subprocess call and looks like a random-segment content bug, not an infrastructure one.
+
+**Rejected:** treating each failed render as a content/geometry problem and continuing to debug
+`render_scene`'s retry logic.
+
+**Reasoning:** the user resumed a failed job and it failed again with a bare, message-less
+`NotImplementedError`, on a *different* segment each of three retry attempts -- the signature that
+finally gave it away, since a real content bug would fail the same segment consistently.
+`uvicorn/loops/asyncio.py::asyncio_loop_factory` picks `asyncio.SelectorEventLoop` over the default
+`ProactorEventLoop` on Windows whenever `use_subprocess=True` -- which is exactly `--reload`'s own
+worker-process mode. `SelectorEventLoop` cannot create subprocesses on Windows at all, and
+`adapters/local/hyperframes_process.py`'s `asyncio.create_subprocess_exec` (every `lint`/`render`/
+`check` shell-out, i.e. most of this project's actual work) hits that wall non-deterministically,
+on whatever segment happens to be mid-render when the process pool gets to it. Confirmed by reading
+uvicorn's own source, not guessed; confirmed fixed by restarting without `--reload` and watching
+the same job resume to `succeeded`. Documented permanently in `api/main.py`'s module docstring so
+it can't be silently reintroduced -- restart the server by hand after an edit instead. A second,
+compounding mistake in the same incident: the server had also been left running *without*
+`--reload` through several rounds of code fixes earlier in the session, so the user's very first
+job ran entirely on stale code -- a backend started without `--reload` gives no signal at all that
+it is serving old code.
+
+### D161 -- Caption band correctness is a tier problem, not a caption-code problem: Tier 0/1's
+fixed/even still-sampling schedule is blind to caption-cue boundaries, so any segment that falls
+back to Tier 1 gets structurally wrong subtitles.
+
+**Rejected:** burning captions in at the ffmpeg mux step instead of the browser-rendered HTML band;
+forcing every caption-bearing segment to Tier 2.
+
+**Reasoning:** found while diagnosing the user's direct report of "complete wrong subtitles" and
+"disappearing subs" on one named segment, cross-referenced against that exact segment's own
+composition: tier 1, 4 PNG stills, 9 caption cues, 27.66s of narration. Captions are `tl.set()`
+opacity calls on the GSAP timeline (`_captions.html::captions_script`); a 4-sample tier can only
+ever capture 4 of a segment's cues, and the `xfade` between stills visibly blends one cue's text
+into the next. All three tier-1 segments in the evidence job were fallback title cards from failed
+geometry, not budget demotions -- tier 1 is reached today only through failure. The user set three
+explicit constraints on the fix (no added latency, identical look to other segments, always
+correct), and those three rule out both rejected alternatives: burning captions with ffmpeg would
+add a video re-encode where `mux/audio_mux.py` currently has none (`-c:v copy`) and cannot be
+pixel-identical to the CSS band; forcing Tier 2 defeats the frame-budget system entirely since
+every segment has narration. The only option satisfying all three is sampling Tier 0/1 stills at
+the union of caption-cue starts and item-reveal times, which keeps the exact same HTML/CSS band
+every segment already uses. Not yet built -- diagnosis and choice only, scoped to T18K.
+
+### D162 -- Finalize, not per-segment rendering, is the dominant cost on short videos, and it
+barely scales with video length -- discovered by reconstructing wall-clock phases from artifact
+mtimes, since neither job logs stage timings itself.
+
+**Rejected:** assuming the user's "7 minutes for a 3-minute video" complaint was about render
+concurrency or per-segment tier cost, since that was the only latency work this session's earlier
+D157 had already covered.
+
+**Reasoning:** the user pointed specifically at "the mixing step," and file mtimes on a real
+6-segment/2.4-minute job confirmed it: render phase 3m16s (47%), finalize 3m41s (53%), total 6m57s.
+A 15-segment/6.4-minute job's finalize was a similar ~3m10s despite covering 2.5x the content --
+finalize cost is nearly flat regardless of segment count, so it dominates precisely the short jobs
+where the user most notices it. `mux/concat_segments.py`'s final `xfade`-based re-encode runs with
+no explicit `-preset`/`-crf` anywhere in the repo (libx264's `medium` default by omission), which
+is the first and cheapest lever. Stream-copy concat was considered and rejected as a target: the
+crossfade transitions require decode+blend by construction, and Tier 2 clips come from the external
+`npx hyperframes render` CLI with its own encoder settings, so segment MP4s do not share encode
+parameters to begin with. A separate, unconfirmed anomaly was also found and flagged rather than
+acted on: the `.srt` sidecar on the short job is stamped 2m44s after `final.mp4` -- implausible for
+a 4KB text write -- versus 6s on the long job, which smells like an unbounded Blob-upload wait but
+needs real instrumentation, not a guess, before anyone optimizes it.
+
+### D163 -- Graph-diagram node entrance order is unclamped against its own drawn order, and the
+node-count limit the schema's docstring claims was never actually enforced.
+
+**Rejected:** re-sorting `graph_diagram` nodes by resolved anchor time, the same fix D155/D158
+already applied to `text_panel`/`icon_panel`/`title`.
+
+**Reasoning:** the user reported a graph where "point number two appeared first" while the
+narrator was still discussing point one. Confirmed: each `GraphNode` carries its own
+`anchor_phrase`, resolved independently by `resolve_item_starts`, with no check that resolved times
+are non-decreasing in node order. Re-sorting was rejected because it was already ruled out for this
+exact block type in D155/D158 for a structural reason that still holds: CHAIN's rail is drawn in
+node order and `GraphDiagramSlots` requires n-1 consecutive edge pairs referencing nodes by
+position, so changing draw order breaks the diagram's own geometry. The fix that preserves
+structure is clamping each node's resolved start to `max(own_start, previous_start)` after
+resolution -- order-preserving, not reordering. Separately, and independently causing the same
+report's "congested"/"crossing lines" half: `GraphDiagramSlots.nodes`' "Three to seven nodes" is
+prose in a docstring only, with no `min_length`/`max_length`, and `edges` has no cap at all --
+real edge routing was explicitly scoped out as too large for the same task, in favor of capping
+node/edge count so the existing barycenter-ordering layout has fewer things to arrange. Not yet
+built -- diagnosis and choice only, scoped to T18K.
+
+### D164 -- Annotation-on-text is a registration gap, not a placement-math bug: the collision
+system only knows about other annotations and graph edge labels, never ordinary body text.
+
+**Rejected:** tuning `hfAnnotationPlace`'s candidate offsets (`above`/`below`/`tip`) to sit further
+from text, since that was the working assumption carried over from this same session's earlier
+annotation work.
+
+**Reasoning:** the user reported this defect twice across sessions ("annotations still appear on
+text"), which is why it was traced to its actual mechanism this time rather than adjusted again by
+feel. `hfAnnotationPlace`'s shared registry (`window.__hfPlacedRects[containerId]`) is populated
+only by annotations placing themselves and by `_block_graph_diagram.html`'s own edge labels -- a
+`text_panel` row's `.blk-text-copy`, a code line, any other block's body text is never registered,
+so the collision check has no information that would stop an annotation landing there; it isn't
+failing to avoid text, it was never told text exists. Tuning offsets was rejected because it cannot
+fix a check that has no input to check against -- any offset large enough to clear real body text
+in one layout would misplace the annotation in another. The correct fix declares avoidance data
+where each block already knows its own layout (a `data-anno-avoid` marker per block partial,
+registered before annotations place) rather than hardcoding a selector list centrally. Confirmed
+that `data-layout-allow-overlap` on annotation *captions* is a separate, deliberate, already-
+documented opt-out and must not be touched by this fix -- only the glyphs are unprotected. Not yet
+built -- diagnosis and choice only, scoped to T18K.
+
+### D165 -- Tier 1's cue-boundary still-sampling plan is a JSON sidecar next to `index.html`, not a
+changed return type on `compose_scene`.
+
+**Rejected:** changing `compose_scene`'s return type to a `Composition` dataclass carrying both
+the HTML path and the still-sampling plan, threaded through `render_segment.py` into
+`rendering/reveal.py`.
+
+**Reasoning:** K1's fix needs the cue boundaries and block reveal times `compose_scene` already
+computes to reach `rendering/reveal.py`, which only ever receives a bare composition `Path`. A
+changed return type would touch `render_segment.py` and every test that calls `compose_scene`
+directly (five files, several dozen call sites) for a plumbing change with no behavioral
+motivation of its own. `compose_scene` already writes more than one file into its composition
+directory (`gsap.min.js`, since T18A) and `hyperframes lint`/`check` only care about the entry
+file's name and location (D60), never about siblings -- so a second sibling, `still_plan.json`
+(`rendering/still_plan.py`), costs nothing architecturally and leaves every existing caller and
+test untouched. `rendering/reveal.py` reads it back via `read_still_plan(composition.parent)`,
+falling back to the old evenly-spaced schedule when the sidecar is absent (a composition built by
+something other than `compose_scene`, or a stale fixture) -- so the change is purely additive.
+
+### D166 -- The caption band's own reserved zone was never marked exempt from
+`hyperframes check --caption-zone`; it only ever passed by accident.
+
+**Rejected:** nothing -- this was found live, not designed around, so there was no alternative to
+reject. Recorded because the mechanism is non-obvious and will bite again if `_captions.html`'s
+markup is ever restructured without carrying this forward.
+
+**Reasoning:** K1's own `hideAt` fix (extending the last caption cue's visible window to the
+segment's full `duration_ms` instead of hiding at its own `end_ms`, so trailing silence doesn't
+show a blank band) made a real render fail geometry validation: `caption_zone_collision` on
+segment 0's own caption words, "the" and "server," reported as illegally sitting in the reserved
+caption band. Confirmed directly with `npx hyperframes check --caption-zone "x0=0;y0=0.8574;
+x1=1;y1=0.9407;severity=error"` against the failed composition (2 errors), then against the same
+composition patched with `data-layout-allow-caption-zone` on the caption layer div (0 issues).
+Root cause: the caption band's own content was NEVER marked exempt from this check -- it only
+ever passed before because the last cue hid (opacity 0) at its own `end_ms`, safely before
+`validate_geometry`'s end-of-timeline sample landed, so the checker never actually observed a
+caption word sitting in its own band. Extending that visible window is what finally exposed the
+gap. Fixed by adding `data-layout-allow-caption-zone` to `_captions.html`'s caption layer div;
+regression test in `tests/test_caption_zone_exemption.py`.
+
+### D167 -- Nothing in this app has ever configured Python's logging level, so every `logger.info`
+call in the codebase -- including T18E's own per-node timing logs -- has been silently swallowed
+by the interpreter's default WARNING threshold since it shipped.
+
+**Rejected:** nothing -- found live while trying to read K2's own new finalize-timing logs off a
+real run and seeing nothing at all, not designed around.
+
+**Reasoning:** `core/graph/node_timing.py`'s per-node `logger.info("node %s started"/"finished")`
+lines (T18E, D121/D122's "make retry/timing visible" fix) and this task's new per-step
+`core/graph/nodes/finalize.py` timing logs both use the standard `logging.getLogger(__name__)`
+pattern, but nothing anywhere in `api/main.py` or elsewhere ever called `logging.basicConfig` or
+otherwise raised the root logger above its Python-default WARNING level. Confirmed directly: the
+real server's stdout showed uvicorn's own request logs and this codebase's `logger.warning` calls
+(e.g. `render_scene.py`'s re-author warning) throughout, but zero `logger.info` lines from
+anywhere in the app, across two full job runs, until `logging.basicConfig(level=logging.INFO, ...)`
+was added near the top of `api/main.py`. T18E's timing instrumentation has therefore been
+shipped, invisible, for its entire life -- this fix does not just serve K2's new logs, it turns on
+the ones already there. `basicConfig` is a documented no-op if something else already configured
+root handlers, so this is safe regardless of run order.
+
+### D168 -- `GraphDiagramSlots`'s node/edge/traversal-count bound is a pydantic
+`model_validator(mode="after")`, not a `Field(min_length=..., max_length=...)`, correcting the
+task's own text.
+
+**Rejected:** `Field(min_length=3, max_length=7)` on `nodes` (and similarly on `edges`) -- what
+`tasks.md`'s own K3 entry originally specified ("add real bounds, which strict `json_schema` then
+enforces rather than suggests").
+
+**Reasoning:** `core/strict_schema.py`'s own docstring lists `minItems`/`maxItems` (what
+`min_length`/`max_length` compile to in the generated JSON schema) among the keywords Azure
+strict-mode structured output rejects outright -- not silently ignores, rejects the whole request
+with a 400, discovered mid-run rather than at schema-definition time. A `model_validator` runs
+*after* a real response is already parsed, so a violation raises pydantic's own `ValidationError`,
+which `adapters/azure/openai_errors.py` already translates into `StructuredOutputError`, which the
+existing node-local bounded retry (`core/graph/nodes/structured_retry.py`) re-asks against --
+same enforcement the task asked for, with no schema-rejection risk. Caught before any code was
+written by reading `core/strict_schema.py` during planning rather than after a real 400.
+
+### D169 -- L3 reads `Segment.render_outcome` directly per-segment, never joining
+`VideoJob.degraded_segments` back onto segments by index.
+
+**Rejected:** the plan's own original design -- add `degradedSegments: DegradedSegmentView[]` to
+`JobView` and a per-segment `degraded` field both, joining the job-level array onto each segment
+by `segment_index` in the adapter.
+
+**Reasoning:** found while implementing that `Segment.render_outcome` is already a real per-segment
+field on the generated `SegmentDto` schema (`core/models.py`'s `Segment.render_outcome`,
+`core/graph/nodes/render_scene.py` sets it directly on the segment it returns) -- `VideoJob.
+degraded_segments` (`core/graph/nodes/finalize.py`) is just `[s.render_outcome for s in ordered if
+s.render_outcome is not None]`, the exact same data collected into a flat list at the end of the
+job. Since the per-segment field already exists, destructuring `render_outcome` directly in
+`toSegmentView` is a straight field mapping with no join, no index lookup, and no risk of the two
+representations disagreeing -- strictly simpler than the planned design, which would have
+maintained the same information in two shapes for no benefit `SegmentCard` (the only consumer)
+needed.
+
+### D170 -- `StageLog.tsx` was removed in the same session as `StageTicker.tsx`, expanding T18L's
+L1 beyond its own written scope, on the user's own direct mid-session instruction.
+
+**Rejected:** keeping `StageLog` -- the task's own text argued for this explicitly ("`StageLog.tsx`
+stays -- it is collapsed by default, index-keyed, stable, and is not what the user complained
+about"), reasoning from the component's technical properties (no per-event churn, collapsed by
+default) rather than from what it showed.
+
+**Reasoning:** mid-session, watching a real render, the user asked for "the stage log and shit"
+to be "fixed - replaced with smth better or removed cuz too many jittery stuff appearing... needs
+to be clean apple esque" -- naming the raw technical log itself (`node #3 edge=start`-style
+strings), not just the ticker's animation churn the original diagnosis targeted. The technical
+argument for keeping it (stability, no jitter) was correct but answered the wrong question: a
+developer-facing raw event dump has no place in a consumer-facing progress UI regardless of how
+smoothly it renders. Removed outright rather than restyled, since the segment-by-segment view
+(`ClipStrip`/`SegmentCard`/`SegmentInspector`) already covers "what's happening" at the level a
+viewer actually wants.
+
+### D171 -- K2's finalize-latency fix measured a ~15x real improvement (3m41s to 14.06s) on a
+comparable job, once D167's logging fix made the measurement possible at all.
+
+**Rejected:** nothing -- this is the measured result the task's own DoD required ("report finalize
+wall clock before and after as a measured number"), recorded here since the number is the whole
+point and belongs beside D162's original measurement, not just in a session summary.
+
+**Reasoning:** D162 measured the pre-fix baseline on a real 6-segment job: finalize 3m41s (221s),
+53% of total wall clock, with `mux/concat_segments.py` running at libx264's unset "medium" preset
+default and an unconfirmed ~2m44s gap around the `.srt` write. Post-fix, a comparable real
+6-segment job (via the live UI, `RUNTIME_ENV=azure`) logged (once D167 made the logs visible at
+all): `concat_segments` 12.61s, `final.mp4` upload 1.14s, `write_srt` 0.00s, `final.srt` upload
+0.29s -- 14.06s total, and the `.srt` anomaly did not reproduce on this run. The explicit
+`-preset veryfast -crf 20` (previously absent everywhere in the repo) accounts for the great
+majority of the drop; the `.srt` gap's absence here is consistent with D162's own Blob-upload-
+latency guess being real but intermittent, not with the guess being wrong -- not confirmed either
+way, and not worth chasing further now that finalize is no longer the dominant cost.

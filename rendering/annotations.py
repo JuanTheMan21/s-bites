@@ -35,7 +35,7 @@ from interfaces.tts_provider import WordMark
 from rendering.anchors import resolve_anchor
 
 if TYPE_CHECKING:
-    from rendering.compose import RenderableBlock
+    from rendering.renderable import RenderableBlock
 
 # Suffix, per block type, an annotation's target_item_index resolves against -- must match the
 # id each block partial actually emits for its per-item elements (`{prefix}-{suffix}-{index}`),

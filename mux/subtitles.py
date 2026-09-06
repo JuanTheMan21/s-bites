@@ -14,24 +14,23 @@ in-frame band, so the two can never disagree about where one cue ends and the ne
 from pathlib import Path
 
 from core.models import Segment
-from mux.caption_cues import group_into_cues
+from mux.caption_cues import cues_for_segment
 
 
 def write_srt(segments: list[Segment], dest: Path) -> Path:
     """Write an SRT file covering every segment's narration, in index order. Returns ``dest``.
 
-    Falls back to one cue per segment (the full ``narration`` text, spanning the segment's whole
-    ``duration_ms``) when a segment has no ``word_marks`` -- the same degrade-to-something-usable
-    rule every other word-timed consumer in this project follows.
+    T18K: cue construction (including the no-``word_marks``-but-has-``narration`` fallback) now
+    goes through ``mux.caption_cues.cues_for_segment`` -- the same call
+    ``rendering/compose.py``'s in-frame band makes, so the two really are the shared grouping
+    this module's own docstring already promised rather than two hand-rolled fallbacks that could
+    drift apart.
     """
     cues: list[tuple[int, int, str]] = []
     offset_ms = 0
     for segment in segments:
         duration_ms = segment.duration_ms or 0
-        if segment.word_marks:
-            cues.extend(_word_cues(segment, offset_ms))
-        elif segment.narration:
-            cues.append((offset_ms, offset_ms + duration_ms, segment.narration))
+        cues.extend(_segment_cues(segment, duration_ms, offset_ms))
         offset_ms += duration_ms
 
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -39,12 +38,13 @@ def write_srt(segments: list[Segment], dest: Path) -> Path:
     return dest
 
 
-def _word_cues(segment: Segment, segment_offset_ms: int) -> list[tuple[int, int, str]]:
-    """One segment's word marks, grouped via ``mux.caption_cues.group_into_cues`` and translated
-    into the final video's timeline via ``segment_offset_ms``."""
+def _segment_cues(
+    segment: Segment, duration_ms: int, segment_offset_ms: int
+) -> list[tuple[int, int, str]]:
+    """One segment's cues, translated into the final video's timeline via ``segment_offset_ms``."""
     return [
         (segment_offset_ms + cue.start_ms, segment_offset_ms + cue.end_ms, cue.text)
-        for cue in group_into_cues(segment.word_marks)
+        for cue in cues_for_segment(segment.word_marks, segment.narration, duration_ms)
     ]
 
 

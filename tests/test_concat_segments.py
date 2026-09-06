@@ -119,3 +119,29 @@ async def test_a_clip_too_short_for_its_own_transitions_raises_value_error(tmp_p
 
     with pytest.raises(ValueError, match="shorter than"):
         await concat_segments([short, long], tmp_path / "final.mp4", durations_ms=[400, 2000])
+
+
+async def test_concat_passes_explicit_preset_and_crf_to_ffmpeg(tmp_path: Path, monkeypatch) -> None:
+    """T18K/D162: no ``-preset``/``-crf`` existed anywhere in the repo before this, so concat ran
+    at libx264's own "medium" default -- measured as the dominant cost on a short job (53% of
+    total wall clock) and the cheapest lever available to cut it."""
+    from mux import concat_segments as concat_segments_module
+
+    captured: list[list[str]] = []
+
+    async def fake_run_ffmpeg(args: list[str], *, context: str) -> None:
+        captured.append(args)
+        Path(args[-1]).write_bytes(b"fake")
+
+    monkeypatch.setattr(concat_segments_module, "run_ffmpeg", fake_run_ffmpeg)
+
+    clips = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
+    for clip in clips:
+        clip.write_bytes(b"x")
+
+    await concat_segments(clips, tmp_path / "final.mp4", durations_ms=[2000, 2000])
+
+    assert len(captured) == 1
+    args = captured[0]
+    assert args[args.index("-preset") + 1] == "veryfast"
+    assert args[args.index("-crf") + 1] == "20"

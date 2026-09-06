@@ -20,7 +20,7 @@
       {% for line in payload.lines %}
       <div class="blk-code-line" id="{{ prefix }}-line-{{ loop.index0 }}">
         <span class="blk-code-line-no">{{ loop.index }}</span>
-        <span class="blk-code-line-text">{{ line }}</span>
+        <span class="blk-code-line-text" data-anno-avoid>{{ line }}</span>
       </div>
       {% endfor %}
     </div>

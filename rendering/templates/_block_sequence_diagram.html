@@ -52,12 +52,12 @@
     </svg>
     {% for actor in payload.actors %}
     {% set pct = (loop.index0 / (n - 1) * 100) if n > 1 else 50 %}
-    <div class="blk-seq-lane-header" id="{{ prefix }}-lane-{{ loop.index0 }}" style="left: calc({{ pct }}% - {{ '70px' if compact else '90px' }});">
+    <div class="blk-seq-lane-header" id="{{ prefix }}-lane-{{ loop.index0 }}" style="left: calc({{ pct }}% - {{ '70px' if compact else '90px' }});" data-anno-avoid>
       {{ actor.label }}
     </div>
     {% endfor %}
     {% for msg in payload.messages %}
-    <div class="blk-seq-msg-label" id="{{ prefix }}-msg-label-{{ loop.index0 }}">{{ msg.label }}</div>
+    <div class="blk-seq-msg-label" id="{{ prefix }}-msg-label-{{ loop.index0 }}" data-anno-avoid>{{ msg.label }}</div>
     {% endfor %}
   </div>
 </div>

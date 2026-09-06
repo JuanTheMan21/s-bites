@@ -22,7 +22,7 @@
       {% for line in payload.lines %}
       <div class="blk-diff-line blk-diff-line-{{ line.op }}" id="{{ prefix }}-line-{{ loop.index0 }}">
         <span class="blk-diff-glyph">{{ "+" if line.op == "add" else ("-" if line.op == "remove" else "") }}</span>
-        <span class="blk-diff-text">{{ line.text }}</span>
+        <span class="blk-diff-text" data-anno-avoid>{{ line.text }}</span>
       </div>
       {% endfor %}
     </div>

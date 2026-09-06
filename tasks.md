@@ -1121,3 +1121,156 @@ Upload interface with grounding display. *(The Dockerfile moved to T35 — cloud
 image earlier than this.)*
 **DoD:** document-to-video works end to end in the browser.
 **Depends:** T32, T28
+
+### T18K — Caption correctness, finalize latency, graph node order, annotation-on-text · `done`
+
+**What actually shipped, all five sub-parts plus two more found live:** K1 (still-sampling at
+cue/reveal boundaries via a new JSON sidecar, `rendering/still_plan.py`; Tier 0 caption
+suppression; last-cue-hides-at-`duration_ms` fix), K2 (per-step finalize timing; explicit
+`-preset veryfast -crf 20`), K3 (`clamp_non_decreasing`, never a re-sort), K4 (a second
+`data-anno-avoid` registry, 8 block partials marked), K5 (`text_panel` outlined chips). Two more
+real bugs found only by watching real renders through the live UI, both fixed with regression
+tests: the caption band was never marked exempt from `hyperframes check --caption-zone` (only
+ever passed by accident before K1's own fix), and nothing in the app has ever configured Python's
+logging level, so every `logger.info` call including T18E's own timing logs has been silently
+invisible since it shipped. `pytest` green (820, up from ~792), `ruff` clean, boundary/line-count
+checks clean, verified against two real `RUNTIME_ENV=azure` end-to-end renders (not just the
+offline suite) with real degraded/re-authored segments in both. Full detail: `decisionlog.md`
+D165-D171, `handoff.md`.
+**Depends:** none (diagnosis-only prior session). Built in the same combined session as T18L, by
+the user's own explicit choice, since the two tasks share no files.
+
+**Every item below is root-caused against real job data, not theorized.** Diagnosis was done in a
+planning-only session after the user rendered three videos through the live frontend and reported
+what was wrong with each. Full evidence, including the measurements and the rejected alternatives,
+is in `decisionlog.md` D160-D164. Evidence jobs on disk: `2572d8f7…` (LangGraph vs Claude SDK, 15
+segments, 6.4 min) and `addc3449…` (Claude Code vs Codex, 6 segments, 2.4 min).
+
+- **K1 — Captions are broken on every Tier-1 segment, and only on Tier-1 segments.** The user
+  named "segment 4 … what claude sdk is" as having "complete wrong subtitles for the audio" and
+  "disappearing subs towards the end while the narrator kept talking." That is index 3: tier 1,
+  **4** PNG stills rendered, **9** caption cues, 27.66s of narration. Captions are opacity
+  `tl.set()` calls on the GSAP timeline (`_captions.html::captions_script`), so a 4-sample tier
+  captures at most 4 of 9 cues and `xfade` smears each into the next. All three tier-1 segments in
+  that job were the ones that failed geometry and fell back — tier 1 is not reachable by budget
+  demotion today, only by the fallback path, so the chain is: geometry failure → fallback card →
+  tier 1 → broken captions. **Fix (chosen against the user's own three stated constraints — no
+  added latency, identical look, always correct): sample the Tier 0/1 stills at the sorted union of
+  caption-cue starts and `resolve_item_starts`' item reveal times**, and shorten or drop the
+  `xfade` between two stills whose caption text differs. Keeps the band in the same HTML/CSS every
+  other segment uses, so "identical" holds by construction. Costs more stills on the rare tier-1
+  path — measure and report it, do not promise a figure. Two smaller caption bugs to fix in the
+  same pass: `compose.py:178` has no empty-`word_marks` fallback (a TTS adapter that reports no
+  word boundaries renders *zero* cues for the whole segment; `mux/subtitles.py:31-34` already has
+  the fallback this needs), and `_captions.html:85` hides the last cue at the last word's end
+  rather than the segment's measured `duration_ms`, so trailing silence shows an empty band.
+- **K2 — Finalize, not rendering, is what makes short videos feel slow.** The user: "the 3 min
+  video took like 7 minutes and especially on the mixing step which is so long." Measured on
+  `addc3449` from artifact mtimes: render 3m16s (47%), **finalize 3m41s (53%)**, total 6m57s. On
+  the 15-segment job: render 6m55s, finalize ~3m10s. Finalize barely scales with length, so it
+  dominates short videos — exactly why a 3-minute video felt worse than a 6-minute one. Levers, in
+  order: (1) `mux/concat_segments.py` re-encodes with `-c:v libx264` and **no `-preset` and no
+  `-crf` anywhere in the repo**, so it runs at libx264's `medium` default — set both explicitly and
+  measure; (2) probe `ffmpeg -encoders` for `h264_nvenc` and use it when present, falling back to
+  libx264, keeping the choice in `mux/` and never in `core/`; (3) **stream-copy concat is not
+  available** — `concat_segments` builds a real `xfade` per join, and tier-2 clips come from the
+  external `npx hyperframes render` with its own encoder settings, so segment MP4s don't share
+  encode parameters; do not plan around it; (4) **instrument finalize before optimising it** — on
+  `addc3449` the `.srt` sidecar is stamped 2m44s after `final.mp4`, impossible for a 4KB text
+  write, while the same gap on the 15-segment job was 6s; the Blob upload is the likely explanation
+  but is **not confirmed**, and if it is, it is a bigger win than the encode.
+- **K3 — Graph diagram nodes reveal out of narration order.** The user: "this graph had point
+  number two appear first (it could've appeared as point number 1 since narrator was talking about
+  it)." Each `GraphNode` carries its own `anchor_phrase` and `resolve_item_starts` resolves node
+  `i` from that phrase alone. `graph_diagram` is correctly excluded from `_SORTABLE_ITEM_FIELDS`
+  (`block_timing.py:74`) because CHAIN's rail is drawn in node order and `GraphDiagramSlots`
+  requires n-1 consecutive edge pairs — but **nothing checks the resolved times are non-decreasing
+  in node order**, so a node whose phrase matches earlier in the narration enters first. Fix: for
+  structurally-ordered block types, clamp each item's start to `max(own_start, previous_start)`.
+  Small, pure, fully testable. Separately, for "looked congested": `GraphDiagramSlots.nodes` says
+  "Three to seven nodes" **in prose only** — no `min_length`/`max_length`, and no cap on `edges` at
+  all; add real bounds, which strict `json_schema` then enforces rather than suggests. Do **not**
+  attempt real edge routing in this task — `computeLayeredLayout` already does barycenter ordering,
+  and post-hoc crossing minimisation is a much larger job. "The graph made absolutely no sense" is
+  a content problem for `runtime_skills/visual-plan`, not a layout one.
+- **K4 — Annotations land on text because body text is invisible to the placement logic.** Reported
+  twice now across sessions. `hfAnnotationPlace` avoids exactly three things: the target block's
+  headline, the caption band, and rects in `window.__hfPlacedRects[containerId]` — and that
+  registry is populated **only by other annotations and `_block_graph_diagram.html`'s edge labels**.
+  A `text_panel` row's `.blk-text-copy`, a code line, a sibling item's label are never registered,
+  so nothing stops an annotation landing on them. Fix: have each block partial declare its
+  text-bearing elements (a `data-anno-avoid` marker attribute) and register them before annotations
+  place themselves — declared per block, not a hardcoded selector list. Leave
+  `data-layout-allow-overlap` on annotation *captions* alone; that opt-out is deliberate and
+  documented. The glyphs don't carry it and are simply not prevented from colliding today.
+- **K5 — Give `text_panel` items the title card's outlined chips.** The user: "a few segments just
+  have text and looks like the title card, it can add the blue outlined text boxes just like the
+  title card." Those chips are `_block_title.html`'s `key_terms` (`border: 2px solid
+  var(--accent-secondary); border-radius: 999px`). `_block_text_panel.html` has no equivalent — a
+  bare `<span class="blk-text-copy">`, no border/background/radius, next to at most a small
+  numbered circle, and in `compact` mode not even that. **But note what the user could not see:**
+  the segment they cited was a *fallback title card*, not a `text_panel` — it looked bare because
+  geometry failed it. K5 makes the bare case better; K1/K3 reduce how often it happens. Don't let
+  the chip change be mistaken for a fix to the fallback rate.
+
+**Verification:** force a job with at least one tier-1 segment and assert its still count equals
+its cue count and every cue's text appears in some frame; unit-test that a `graph_diagram` whose
+node 2 anchors earlier than node 1 still reveals node 1 first; report finalize wall clock before
+and after as a **measured** number. Then watch the render.
+
+### T18L — Frontend: kill the jittering ticker, make the waveform live, surface degraded · `done`
+
+**What actually shipped, all three sub-parts plus one expansion found live:** L1
+(`StageTicker.tsx` deleted; SSE arrivals batched per animation frame in `use-job-stream.ts`) —
+**and `StageLog.tsx` deleted too**, not in this task's own original scope, added mid-session on
+the user's own direct instruction after watching a real render call it "jittery" and ask for
+"clean apple esque" (D170; the task's own text had argued for keeping it, correctly on the
+technical merits, wrongly on what the user actually wanted). L2: a real animated waveform
+(`wave-shape.ts`, `use-smooth-progress.ts`, `WaveScope.tsx` — a dark scope panel, bright/dim
+progress split with a glow, creeps forward during signal-less phases without ever claiming more
+progress than real). L3: `Segment.render_outcome`'s existing per-segment field wired straight
+into `SegmentCard`'s new "Degraded" badge — simpler than the plan's own job-level-array design,
+since the per-segment field already existed (D169). `tsc`/`eslint` clean, 53 vitest tests passing
+(up from 40), verified live: the ticker and log are gone, the waveform visibly animates through
+every phase including the four with no per-segment signal, and the degraded badge appeared
+correctly on two real re-authored segments across two different real renders. Full detail:
+`decisionlog.md` D165-D171, `handoff.md`.
+**Depends:** none. Built in the same combined session as T18K, sharing no files.
+
+Independent of T18K — **they share no files**, so either order, or in parallel. Respect the ESLint
+seam (`web/eslint.config.js`): `features/`, `components/`, `routes/` may not import `src/api/*` or
+`openapi-fetch`; new data goes through `src/domain/` types and `src/adapters/` mappers.
+
+- **L1 — Remove `StageTicker`.** The user: "i dont want the stage log continuously updating, it
+  just moves up and down very fast … budgeting motion, composing scene etc goes up and down a lot
+  which is not needed. either we have to replace it or remove it." The culprit is
+  `features/progress/StageTicker.tsx`, **not** `StageLog.tsx` (collapsed by default, keyed by
+  index, stable). `StageTicker` renders `events.filter(transition).slice(-3)` inside
+  `AnimatePresence` + `m.div layout`; the backend fan-out fires `start` *and* `end` per node per
+  segment, several within the same millisecond, and `use-job-stream.ts:59` does an unconditional
+  unbatched `setEvents(prev => [...prev, event])` per SSE message — so the 3-row window churns
+  faster than its own 0.24s enter/exit can settle and `layout` reflows every surviving row each
+  time. Also coalesce at the source: drop `edge: 'start'` events and batch, which additionally
+  kills an unmemoized per-event O(n) reverse scan in `use-progress-model.ts::deriveCurrentPhase`.
+  **What the user asked to see instead already exists** — `ClipStrip` → `SegmentCard` →
+  `SegmentInspector` lists every segment with its title and opens narration text plus the scene
+  tree on click. It doesn't need building; it needs to stop competing with the ticker.
+- **L2 — Make the waveform actually move.** The user: "theres a waveform right as the loader (that
+  stay still and moves only in big bits) which is disappointing, it has potential to look like an
+  actual waveform with really good animation." `features/progress/ClipTrack.tsx`: `barHeightPct(i)`
+  is a deterministic sine hash of the bar **index only**, so the shape is frozen for the job's whole
+  life by design; the only motion is a per-bar colour swap plus a playhead, driven by `fillPct`,
+  which advances only on a whole phase change (7 discrete steps) or a whole segment completing —
+  and `outline`/`budget`/`visuals`/`finalize` have no per-segment signal at all, so it freezes then
+  jumps. Fix: animate bar heights continuously (keep the deterministic base shape, add a per-bar
+  phase offset via rAF or CSS) and interpolate `fillPct` smoothly over elapsed time between known
+  progress points. Purely presentational, one file.
+- **L3 — Surface `degraded_segments`.** `adapters/job-adapter.ts::toJobView` never destructures it
+  from `VideoJobDto`, so it isn't in `JobView`/`SegmentView` and no component can render it. The
+  backend has sent it since T18I. `SegmentCard` has pending/assigned/active/done and **no degraded
+  state**. On the evidence job 4 of 15 segments were degraded and the UI said nothing. Destructure
+  it in the adapter, add it to the domain types, badge it on the card.
+
+**Verification:** submit a real job from the UI and watch the whole run — the ticker gone, the
+waveform visibly alive throughout *including* the phases with no per-segment signal, and degraded
+segments visibly marked.

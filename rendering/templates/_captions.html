@@ -15,17 +15,28 @@
     word spans (kept individually addressable for future styling, not for per-word animation),
     ids namespaced "{prefix}-cap-{cue index}-{word index}" so two cues' words never collide.
   captions_script(prefix, cues, duration_sec) -- shows each cue's div, instantly, at its own
-    start; hides it, instantly, the moment the next cue's starts (or at its own end, for the
-    last cue). No per-word timing left to get wrong.
+    start; hides it, instantly, the moment the next cue's starts (or, for the last cue, at the
+    segment's own measured duration -- T18K: this was the last cue's own end_ms before, which
+    left a blank band for any trailing silence after the final word). No per-word timing left to
+    get wrong.
 
   Sits inside `hyperframes check --caption-zone`'s default guard band (bottom ~18% of the frame)
   by construction -- pinned to the bottom of #root with a fixed inset. That guard is about the
   caption band's OWN position, not about content elsewhere on screen growing into it -- see
   tasks.md's T18C entry for the follow-up this doesn't cover.
+
+  T18K: the layer carries `data-layout-allow-caption-zone` -- found missing by a real render, not
+  by reasoning about it. Before the same task's `hideAt` fix above, the last cue always hid at its
+  own `end_ms`, safely before `validate_geometry`'s end-of-timeline sample point, so the checker
+  never actually caught a caption word sitting in its own reserved band. Extending the last cue's
+  visible window to `duration_sec` made that sample land while a cue was still showing, and only
+  then did it become visible that the caption layer itself had never carried the exemption its own
+  band legitimately needs -- this content is the caption zone's intended occupant, not a violation
+  of it.
 #}
 
 {% macro captions_markup(prefix, cues, duration_sec) %}
-<div id="{{ prefix }}-captions" class="clip {{ prefix }}-captions-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="2">
+<div id="{{ prefix }}-captions" class="clip {{ prefix }}-captions-layer" data-start="0" data-duration="{{ duration_sec }}" data-track-index="2" data-layout-allow-caption-zone>
   {% for cue in cues %}
   {% set cue_idx = loop.index0 %}
   <div class="{{ prefix }}-cue" id="{{ prefix }}-cue-{{ cue_idx }}">
@@ -77,12 +88,13 @@
   (function () {
     var cueEls = document.querySelectorAll("#{{ prefix }}-captions .{{ prefix }}-cue");
     var cueStarts = [{% for cue in cues %}{{ cue.start_ms / 1000 }}{{ "," if not loop.last }}{% endfor %}];
-    var cueEnds = [{% for cue in cues %}{{ cue.end_ms / 1000 }}{{ "," if not loop.last }}{% endfor %}];
     // Clear-and-replace, movie style: cue c appears all at once (no per-word stagger) at its own
-    // start, and holds until the NEXT cue's start (or, for the last cue, its own end) -- never
-    // two cues visible at once, and never one word lit before its neighbours.
+    // start, and holds until the NEXT cue's start (or, for the last cue, the segment's own
+    // measured duration -- T18K: using the last cue's end_ms instead cleared the band during any
+    // trailing silence after the final word, reading as a caption that vanished too early) --
+    // never two cues visible at once, and never one word lit before its neighbours.
     cueEls.forEach(function (el, i) {
-      var hideAt = i + 1 < cueEls.length ? cueStarts[i + 1] : cueEnds[i];
+      var hideAt = i + 1 < cueEls.length ? cueStarts[i + 1] : {{ duration_sec }};
       tl.set(el, { opacity: 1 }, cueStarts[i]);
       tl.set(el, { opacity: 0 }, hideAt);
     });

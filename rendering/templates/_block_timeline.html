@@ -25,8 +25,8 @@
     {% set above = loop.index0 % 2 == 0 %}
     <div class="blk-tl-marker" id="{{ prefix }}-marker-{{ loop.index0 }}" style="left: calc({{ pct }}% - 10px);"></div>
     <div class="blk-tl-event blk-tl-event-{{ 'above' if above else 'below' }}" id="{{ prefix }}-event-{{ loop.index0 }}" style="left: calc({{ pct }}% - {{ '85px' if compact else '110px' }});">
-      <div class="blk-tl-date voice-data">{{ event.date_label }}</div>
-      <div class="blk-tl-label">{{ event.label }}</div>
+      <div class="blk-tl-date voice-data" data-anno-avoid>{{ event.date_label }}</div>
+      <div class="blk-tl-label" data-anno-avoid>{{ event.label }}</div>
     </div>
     {% endfor %}
   </div>

@@ -26,7 +26,7 @@ field name they read, not in mechanism, now that every _ITEM_FIELDS item has its
 T18J: two real-render defects, both traced to this module. First, an unmatched anchor fell back
 to a flat 0.75s + 0.22s-per-item cascade -- disconnected from the block's own measured duration
 and, worse, from ``entrance_start`` itself, so an unmatched item could appear BEFORE the block
-containing it had even entered. Replaced with ``_interpolate_missing``: an unmatched item's time
+containing it had even entered. Replaced with ``interpolate_missing`` (rendering/timing_math.py): an unmatched item's time
 is now interpolated between its own matched neighbours (or ``entrance_start``/the segment's end
 where there is no neighbour on one side), so it always lands somewhere plausible relative to the
 items around it and the block's own visible window, never at a fixed instant regardless of
@@ -36,13 +36,23 @@ third. ``resolve_item_starts`` now reorders a SORTABLE block type's own items (a
 reordered payload alongside its times) so visual top-to-bottom always matches narration order;
 ``_SORTABLE_ITEM_FIELDS`` is a closed, deliberately short list -- a block type belongs on it only
 when its own item ORDER carries no meaning independent of when each item is mentioned.
+
+T18K/D163: a NON-sortable item field's own draw order is structural (CHAIN's rail is drawn in
+node order, ``GraphDiagramSlots`` requires n-1 consecutive edge pairs referencing nodes by
+position; ``code_diff``'s line order IS the code) -- so a resolved anchor that lands out of that
+order cannot be fixed by reordering the way a sortable field is. ``clamp_non_decreasing`` (rendering/timing_math.py) is the
+fix that preserves structure: each item's resolved time is clamped to ``max(own, previous)`` so
+node 2 can never visually enter before node 1 just because its anchor phrase happened to match
+earlier narration. Applied to every non-sortable item field and to every ``step_starts`` result
+(``array_grid``/``graph_diagram``/``sequence_diagram``/``timeline`` are all ordered event
+sequences by definition, so this is not block-type-specific the way the item-field split is).
 """
 
-import itertools
 from typing import Any, TypeVar
 
 from interfaces.tts_provider import WordMark
 from rendering.anchors import resolve_anchor
+from rendering.timing_math import clamp_non_decreasing, interpolate_missing
 
 # Field name, per block type, holding a list of items that each carry their own authored
 # anchor_phrase but are exposed to a block's script() macro as `item_starts` rather than
@@ -76,38 +86,6 @@ _SORTABLE_ITEM_FIELDS = frozenset({"text_panel", "icon_panel", "title"})
 T = TypeVar("T")
 
 
-def _interpolate_missing(
-    resolved: list[float | None], *, entrance_start: float, end_s: float
-) -> list[float]:
-    """Fill in every ``None`` by linear interpolation against ``entrance_start``/``end_s`` as
-    virtual bookend anchors -- so a gap before the first real match, a gap after the last, and a
-    gap between two matches are all the same one-loop case, and every returned time falls inside
-    the block's own visible window regardless of how many (or how few) items actually matched.
-
-    All-unmatched degrades to an even spread across the window (the old cascade's replacement);
-    a single unmatched item lands at the window's midpoint.
-    """
-    n = len(resolved)
-    if n == 0:
-        return []
-    end_s = max(end_s, entrance_start)
-
-    points: list[tuple[int, float]] = [(-1, entrance_start)]
-    points.extend((i, t) for i, t in enumerate(resolved) if t is not None)
-    points.append((n, end_s))
-
-    out = [entrance_start] * n
-    for (i1, t1), (i2, t2) in itertools.pairwise(points):
-        gap = i2 - i1
-        for k in range(i1 + 1, i2):
-            out[k] = t1 + (t2 - t1) * (k - i1) / gap
-
-    for i, t in enumerate(resolved):
-        if t is not None:
-            out[i] = t
-    return out
-
-
 def _resolve_anchor_phrases(
     items: list[Any], word_marks: list[WordMark], *, entrance_start: float, end_s: float
 ) -> list[float]:
@@ -115,7 +93,7 @@ def _resolve_anchor_phrases(
     for item in items:
         anchor_ms = resolve_anchor(word_marks, item.anchor_phrase)
         resolved.append(anchor_ms / 1000 if anchor_ms is not None else None)
-    return _interpolate_missing(resolved, entrance_start=entrance_start, end_s=end_s)
+    return interpolate_missing(resolved, entrance_start=entrance_start, end_s=end_s)
 
 
 def resolve_item_starts(
@@ -154,8 +132,11 @@ def resolve_item_starts(
             starts = [starts[i] for i in order]
             payload = payload.model_copy(update={field: items})
             return payload, starts, order
+        return payload, starts, None
 
-    return payload, starts, None
+    # T18K/D163: draw order is structural for every remaining item field -- clamp forward instead
+    # of reordering, so a later item's resolved anchor can never render before an earlier one's.
+    return payload, clamp_non_decreasing(starts), None
 
 
 def resolve_step_starts(
@@ -169,6 +150,9 @@ def resolve_step_starts(
     field = _STEP_FIELDS.get(block_type)
     if field is None:
         return None
-    return _resolve_anchor_phrases(
+    starts = _resolve_anchor_phrases(
         getattr(payload, field), word_marks, entrance_start=entrance_start, end_s=end_s
     )
+    # T18K/D163: every step field is an ordered event sequence by definition -- same clamp as
+    # resolve_item_starts' non-sortable branch, applied unconditionally here.
+    return clamp_non_decreasing(starts)

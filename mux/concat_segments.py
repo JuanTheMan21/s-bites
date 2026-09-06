@@ -30,6 +30,15 @@ from mux.ffmpeg_run import run_ffmpeg
 
 DEFAULT_TRANSITION_S = 0.5
 
+# T18K/D162: no encoder speed/quality flags existed anywhere in the repo, so this ran at
+# libx264's own "medium" default -- measured as roughly half of total wall clock on a short job,
+# and the dominant cost precisely because it barely scales with video length (D162). "veryfast"
+# trades some compression efficiency for real wall-clock speed; crf=20 keeps quality visually
+# lossless at this resolution. Both are the cheapest available lever -- no new encoder path, no
+# stream-copy (impossible here: this filter graph always decodes+blends for the crossfade).
+FFMPEG_PRESET = "veryfast"
+FFMPEG_CRF = "20"
+
 # Cycled by join index (T18A) rather than always "fade" -- all five are ordinary xfade filter
 # names ffmpeg ships, chosen to read as a clean cut style rather than a gimmick: no spins, no
 # heavy distortion. "dissolve" behaves like "fade" but with slightly different blend math; both
@@ -127,6 +136,10 @@ async def concat_segments(
         "[aout]",
         "-c:v",
         "libx264",
+        "-preset",
+        FFMPEG_PRESET,
+        "-crf",
+        FFMPEG_CRF,
         "-pix_fmt",
         "yuv420p",
         "-c:a",

@@ -1,6 +1,6 @@
 import { getJob, listJobs, resumeJob, submitJob } from '@/api/endpoints'
-import type { SegmentDto, VideoJobDto } from '@/api/endpoints'
-import type { JobView, SegmentView } from '@/domain/job'
+import type { RenderOutcomeDto, SegmentDto, VideoJobDto } from '@/api/endpoints'
+import type { DegradedSegmentView, JobView, SegmentView } from '@/domain/job'
 
 export { ApiError } from '@/api/errors'
 
@@ -49,8 +49,19 @@ export async function resumeJobRequest(jobId: string): Promise<JobView> {
 }
 
 function toSegmentView(dto: SegmentDto): SegmentView {
-  const { index, title, summary, visual_intent, importance, narration, duration_ms, tier, scene, clip_key } =
-    dto
+  const {
+    index,
+    title,
+    summary,
+    visual_intent,
+    importance,
+    narration,
+    duration_ms,
+    tier,
+    scene,
+    clip_key,
+    render_outcome,
+  } = dto
   return {
     index,
     title,
@@ -62,5 +73,18 @@ function toSegmentView(dto: SegmentDto): SegmentView {
     tier: tier ?? null,
     hasScene: scene != null,
     clipKey: clip_key ?? null,
+    degraded: render_outcome ? toDegradedSegmentView(render_outcome) : null,
+  }
+}
+
+function toDegradedSegmentView(dto: RenderOutcomeDto): DegradedSegmentView {
+  const { segment_index, attempts, finding_codes, reauthored, fallback_used, original_tier } = dto
+  return {
+    segmentIndex: segment_index,
+    attempts,
+    findingCodes: finding_codes,
+    reauthored,
+    fallbackUsed: fallback_used,
+    originalTier: original_tier,
   }
 }

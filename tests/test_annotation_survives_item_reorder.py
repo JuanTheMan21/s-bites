@@ -76,7 +76,7 @@ def test_an_annotation_still_marks_its_authored_item_after_a_reorder(tmp_path: P
 
     # Confirm the reorder actually happened (narration order puts "other" first, "important"
     # last) -- otherwise this test would pass trivially without exercising the fix at all.
-    rows = re.findall(r'class="blk-text-copy">([^<]+)</span>', html)
+    rows = re.findall(r'class="blk-text-copy"[^>]*>([^<]+)</span>', html)
     assert rows == ["the other item", "THE IMPORTANT ITEM"], (
         "expected the reorder to fire so this test actually exercises the permutation fix"
     )

@@ -63,7 +63,7 @@ def test_text_panel_items_render_in_narration_order_not_authored_order(tmp_path:
     dest = compose_scene(segment, tmp_path)
     html = dest.read_text(encoding="utf-8")
 
-    rows = re.findall(r'class="blk-text-copy">([^<]+)</span>', html)
+    rows = re.findall(r'class="blk-text-copy"[^>]*>([^<]+)</span>', html)
     assert rows == [
         "authored-third, spoken-first",
         "authored-second, spoken-second",
@@ -85,8 +85,15 @@ def test_graph_diagram_nodes_are_never_reordered(tmp_path: Path) -> None:
         "nodes": [
             {"id": "n1", "label": "First", "caption": None, "anchor_phrase": "node spoken last"},
             {"id": "n2", "label": "Second", "caption": None, "anchor_phrase": "node spoken first"},
+            # T18K/D163: GraphDiagramSlots now requires 3-7 nodes -- this third node plays no
+            # part in the reorder proof below, it exists only to satisfy the bound. CHAIN needs
+            # the n-1 consecutive edge pairs regardless of node count, hence the edges below.
+            {"id": "n3", "label": "Third", "caption": None, "anchor_phrase": "third node"},
         ],
-        "edges": [],
+        "edges": [
+            {"from_id": "n1", "to_id": "n2", "label": None},
+            {"from_id": "n2", "to_id": "n3", "label": None},
+        ],
         "positions": [],
         "traversal": [],
     }
@@ -107,8 +114,8 @@ def test_graph_diagram_nodes_are_never_reordered(tmp_path: Path) -> None:
     dest = compose_scene(segment, tmp_path)
     html = dest.read_text(encoding="utf-8")
 
-    labels = re.findall(r'class="blk-graph-label">([^<]+)</div>', html)
-    assert labels == ["First", "Second"], "graph_diagram nodes must never be reordered"
+    labels = re.findall(r'class="blk-graph-label"[^>]*>([^<]+)</div>', html)
+    assert labels == ["First", "Second", "Third"], "graph_diagram nodes must never be reordered"
 
 
 def test_an_unmatched_item_interpolates_between_its_matched_neighbours() -> None:

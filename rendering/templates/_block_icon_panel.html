@@ -55,7 +55,7 @@
     {% for item in payload.items %}
     <div class="blk-icon-chip" id="{{ prefix }}-chip-{{ loop.index0 }}">
       <svg class="blk-icon-glyph" viewBox="0 0 32 32">{{ _icon_svg(item.icon.value) }}</svg>
-      <span class="blk-icon-label">{{ item.label }}</span>
+      <span class="blk-icon-label" data-anno-avoid>{{ item.label }}</span>
     </div>
     {% endfor %}
   </div>

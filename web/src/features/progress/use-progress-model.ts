@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { deriveCompletedPhases, type PipelinePhase, type StageEvent } from '@/domain/stage'
 import type { JobView, SegmentView } from '@/domain/job'
 import { useJobStream } from './use-job-stream'
@@ -20,14 +21,16 @@ export function derivePhaseProgress(phase: PipelinePhase, segments: SegmentView[
 }
 
 export function deriveCurrentPhase(events: StageEvent[]): PipelinePhase {
-  const last = [...events].reverse().find((e) => e.kind === 'transition')
+  // T18L: findLast rather than a reverse-copy-then-find -- no array copy, same "most recent
+  // transition" semantics, and cheap enough that memoizing it in useProgressModel below is
+  // actually worth doing (a growing job-lifetime events array no longer means a growing O(n)
+  // scan PLUS a growing O(n) copy on every render).
+  const last = events.findLast((e) => e.kind === 'transition')
   return last && last.kind === 'transition' ? last.phase : 'outline'
 }
 
 export function deriveActiveSegmentIndex(events: StageEvent[]): number | null {
-  const last = [...events]
-    .reverse()
-    .find((e) => e.kind === 'transition' && e.segmentIndex !== undefined)
+  const last = events.findLast((e) => e.kind === 'transition' && e.segmentIndex !== undefined)
   return last && last.kind === 'transition' ? (last.segmentIndex ?? null) : null
 }
 
@@ -36,7 +39,11 @@ export function deriveActiveSegmentIndex(events: StageEvent[]): number | null {
 export function useProgressModel(job: JobView) {
   const { events, connection } = useJobStream(job.jobId, job)
 
-  const currentPhase = deriveCurrentPhase(events)
+  // T18L: memoized on the events array reference -- use-job-stream.ts now batches SSE arrivals
+  // into one array replacement per animation frame rather than one per message, so this only
+  // re-derives once per batch instead of once per event.
+  const currentPhase = useMemo(() => deriveCurrentPhase(events), [events])
+  const activeSegmentIndex = useMemo(() => deriveActiveSegmentIndex(events), [events])
   const completedPhases = deriveCompletedPhases(job.segments)
   if (job.status === 'succeeded') completedPhases.add('finalize')
 
@@ -44,7 +51,7 @@ export function useProgressModel(job: JobView) {
     currentPhase,
     completedPhases,
     phaseProgress: derivePhaseProgress(currentPhase, job.segments),
-    activeSegmentIndex: deriveActiveSegmentIndex(events),
+    activeSegmentIndex,
     connection,
     events,
   }
