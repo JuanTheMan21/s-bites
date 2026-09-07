@@ -4714,3 +4714,53 @@ for T18M/T40 (reproduce or derive from real evidence, never patch on a guess).
 Built on `dev` (commit `374b934`), merged into `cloud` per the branch-split rule (frontend work
 belongs on `dev` first), full gates (pytest, ruff, boundary, web typecheck/lint/test) green on
 both branches before and after the merge.
+
+### D196 -- Live production redeploy: the deployed stack now reflects this session's fixes; found
+and fixed a real `az acr build` crash on Windows along the way, five attempts deep.
+
+**Reasoning:** the user explicitly asked for a full redeploy (container rebuild included) so the
+live stack would actually reflect T18M items 1-3 and D195's waveform fix, not just the CORS-only
+live patch item 4 already had. Ran `scripts/deploy_cloud.sh` in full against `rg-sbites-cloud`.
+
+**A real bug found along the way, not assumed away:** `az acr build`'s own log streaming crashed
+the CLI process with a `UnicodeEncodeError` while displaying pip's resolver output for this
+project's own `requirements.txt`, aborting the whole script at step 3/6 under `set -euo pipefail`
+before ever touching the Container Apps. **Confirmed the live stack was NOT put in a broken state
+by this** -- the script's own pre-existing `EXISTING_IMAGE` guard (added at T38B) correctly found
+and passed the last good image as the Bicep override, so both apps kept serving their last known-
+good revision throughout every failed attempt below; verified directly (`az containerapp show`)
+after the first crash, not assumed safe.
+
+**Five real attempts, in order, each one narrowing the diagnosis with actual evidence rather than
+guessing the next thing to try:**
+1. `PYTHONIOENCODING=utf-8` (already in the script, from an earlier session) -- crashed anyway.
+2. Added `PYTHONUTF8=1` (Python's own more forceful UTF-8 mode) -- crashed at the identical byte
+   offset, proving this isn't a Python-level stream-encoding setting at all.
+3. Added `--no-format` on the build call -- crashed even EARLIER in the log (right after "Waiting
+   for an agent..."), which is what pinned the actual failure to az's own CLI status/spinner
+   chrome, not build log content -- `--no-format` only changes how build LOGS are shown.
+4. Added `AZURE_CORE_NO_COLOR=true` (az's own documented no-color switch, verified first via
+   `az config set core.no_color=true` / `AZURE_CORE_NO_COLOR=true az group show ...` before
+   trusting it in the script) -- crashed again, same offset. Colorama's Windows-console write path
+   runs regardless of whether color codes are actually being emitted.
+5. **`--no-logs`** -- the actual fix. Confirmed against `az acr build`'s own `--help` text that
+   this still queues AND BLOCKS until the build finishes (a real failure still surfaces as a
+   nonzero exit); it only skips PRINTING the log content, which is the one thing crashing.
+
+**Full deploy succeeded and was verified live, not just by exit code:** both `ca-sbites-api` and
+`ca-sbites-worker` on a new revision (`rev1788757547`), API replica confirmed `Running`, `/docs`
+returning `200`, frontend rebuilt and redeployed to the SWA, redirect URI patched, CORS
+re-converged (already live from D194, this re-run is idempotent over it). The deployed stack now
+genuinely reflects T18M items 1-3, T18M item 4, and D195's waveform fix -- not just the source
+tree.
+
+**Rejected:** stopping after any of the first four failed attempts and calling the crash
+unfixable/pre-existing-and-tolerated. Each attempt was cheap to disprove (a few minutes of a real
+build) and each one materially narrowed where the bug actually was, the same evidentiary
+discipline this session held itself to everywhere else (T18M/T40/D195) -- guessing a fifth time
+without the first four's evidence would have been exactly the kind of blind patch this project's
+whole session explicitly avoided.
+
+`scripts/deploy_cloud.sh`'s own header comment carries the full diagnostic trail (all four
+non-fixes and why, plus the real one) so a future session hitting a variant of this never has to
+re-derive it from scratch.
