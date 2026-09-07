@@ -42,7 +42,7 @@ CONTRACTS = {
     SkillRegistry: {"load", "versions", "list_packs"},
     JobQueue: {"enqueue", "dequeue", "complete", "fail"},
     RenderBackend: {"capture", "render", "lint", "validate_geometry"},
-    EventChannel: {"publish", "end_stream", "subscribe", "unsubscribe", "start"},
+    EventChannel: {"publish", "end_stream", "subscribe", "unsubscribe", "start", "history"},
 }
 
 # Everything a *backend* can do to us. Membership says only that the failure came from

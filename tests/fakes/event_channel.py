@@ -1,6 +1,7 @@
 """``EventChannel``, as an in-process fan-out with test-observable state."""
 
 import asyncio
+import time
 from typing import Any
 
 from interfaces import EventChannel, check_event_serialisable
@@ -36,12 +37,19 @@ class FakeEventChannel(FailureInjector, EventChannel):
     async def publish(self, job_id: str, event: dict[str, Any]) -> None:
         self._maybe_fail("publish")
         check_event_serialisable(event)
-        self.published.append((job_id, event))
+        # T18M/D197: same stamping LocalEventChannel/ServiceBusEventChannel do -- see the real
+        # implementation's own comment. A new dict, never a mutation of the caller's own; never
+        # overwritten if the caller already stamped one.
+        stamped = event if "at" in event else {**event, "at": int(time.time() * 1000)}
+        self.published.append((job_id, stamped))
         for queue in self._subscribers.get(job_id, []):
-            await queue.put(event)
+            await queue.put(stamped)
 
     async def end_stream(self, job_id: str) -> None:
         self._maybe_fail("end_stream")
         self.ended.append(job_id)
         for queue in self._subscribers.get(job_id, []):
             await queue.put(None)
+
+    async def history(self, job_id: str) -> list[dict[str, Any]]:
+        return [event for pub_job_id, event in self.published if pub_job_id == job_id]

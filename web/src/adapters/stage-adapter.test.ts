@@ -46,4 +46,17 @@ describe('toStageEvent', () => {
       expect(toStageEvent(raw).kind).toBe('unknown')
     }
   })
+
+  it('prefers the payload\'s own server timestamp over receipt time', () => {
+    // T18M/D197: a replayed history event carries its REAL server time in `at` -- must win over
+    // the receipt-time fallback, or every replayed tick shows "just now" instead of when it
+    // actually happened.
+    const event = toStageEvent({ node: 'render_scene', stage: 'start', at: 12345 }, 999)
+    expect(event.at).toBe(12345)
+  })
+
+  it('falls back to receipt time when the payload has no server timestamp', () => {
+    const event = toStageEvent({ node: 'render_scene', stage: 'start' }, 999)
+    expect(event.at).toBe(999)
+  })
 })

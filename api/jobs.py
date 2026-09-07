@@ -93,14 +93,39 @@ async def stream_job_events(
     # publish to (the runner has already returned) and hang open forever. Terminal jobs skip
     # subscribing entirely and just report the status once.
     already_terminal = job.status in (JobStatus.SUCCEEDED, JobStatus.FAILED)
+    # T18M/D197: subscribe BEFORE reading history -- guarantees every event published from this
+    # exact moment on reaches this connection (EventChannel.publish's own contract), at the cost
+    # of a narrow, harmless chance an event published in the gap between subscribing and finishing
+    # the history read arrives twice (once replayed, once live). The frontend's own derivation
+    # (use-progress-model.ts's findLast, ClipTrack.tsx's phaseStartOffsets first-wins) already
+    # tolerates a duplicate identically to a single delivery -- reading history first instead
+    # would risk the opposite, a genuine LOST event in that same gap, which nothing downstream
+    # tolerates.
     queue = None if already_terminal else await bus.subscribe(job_id)
+    history = await bus.history(job_id)
+    # Found by review: the runner's own real terminal ping (`{"job_status": ..., "terminal":
+    # True}`) is published through `bus.publish`, same as every other event -- so on the common
+    # single-replica path it is ALSO already in `history` by the time a client reconnects to an
+    # already-terminal job. Sending the synthetic ping below unconditionally would deterministically
+    # double it, not just in some narrow race. Only send the synthetic one when history didn't
+    # already end with a genuine terminal marker (e.g. after a process restart wiped in-memory
+    # history) -- a real fallback, not the common case.
+    history_already_ended_terminal = bool(history) and history[-1].get("terminal") is True
 
     async def stage_events():
+        # Replayed for BOTH a still-running and an already-terminal job -- a fresh connection to
+        # a job that's been running for a while (opened from the job list, a page refresh) used
+        # to get nothing before this: every phase timecode and the whole waveform are built
+        # entirely from received events, so a job's real progress looked frozen/blank even though
+        # it was running or had already finished fine. See EventChannel.history's own docstring.
+        for item in history:
+            yield {"event": "stage", "data": json.dumps(item)}
         if already_terminal or queue is None:
-            yield {
-                "event": "stage",
-                "data": json.dumps({"job_status": job.status.value, "terminal": True}),
-            }
+            if not history_already_ended_terminal:
+                yield {
+                    "event": "stage",
+                    "data": json.dumps({"job_status": job.status.value, "terminal": True}),
+                }
             return
         try:
             while True:

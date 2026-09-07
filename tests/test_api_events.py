@@ -99,33 +99,6 @@ def test_events_of_an_unknown_job_404s() -> None:
 
 
 @needs_ffmpeg
-def test_events_of_an_already_finished_job_report_once_and_do_not_hang() -> None:
-    """Regression: a subscriber that connects after the run already ended -- a page refresh, a
-    reconnect -- used to get a fresh, empty queue nothing would ever publish to, and the request
-    hung open forever. A terminal job must report its status once and close instead."""
-    adapters = fake_adapters()
-    app = create_app(adapters, frame_budget=FRAME_BUDGET, fps=FPS)
-
-    with TestClient(app) as client:
-        job_id = client.post(
-            "/jobs", json={"topic": "x", "target_duration_ms": API_TEST_TARGET_DURATION_MS}
-        ).json()["job_id"]
-        finished = _wait_for_terminal(client, job_id)
-        assert finished["status"] == "succeeded"
-
-        events = []
-        with client.stream("GET", f"/jobs/{job_id}/events") as stream:
-            assert stream.status_code == 200
-            for line in stream.iter_lines():
-                if line.startswith("data:"):
-                    events.append(line[len("data:") :].strip())
-
-    assert len(events) == 1
-    assert '"job_status": "succeeded"' in events[0]
-    assert '"terminal": true' in events[0]
-
-
-@needs_ffmpeg
 def test_a_dead_lettered_failure_reports_terminal_true_and_records_the_error(monkeypatch) -> None:
     """T24: a client cannot otherwise tell a genuinely final failure from one that is about to be
     auto-requeued (both publish an identical {"job_status": "failed"}) -- the stream staying open

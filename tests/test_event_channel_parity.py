@@ -54,8 +54,11 @@ async def test_a_subscriber_receives_a_published_event(channel: EventChannel) ->
 
     await channel.publish("job-1", {"stage": "start"})
 
+    # T18M/D197: every delivered event now also carries a server-stamped "at" -- checked
+    # separately in test_event_channel_parity.py's own history tests; irrelevant to what this
+    # test asserts, so excluded here rather than pinning a real wall-clock value.
     event = await asyncio.wait_for(queue.get(), timeout=GET_TIMEOUT_S)
-    assert event == {"stage": "start"}
+    assert {k: v for k, v in event.items() if k != "at"} == {"stage": "start"}
 
 
 async def test_every_current_subscriber_gets_the_same_event(channel: EventChannel) -> None:
@@ -64,8 +67,10 @@ async def test_every_current_subscriber_gets_the_same_event(channel: EventChanne
 
     await channel.publish("job-1", {"stage": "start"})
 
-    assert await asyncio.wait_for(first.get(), timeout=GET_TIMEOUT_S) == {"stage": "start"}
-    assert await asyncio.wait_for(second.get(), timeout=GET_TIMEOUT_S) == {"stage": "start"}
+    first_event = await asyncio.wait_for(first.get(), timeout=GET_TIMEOUT_S)
+    second_event = await asyncio.wait_for(second.get(), timeout=GET_TIMEOUT_S)
+    assert first_event == second_event
+    assert {k: v for k, v in first_event.items() if k != "at"} == {"stage": "start"}
 
 
 async def test_end_stream_puts_the_sentinel_a_subscriber_stops_on(channel: EventChannel) -> None:
@@ -92,3 +97,47 @@ async def test_publish_with_no_subscribers_is_not_an_error(channel: EventChannel
     """The same reasoning as JobQueue.dequeue's empty case: a subscriber connecting after this
     call started is a normal race, not a bug to raise on."""
     await channel.publish("job-with-nobody-watching", {"stage": "start"})
+
+
+async def test_history_replays_every_published_event_in_order(channel: EventChannel) -> None:
+    """T18M/D197: this is what closes the "connects after this call started is a normal race"
+    gap ``publish``'s own docstring names -- a subscriber joining late must still be able to see
+    what already happened, via ``history``, not lose it."""
+    await channel.publish("job-1", {"stage": "outline", "edge": "start"})
+    await channel.publish("job-1", {"stage": "voice", "edge": "start"})
+
+    # servicebus delivers via its own background pump, not synchronously with publish() -- give
+    # it a real chance to land before asserting, the same tolerance GET_TIMEOUT_S already grants
+    # every other assertion in this file for that implementation specifically.
+    for _ in range(50):
+        if len(await channel.history("job-1")) >= 2:
+            break
+        await asyncio.sleep(GET_TIMEOUT_S / 50)
+
+    history = await channel.history("job-1")
+    # Every event is stamped with a server-side "at" (T18M/D197) -- checked separately below
+    # since its exact value is real wall-clock time, not something to pin in this assertion.
+    assert [{k: v for k, v in event.items() if k != "at"} for event in history] == [
+        {"stage": "outline", "edge": "start"},
+        {"stage": "voice", "edge": "start"},
+    ]
+    assert all(isinstance(event["at"], int) for event in history)
+
+
+async def test_history_of_an_unpublished_job_is_empty(channel: EventChannel) -> None:
+    assert await channel.history("nobody-ever-published-to-this-job") == []
+
+
+async def test_an_event_already_carrying_at_is_never_overwritten(channel: EventChannel) -> None:
+    """T18M/D197: the one case ``publish`` must NOT stamp -- a message already carrying its true
+    origin time (a ``ServiceBusEventChannel`` pump re-publishing one it received over the wire,
+    which was already stamped by the ORIGINAL sender's own ``publish`` call)."""
+    await channel.publish("job-1", {"stage": "outline", "edge": "start", "at": 42})
+
+    for _ in range(50):
+        if await channel.history("job-1"):
+            break
+        await asyncio.sleep(GET_TIMEOUT_S / 50)
+
+    history = await channel.history("job-1")
+    assert history[0]["at"] == 42

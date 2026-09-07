@@ -83,3 +83,21 @@ class EventChannel(ABC):
         Must be called once before any cross-process event can arrive; called from the same
         FastAPI lifespan that starts the in-process worker today. A no-op on an implementation
         with nothing to receive."""
+
+    @abstractmethod
+    async def history(self, job_id: str) -> list[dict[str, Any]]:
+        """Every event ``publish``ed for ``job_id`` so far, in order. Empty for a ``job_id`` this
+        channel has never seen a ``publish`` call for.
+
+        T18M/D197: this is what closes the gap ``publish``'s own docstring names ("a subscriber
+        connecting after this call started is a normal race, not a bug") -- true for ``publish``
+        itself, but confirmed live to leave a real user's progress UI (every phase timecode, and
+        the waveform, both entirely built from received events) permanently blank for a job that
+        was already mid-flight when the page connected -- an ordinary refresh or a job opened
+        from the list, not a rare edge case. ``api/jobs.py::stream_job_events`` replays this
+        before tailing live events, for both a still-running and an already-terminal job.
+
+        In-memory for the life of this process, not durably persisted -- sufficient for the
+        current single-replica deployment (``config_events.py``'s own documented constraint);
+        lost across a process restart, same caveat that constraint already carries. A future
+        multi-replica API would need real persistence here, not just this."""

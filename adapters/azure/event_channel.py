@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from typing import Any
 
 from azure.servicebus import ServiceBusMessage
@@ -105,9 +106,23 @@ class ServiceBusEventChannel(EventChannel):
     async def unsubscribe(self, job_id: str, queue: asyncio.Queue) -> None:
         await self._local.unsubscribe(job_id, queue)
 
+    async def history(self, job_id: str) -> list[dict[str, Any]]:
+        """Delegates to the same inner ``LocalEventChannel`` ``_pump`` already feeds -- every
+        message this replica's pump has received for ``job_id`` since IT started is already
+        recorded there (``_pump`` calls ``self._local.publish`` for each one), so no separate
+        storage is needed for the single-replica deployment this adapter's own class docstring
+        already documents as the current constraint. Lost the same way `_local`'s own history is:
+        on a process restart -- see ``EventChannel.history``'s own docstring."""
+        return await self._local.history(job_id)
+
     async def publish(self, job_id: str, event: dict[str, Any]) -> None:
         check_event_serialisable(event)
-        await self._send(job_id, event)
+        # T18M/D197: stamped here, at the true origin, before the event ever crosses the wire --
+        # so every replica's `_pump` receives (and re-publishes into its own `self._local`) an
+        # event that already carries the ORIGINAL publish time, not each replica's own receive
+        # time. Same "new dict, never overwrite" rule as LocalEventChannel's own stamping.
+        stamped = event if "at" in event else {**event, "at": int(time.time() * 1000)}
+        await self._send(job_id, stamped)
 
     async def end_stream(self, job_id: str) -> None:
         await self._send(job_id, None)
