@@ -13,12 +13,25 @@
 # move the resource group's own (immutable) location instead.
 set -euo pipefail
 
-# Found live: `az acr build`'s own log-streaming crashes the CLI process (a UnicodeEncodeError
-# against Windows' cp1252 console codepage, unrelated to whether the remote build itself is
-# succeeding) the moment any dependency's install output contains a character cp1252 can't
-# represent -- this project's own requirements.txt (langgraph et al) reliably triggers it. Forcing
-# UTF-8 here is what prevents that crash rather than a workaround for anything wrong with the build.
+# Found live, four attempts deep before landing on the actual fix: `az acr build`'s own
+# log-streaming crashes the CLI process with a UnicodeEncodeError -- specifically on pip's own
+# resolver output for this project's `requirements.txt` (`Collecting langgraph...`, then whatever
+# non-ASCII character pip's new resolver prints next), unrelated to whether the remote build
+# itself is succeeding. In order, confirmed NOT the fix, each crashing at the identical byte
+# offset regardless: `PYTHONIOENCODING=utf-8`; `PYTHONUTF8=1` (Python's own more forceful UTF-8
+# mode); `--no-format` on the build call (only changes build LOG formatting, not this); az's own
+# `AZURE_CORE_NO_COLOR=true` switch (disables color, but the crashing write path runs regardless
+# of color being on). All four are variations on "make the write UTF-8-safe" and none of them are
+# -- this is a known, longstanding class of Azure CLI issue writing to a Windows console (the
+# tool's own error message links straight to github.com/Azure/azure-cli/issues over it).
+# The two exports below are kept anyway (harmless, correct practice generally) but the actual fix
+# is `--no-logs` on the build call: it still QUEUES the build and BLOCKS until it finishes
+# (confirmed against `az acr build`'s own docs -- this is "don't stream/print the log", not
+# "don't wait"), it just never prints the log content that was crashing the process to try to
+# print. A failed build still surfaces as a real nonzero exit here; only the crash from trying to
+# DISPLAY output found a bug in.
 export PYTHONIOENCODING=utf-8
+export PYTHONUTF8=1
 
 RESOURCE_GROUP="${1:?usage: deploy_cloud.sh <resource-group> [location]}"
 LOCATION="${2:-eastus}"
@@ -158,7 +171,7 @@ for d in api adapters core interfaces mux rendering runtime_skills scorm; do
   cp -r "$d" "$BUILD_CONTEXT/$d"
   find "$BUILD_CONTEXT/$d" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 done
-az acr build --registry "$ACR_NAME" --image s-bites:latest "$BUILD_CONTEXT" -o none
+az acr build --registry "$ACR_NAME" --image s-bites:latest --no-logs "$BUILD_CONTEXT" -o none
 
 echo "== 4/6: point both Container Apps at the real image =="
 # --revision-suffix forces a genuinely new revision -- found live: passing the same image string
