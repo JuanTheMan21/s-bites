@@ -53,4 +53,62 @@ describe('WaveScope', () => {
     await waitFor(() => expect(errorSpy).toHaveBeenCalled())
     errorSpy.mockRestore()
   })
+
+  // D198: confirmed live via a real user's own `prefers-reduced-motion: reduce` setting -- the
+  // reduced-motion path draws exactly once and never again (no rAF loop), so a LATER resize
+  // (DevTools opening, a font loading, anything) reassigning canvas.width/height silently wiped
+  // the canvas back to fully transparent with nothing left to ever redraw it. Needs a real
+  // (stubbed) 2D context, unlike every test above -- jsdom's own null-context default can't
+  // exercise the actual draw path this regression lives in.
+  it('redraws after a resize even in reduced-motion mode', async () => {
+    const ctx = {
+      clearRect: vi.fn(),
+      fillRect: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      closePath: vi.fn(),
+      fill: vi.fn(),
+      clip: vi.fn(),
+      rect: vi.fn(),
+      setTransform: vi.fn(),
+      fillStyle: '',
+      globalAlpha: 1,
+      shadowColor: '',
+      shadowBlur: 0,
+    }
+    let resizeCallback: (() => void) | undefined
+    class FakeResizeObserver {
+      constructor(cb: () => void) {
+        resizeCallback = cb
+      }
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }))
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      ctx as unknown as CanvasRenderingContext2D,
+    )
+    vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 300,
+      height: 88,
+    } as DOMRect)
+
+    render(<WaveScope seed={1} fillPct={20} />)
+
+    // The initial mount-time draw -- present with or without the fix.
+    await waitFor(() => expect(ctx.fillRect).toHaveBeenCalledTimes(1))
+
+    // Simulates a real later layout change (a ResizeObserver firing again, long after mount) --
+    // before the fix, nothing ever called drawFrame again in reduced-motion mode.
+    resizeCallback?.()
+
+    await waitFor(() => expect(ctx.fillRect).toHaveBeenCalledTimes(2))
+
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
 })

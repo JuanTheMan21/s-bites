@@ -167,6 +167,22 @@ export function WaveScope({ seed, fillPct }: Props) {
     // matters for the wave's own phase, so an arbitrary zero point is fine.
     const start = performance.now()
 
+    let raf = 0
+    // Shared between resize()'s own redraw and the rAF loop's -- a persistently failing draw
+    // must reach the same fallback regardless of which path is doing the drawing.
+    let consecutiveFailures = 0
+
+    // T18M/D198: confirmed live via a real user's own `prefers-reduced-motion: reduce` setting
+    // -- reassigning canvas.width/height (even to an UNCHANGED value) clears its drawing buffer
+    // as a browser-spec side effect. The reduced-motion path below draws exactly once and never
+    // again (the rAF loop is deliberately skipped for it, the whole point of "reduced motion").
+    // Before this fix, `resize()` only resized -- so ANY later resize (DevTools opening, a font
+    // loading, a sidebar toggling, literally anything) silently wiped the canvas back to fully
+    // transparent with nothing left to ever redraw it again. Confirmed live: a real center-pixel
+    // read came back `[0,0,0,0]` -- fully transparent, not merely dim -- exactly this signature,
+    // not a color/opacity problem. `resize()` now redraws after every resize, in BOTH motion
+    // modes -- harmless in the animated path (the next rAF frame overwrites it moments later
+    // anyway), the actual fix in the reduced-motion one.
     function resize() {
       if (!canvas) return
       const dpr = window.devicePixelRatio || 1
@@ -174,14 +190,28 @@ export function WaveScope({ seed, fillPct }: Props) {
       canvas.width = Math.max(1, Math.round(rect.width * dpr))
       canvas.height = Math.max(1, Math.round(rect.height * dpr))
       readyCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const t = reduceMotion ? 0 : (performance.now() - start) / 1000
+      try {
+        drawFrame(readyCtx, harmonicsRef.current, t, rect.width, rect.height, fillRef.current)
+        consecutiveFailures = 0
+      } catch (err) {
+        consecutiveFailures += 1
+        console.error('WaveScope: resize redraw failed', err)
+        // Deferred, not called synchronously -- resize()'s FIRST call runs synchronously inside
+        // this effect's own body (the `resize()` call right below this definition), same
+        // react-hooks/set-state-in-effect concern the failure path below already works around.
+        // Later calls (ResizeObserver's own callback) are already async and wouldn't need this,
+        // but deferring unconditionally is simpler than branching on which call this is.
+        if (consecutiveFailures >= MAX_CONSECUTIVE_DRAW_FAILURES) {
+          queueMicrotask(() => setCanvasFailed(true))
+        }
+      }
     }
 
     resize()
     const observer = new ResizeObserver(resize)
     observer.observe(canvas)
 
-    let raf = 0
-    let consecutiveFailures = 0
     function frame(now: number) {
       try {
         const rect = canvas!.getBoundingClientRect()
@@ -199,15 +229,7 @@ export function WaveScope({ seed, fillPct }: Props) {
       raf = requestAnimationFrame(frame)
     }
 
-    if (reduceMotion) {
-      try {
-        const rect = canvas.getBoundingClientRect()
-        drawFrame(readyCtx, harmonicsRef.current, 0, rect.width, rect.height, fillRef.current)
-      } catch (err) {
-        console.error('WaveScope: static draw failed', err)
-        queueMicrotask(() => setCanvasFailed(true))
-      }
-    } else {
+    if (!reduceMotion) {
       raf = requestAnimationFrame(frame)
     }
 
