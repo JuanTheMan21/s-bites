@@ -6,93 +6,78 @@ memory of how this state was reached.**
 
 ## What just happened
 
-**All four T18M items are done, a live-reported waveform bug was fixed reactively, and the live
-stack was fully redeployed to reflect all of it.** D191 diagnosed four defects from a real
-15-segment cloud render and built nothing; this session built items 1-3 on `dev` (D192), pushed
-further into T40's diagnosis at the user's request (D193), fixed and applied item 4 live (D194),
-fixed a real user-reported "invisible waveform" frontend bug (D195), then ran a full production
-redeploy at the user's explicit request — which hit and fixed a real, separate `az acr build`
-crash on Windows along the way (D196). Full details: `tasks.md`'s T18M entry, `decisionlog.md`
-D192-D196.
+**T18M shipped in full, then a live user report chain surfaced (and fixed) three more real bugs
+this session hadn't caught: SSE events never replay for a mid-job connection (D197), and two
+separate, structurally different causes of a black waveform (D195, D198).** Full chain:
+D191 (diagnosis, nothing built) → D192 (T18M items 1-3) → D193 (T40 diagnosis) → D194 (T18M item
+4, CORS) → D195 (waveform dim-color) → D196 (full redeploy + a real `az acr build` bug) → D197
+(SSE event history replay) → D198 (waveform under `prefers-reduced-motion`). Read D197/D198 in
+full before assuming the waveform or progress panel is "fixed" — this took real, hard-won evidence
+to actually pin down, twice, after two earlier attempts that looked complete but weren't.
 
-### T18M items 1-3 (commit `5112f4a` on `dev`, merged into `cloud`)
-1. `clipped_text` added to `rendering/geometry_findings.py::_CONTENT_SIZING_CODES`; an
-   unrecognised finding code now logs a `WARNING` naming it. Failed attempts now preserve their own
-   scene and full finding strings (`RenderOutcome.findings`, new `core/graph/nodes/
-   render_diagnostics.py`) — this is the mechanism that made T40's diagnosis possible.
-2. `rendering/renderable.py`'s single-block `entrance_start` capped at `_MAX_ANCHOR_ENTRANCE =
-   2.0`s (multi-block untouched) — confirmed firing live (a 5.26s anchor capped to 2.00s).
-3. `core/graph/nodes/scene_fallback.py`'s fallback title card now derives `key_terms`
-   deterministically from the segment's own narration instead of hardcoded `[]`; subtitle
-   truncated instead of the full `segment.summary`. Confirmed live: 4 chips staged over time.
+### T18M (all four items done) — `tasks.md`'s own entry has the full list, D192/D194 the reasoning
+Fallback rate 27% → 6.7% (measured), blank-stage entrance capped, fallback cards get real chips,
+Blob CORS fixed. Not repeated here — see `tasks.md`.
 
-**Measured result:** fallback rate on "teach me about differential and integral calculus" went
-from 4/15 (27%, D191's baseline) to **1/15 (6.7%)**, job `24a8f261-d260-4e09-a08d-a7a8640c6245`.
+### D197 — SSE event history replay (`cloud`-only; `dev` never had the architecture this needs)
+`EventChannel` had no history at all — a browser tab that connects to a job already in progress
+(a refresh, opening a job from the list) permanently missed everything before that connection: not
+a rare race, the ordinary case. Added `EventChannel.history(job_id)`; `api/jobs.py` replays it
+before tailing live events. Two real bugs `project-reviewer` caught before commit: events needed a
+server-stamped `at` (a naive fix would've replayed history with every tick showing "just now"),
+and a reconnect to a terminal job was double-sending the terminal ping. **This could only live on
+`cloud`** — `dev` predates T34/T38A entirely and has no `EventChannel`/auth code; discovered via a
+stash-pop conflict after first (wrongly) trying to build it on `dev`.
 
-### T18M item 4 (Blob CORS — commit on `cloud`)
-`VideoPlayer.tsx`'s `crossOrigin="use-credentials"` needed the Blob Storage SAS redirect target to
-answer with CORS headers; the storage account had zero rules. Fixed: `scripts/deploy_cloud.sh`
-step 7/7 (`az storage cors clear` + `add`). Verified with real HTTP requests. **Not verified by
-pressing play in a real signed-in browser session** — needs the user's own sign-in, still true.
-
-### D195 — waveform invisible during early job progress (commit `374b934` on `dev`, merged into `cloud`)
-User reported live, mid-session: two jobs, same prompt, two accounts/browsers — one showed the
-waveform, one showed a plain black box with only the playhead moving, zero console errors. Traced
-to `WaveScope.tsx`'s `DIM_COLOR` (the "not yet reached" wave color) being effectively 4-14% opaque
-against the near-black canvas background — invisible during a job's `outline` phase (no
-per-segment progress signal, so `fillPct` sits near 0 and the ENTIRE canvas draws from this
-near-invisible color). Not a browser bug — the two jobs were just at different points in their own
-lifecycle. Raised `DIM_COLOR`'s alpha to 0.38; verified visually with a standalone canvas repro
-screenshotted via Playwright before touching the real file. Also fixed a real, unrelated finding
-the project's own design-quality hook surfaced while editing this file: the D172 fallback bar
-animated `width` (layout property) instead of `transform: scaleX()` (compositor-only).
-
-### D196 — full production redeploy, and a real `az acr build` bug found and fixed along the way
-User asked for the full redeploy (container rebuild included), explicitly. `scripts/
-deploy_cloud.sh` hit a real, reproducible `az acr build` crash on this Windows machine
-(`UnicodeEncodeError` while displaying pip's own resolver output for `requirements.txt`) — **five
-attempts** to fix it, four of which failed with real evidence each time (`PYTHONIOENCODING=utf-8`,
-`PYTHONUTF8=1`, `--no-format`, `AZURE_CORE_NO_COLOR=true` — all confirmed NOT the fix, each ruling
-out a specific layer). The actual fix: `--no-logs` on the build call — still queues and blocks
-until the build finishes, just never prints the log content that was crashing the process trying
-to display it. **Confirmed live the stack was never put in a broken state** by the four failed
-attempts (the script's own `EXISTING_IMAGE` guard kept both Container Apps on their last good
-image throughout).
-
-**The full deploy succeeded and was verified live, not just by exit code:** both `ca-sbites-api`
-and `ca-sbites-worker` on revision `rev1788757547`, API replica confirmed `Running`, `/docs`
-returning `200`, frontend rebuilt and redeployed. **The deployed stack now genuinely reflects
-everything from this session** — T18M items 1-3, item 4, and D195's waveform fix are all live.
+### D198 — waveform blank under `prefers-reduced-motion: reduce` (shared file, `dev` and `cloud`)
+A *different* bug from D195 (which only fixed low-but-nonzero `fillPct` visibility). This one:
+the reduced-motion path draws exactly once, ever — and any later `ResizeObserver` firing (DevTools
+opening, a font loading) wipes the canvas via the `canvas.width` reassignment side effect, with
+nothing left to redraw it. Found only by getting a real pixel read (`[0,0,0,0]`, fully
+transparent) directly from the user's own failing browser after two of this session's own
+Playwright repros against the same job both failed to reproduce it. `resize()` now redraws after
+every resize in both motion modes.
 
 ## Environment state
 
-- **Branch `cloud`** now holds T34/T35/T38A/T38B, all of T18M (items 1-4), D193's T40 diagnosis,
-  the D195 waveform fix, and D196's deploy-script fix. `dev` and `cloud` are in sync (`dev` has no
-  commits `cloud` lacks; `cloud` additionally holds infra-only commits, as intended by the
-  branch-split rule). **Pushed to both `origin/cloud` and `origin/dev`** — confirm this is still
-  true if picking up mid-session (`git log origin/cloud..cloud`, `git log origin/dev..dev`, both
-  should be empty).
-- The deployed stack: `https://lively-meadow-05448450f.6.azurestaticapps.net` (SWA) talking to
-  `https://ca-sbites-api.politeforest-8877ab80.eastus.azurecontainerapps.io` (API). **Fully current
-  as of this session's redeploy** — container image, frontend build, and CORS all reflect the
-  latest `cloud` commit. No known gap between source and deployed state right now.
+- **Both `dev` and `cloud` pushed, in sync** (`dev` has no commits `cloud` lacks; `cloud` has
+  infra-only commits on top, per the branch-split rule). Confirm with `git log origin/cloud..cloud`
+  / `git log origin/dev..dev` (both should be empty) before assuming this is still true.
+- **The DEPLOYED Azure stack reflects D196's redeploy — NOT D197 or D198.** Those two were built
+  and pushed to git *after* the last live redeploy. The event-history replay and the
+  reduced-motion fix are **not live** on `https://lively-meadow-05448450f.6.azurestaticapps.net`
+  yet. A real redeploy (`scripts/deploy_cloud.sh rg-sbites-cloud eastus <email>`) is needed before
+  a real user sees either fix on the actual deployed site.
+- **Local dev servers from this session's testing:** the API (`uvicorn api.main:app --port 8000`,
+  on `dev`'s code) may still be running (check `netstat -ano | grep :8000`) — the Vite dev server
+  was stopped to free a file lock for `cloud`'s own `npm ci` and was not restarted. If picking this
+  back up, confirm which branch is actually checked out before restarting either — **a running
+  local server keeps serving whatever branch it started on, even after `git checkout` switches the
+  repo to a different one.** This exact mistake cost real time this session (D198's own note).
+- **`web/node_modules` reflects whatever branch's `package.json` was last `npm ci`'d against** —
+  `cloud` has `@azure/msal-*` deps `dev` does not. Switching branches does not update
+  `node_modules`; forgetting this produces confusing "module not found" errors that look like a
+  real bug but are only a stale install.
 - `RUNTIME_ENV=azure`, `QUEUE_ENV=local`, `EVENTS_ENV=local`, `RUN_INPROC_WORKER=true` (local),
-  `RENDER_ENV=local` — all unchanged.
+  `RENDER_ENV=local` — all unchanged. Local dev talks to real Azure Blob Storage even locally (not
+  a local-disk stub) — confirmed useful this session for testing the CORS fix without a full
+  cloud redeploy.
 - `RENDER_MAX_CONCURRENCY=1` — still unmeasured/untuned, still T39, still nobody's task.
-- **`scripts/deploy_cloud.sh`'s own `az acr build` invocation now uses `--no-logs`** — a future
-  redeploy on this same machine should not hit the Windows console encoding crash again. If it
-  does anyway (a genuinely different crash, not this one), don't re-try the four approaches D196
-  already ruled out — read that entry first.
+- **A real, recurring operational hazard this session hit four separate times:** running a local
+  Vite dev server and `scripts/deploy_cloud.sh`'s own `npm ci` in the same `web/` directory at the
+  same time causes a Windows file-lock (`EPERM`/`unlink`) on native `.node` binaries. **Stop any
+  local dev server before running the deploy script, every time**, not just when it happens to
+  collide.
 
 ## Known gaps / open questions, unresolved this session
 
-- **Confirm playback in an actual signed-in browser session** — the one part of T18M item 4 this
-  session could not verify itself (needs the user's own Microsoft/Entra sign-in). Now that the
-  live stack is fully current, this is the most worthwhile thing to check next.
-- **T40 (`graph_diagram` deep-chain layout capacity)** — diagnosed exactly, not built. See
-  `tasks.md` and D193. Real scope: a new zigzag/serpentine layout mode in a heavily-shared,
-  five-times-hardened template — budget real time and re-verification against other real
-  `graph_diagram` jobs, not a quick patch.
+- **Redeploy needed for D197/D198 to reach the live site.** See above — this is the single most
+  actionable next step if the goal is the live user experience, not just the source tree.
+- **Confirm playback in an actual signed-in browser session** — T18M item 4's CORS fix was
+  verified via direct HTTP requests, never by actually pressing play as a signed-in user. Still
+  true, still worth checking once a redeploy happens.
+- **T40 (`graph_diagram` deep-chain layout capacity)** — diagnosed exactly (D193), not built. Real
+  scope: a new zigzag/serpentine layout mode in a heavily-shared, five-times-hardened template.
 - **T39 (Dockerfile `USER`, `RENDER_MAX_CONCURRENCY` tuning)** — still nobody's task, deferred
-  three times now (T35, T38A, T38B) plus mentioned again this session without being scheduled.
+  three times now plus mentioned again this session without being scheduled.
 - D141's `Copy Link` UI feature — still not redesigned, still not blocking anything.

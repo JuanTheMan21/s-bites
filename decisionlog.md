@@ -4764,3 +4764,99 @@ whole session explicitly avoided.
 `scripts/deploy_cloud.sh`'s own header comment carries the full diagnostic trail (all four
 non-fixes and why, plus the real one) so a future session hitting a variant of this never has to
 re-derive it from scratch.
+
+### D197 -- Added SSE event-history replay (EventChannel.history): fixes a job's progress panel
+showing frozen/blank state for any connection that joins mid-job, not just a rare edge case.
+
+**Reasoning:** the user reported, live, that a job's progress panel (waveform + phase timecodes)
+showed completely blank state 6 phases into a 7-phase render. `EventChannel.publish`'s own
+docstring already documented the cause as accepted behaviour: "a subscriber connecting after this
+call started is a normal race, not a bug to raise on" -- true for the publish call itself, but the
+consequence (the ENTIRE progress UI is built purely from events received over one connection's
+own lifetime) meant any reconnect -- a page refresh, opening a job from the list after it's been
+running a while -- permanently lost everything before that connection. This is the common case,
+not the rare one.
+
+**Built:** `EventChannel.history(job_id)`, in-memory (matches `config_events.py`'s own documented
+single-replica constraint; a future multi-replica API needs real persistence, not just this).
+`LocalEventChannel` accumulates it directly in `publish()`; `ServiceBusEventChannel` delegates to
+its own internal `LocalEventChannel`, which its existing `_pump` already feeds -- no new Storage
+dependency. `api/jobs.py::stream_job_events` subscribes BEFORE reading history (guarantees no live
+event is ever lost; a rare, harmless possible duplicate is accepted instead -- the frontend's own
+`findLast`/first-wins derivation already tolerates a duplicate identically to a single delivery)
+and replays history for both a running and an already-terminal job.
+
+**This fix could only live on `cloud`, not `dev`**, discovered the hard way: attempted first on
+`dev` (matching the branch-split rule for what looked like ordinary pipeline/frontend work), and
+the stash-pop conflict revealed `dev`'s own `api/jobs.py` has zero auth/EventChannel code at all
+-- T34 and T38A, which introduced `EventChannel`/`ServiceBusEventChannel`/owner-scoped auth, are
+cloud-only commits `dev` never received. Reset cleanly and rebuilt on `cloud` instead.
+
+**Two real bugs found by `project-reviewer` and fixed before commit, not shipped and forgotten:**
+1. Every event now carries a server-stamped `at` (epoch ms, stamped once at true origin, never
+   overwritten on re-publish via `setdefault`-equivalent logic). Without this, a reconnecting
+   client's whole burst of replayed history would land with the BROWSER's receipt time on every
+   event, showing every already-passed phase tick as "just now" -- the fix would have traded a
+   blank panel for a wrong one.
+2. A reconnect to an already-terminal job used to deterministically receive the real terminal
+   event (now also in history) AND a second, synthetic copy -- not a rare race, guaranteed on
+   every such reconnect. Fixed by skipping the synthetic ping when history already ends terminal.
+
+**Also found and fixed, separately, before this could even be tested:** the classic import-strip
+trap CLAUDE.md's own hooks section warns about -- `import time` added to `tests/fakes/
+event_channel.py` in one edit, the actual `time.time()` usage added in a later edit, `ruff --fix`
+silently stripped the import in between, causing every parity test using `FakeEventChannel` to
+hang (not fail loudly) until traced down to a bare `NameError` inside an awaited coroutine.
+
+**Verified live, not just by test:** a fresh connection after a real delay received replayed
+events with real historical ages (~460ms, not "now"); reconnecting to a terminal job received
+exactly one terminal ping, not two.
+
+### D198 -- Waveform stayed permanently blank under a real user's own `prefers-reduced-motion:
+reduce` OS setting -- a structurally different bug from D195, found only by getting hard pixel
+data directly from the user's own failing browser.
+
+**Reasoning:** after D195 (dim-color visibility) and D197 (event history) both shipped and were
+verified working in this session's own testing (including a real live Playwright check against
+the exact job the user reported), the user STILL reported a solid black waveform, in two separate
+browsers, in incognito (ruling out caching). Neither of this session's own reproduction attempts
+(Playwright, against the same job, moments apart) could reproduce it -- a real, confirmed
+divergence between this session's test environment and the user's own machine, not something to
+keep guessing at.
+
+**Method:** rather than guess a fourth time, asked the user to run a one-line diagnostic directly
+in their own failing browser's console (`getImageData` on the canvas's center pixel, plus
+`devicePixelRatio` and buffer/CSS dimensions). The result -- `centerPixel: [0,0,0,0]` (fully
+TRANSPARENT, not merely dark) alongside a console warning already visible in their own DevTools
+("You have Reduced Motion enabled on your device") -- pinned the real cause immediately.
+
+**Root cause:** `WaveScope.tsx`'s `prefers-reduced-motion` path draws exactly one static frame and
+never again -- the whole point of respecting reduced motion is skipping the rAF loop. But
+reassigning `canvas.width`/`height` (even to an unchanged value, which the `ResizeObserver`-driven
+`resize()` did on every firing) clears the canvas's drawing buffer as a browser-spec side effect.
+Before this fix, `resize()` only resized; any layout change after mount (DevTools opening, a font
+loading, literally anything) silently wiped the canvas with nothing left to ever redraw it, since
+reduced-motion mode has no ongoing loop to notice and repaint.
+
+**Fixed:** `resize()` now redraws after every resize, in both motion modes -- harmless in the
+animated path (the next rAF frame overwrites it moments later anyway), the actual fix in the
+reduced-motion one. The existing consecutive-failure counter and deferred `setCanvasFailed` (D172's
+own fallback contract) are now shared between `resize()`'s and the rAF loop's own draw attempts,
+so a persistently failing draw still reaches the same CSS-bar fallback regardless of which path is
+drawing. New regression test stubs a real 2D context and a fake `ResizeObserver` (jsdom's own
+null-context default can't exercise this code path at all) to directly prove a resize triggers a
+second draw call in reduced-motion mode.
+
+**Session-wide operational lesson, worth recording separately from the code fix itself:** this
+session ran a local `dev`/`cloud` server side by side with `scripts/deploy_cloud.sh`'s own `npm
+ci` in the SAME `web/` directory multiple times, each time hitting the exact same Windows EPERM
+file-lock collision (a running Vite dev server holds native `.node` binaries `npm ci` needs to
+replace). Also: switching branches with a live local server running does NOT update what that
+server serves until it's restarted -- confirmed the hard way when the user was told "test on dev"
+while the API server was still actually running `cloud`'s own code. **Rule for any future session
+doing this again: stop local dev servers before any `npm ci`/deploy step in the same directory,
+and always verify which branch a running local server's process actually started from, not which
+branch the repo is currently checked out to.**
+
+Built on `dev` first (frontend-only, `dev` has the same `WaveScope.tsx`), merged into `cloud`; full
+gates (pytest, ruff, boundary, web typecheck/lint/test) green on both branches, both pushed.
